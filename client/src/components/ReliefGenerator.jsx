@@ -7,6 +7,7 @@ import {
 } from '../lib/gcode/relief.js';
 import {
   processBasReliefPipeline,
+  upsampleDepthGuided,
   buildDepthGridFromExternalMap,
   despeckleSpikesFloat,
   bilateralFilterFloat,
@@ -351,7 +352,19 @@ export default function ReliefGenerator({ onBackToMenu }) {
         // AI depth'i canvas'tan okumaz; 16-bit değerleri doğrudan örnekler.
         // Böylece PNG/canvas dönüşümünde oluşan 8-bit hassasiyet kaybı yoktur.
         const total = sampleW * sampleH;
-        const rawAiDepth = resampleDepthData(aiDepthData.data, aiDepthData.width, aiDepthData.height, sampleW, sampleH);
+        const guideLuma = new Float32Array(total);
+        for (let i = 0; i < total; i++) {
+          const pixel = i * 4;
+          guideLuma[i] = (0.299 * imgData.data[pixel] + 0.587 * imgData.data[pixel + 1] + 0.114 * imgData.data[pixel + 2]) / 255;
+        }
+        const rawAiDepth = upsampleDepthGuided(
+          aiDepthData.data,
+          aiDepthData.width,
+          aiDepthData.height,
+          guideLuma,
+          sampleW,
+          sampleH,
+        );
 
         // Execute SculptOK-Level AI + Texture Multi-Scale Fusion
         const res = processBasReliefPipeline(imgData, rawAiDepth, {
@@ -1246,25 +1259,4 @@ export default function ReliefGenerator({ onBackToMenu }) {
       </div>
     </div>
   );
-}
-
-
-function resampleDepthData(source, sourceWidth, sourceHeight, targetWidth, targetHeight) {
-  const output = new Float32Array(targetWidth * targetHeight);
-  for (let y = 0; y < targetHeight; y++) {
-    const sy = targetHeight === 1 ? 0 : (y * (sourceHeight - 1)) / (targetHeight - 1);
-    const y0 = Math.floor(sy);
-    const y1 = Math.min(sourceHeight - 1, y0 + 1);
-    const fy = sy - y0;
-    for (let x = 0; x < targetWidth; x++) {
-      const sx = targetWidth === 1 ? 0 : (x * (sourceWidth - 1)) / (targetWidth - 1);
-      const x0 = Math.floor(sx);
-      const x1 = Math.min(sourceWidth - 1, x0 + 1);
-      const fx = sx - x0;
-      const top = source[y0 * sourceWidth + x0] * (1 - fx) + source[y0 * sourceWidth + x1] * fx;
-      const bottom = source[y1 * sourceWidth + x0] * (1 - fx) + source[y1 * sourceWidth + x1] * fx;
-      output[y * targetWidth + x] = top * (1 - fy) + bottom * fy;
-    }
-  }
-  return output;
 }

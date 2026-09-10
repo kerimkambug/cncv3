@@ -354,19 +354,28 @@ async def generate_depth(
             background_mask=background_mask,
         )
 
+        depth_float = optimized_depth.astype(np.float32) / (65535.0 if is_16 else 255.0)
+        qc_report = []
+        depth_float, first_qc = analyze_and_verify_depth(depth_float, 1)
+        qc_report.append(first_qc)
+        if not first_qc["clean"]:
+            depth_float, second_qc = analyze_and_verify_depth(depth_float, 2)
+            qc_report.append(second_qc)
+
         # PNG yalnızca önizleme için uygundur: browser canvas 16-bit PNG'yi
         # tekrar 8-bit RGBA'ya indirir. STL hattı için hassasiyeti kayıpsız
         # olarak little-endian ham uint16 verisi şeklinde taşı.
         if is_16:
-            depth_bytes = optimized_depth.astype("<u2", copy=False).tobytes()
+            depth_bytes = np.clip(depth_float * 65535.0, 0.0, 65535.0).astype("<u2").tobytes()
         else:
-            depth_bytes = optimized_depth.astype("u1", copy=False).tobytes()
+            depth_bytes = np.clip(depth_float * 255.0, 0.0, 255.0).astype("u1").tobytes()
         return JSONResponse({
             "ok": True,
             "width": orig_w,
             "height": orig_h,
             "bitDepth": 16 if is_16 else 8,
             "depthDataBase64": base64.b64encode(depth_bytes).decode("ascii"),
+            "qcReport": qc_report,
         })
 
     except Exception as e:

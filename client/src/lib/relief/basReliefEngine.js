@@ -980,7 +980,9 @@ function fuseBaseDepth(source, w, h, total, aiDepthMap, { detailBoost, highlight
   const detailLayer = extractBasReliefDetails(rawLuma, w, h, detailBoost);
   const dampened = suppressSpecularHighlights(rawLuma, w, h, highlightDamp);
   const hasAi = Boolean(aiDepthMap && aiDepthMap.length === total);
-  const sceneCorrectedAi = hasAi ? normalizeContinuousDepth(aiDepthMap) : null;
+  const sceneCorrectedAi = hasAi
+    ? removeSceneDepthRamp(normalizeContinuousDepth(aiDepthMap), w, h)
+    : null;
   const aiSurfaceSlope = hasAi ? deriveSurfaceSlope(sceneCorrectedAi, w, h) : null;
 
   const baseDepth = new Float32Array(total);

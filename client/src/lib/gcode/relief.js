@@ -139,7 +139,8 @@ export function calculateCompensatedZ(depthRatio, gradX, gradY, cfg, cellW_mm = 
   const maxOffset = toolRadius * 0.35;
   const compensationOffset = Math.min(maxOffset, toolRadius * (1.0 - cosTheta));
 
-  return surfaceZ - compensationOffset;
+  // Küreyi eğimli yüzeyden uzak tutmak için takımı yüzeye doğru değil yukarı kaldır.
+  return surfaceZ + compensationOffset;
 }
 
 /**
