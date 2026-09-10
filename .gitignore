@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+*.log
+server/data/
+venv/
+server/ai_service/venv/
+server/ai_service/learned_relief_*
+__pycache__/
+*.pyc

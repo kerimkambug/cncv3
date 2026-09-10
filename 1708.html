@@ -1,0 +1,2901 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>Empire CNC - G-code Üretici</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/clipper-lib@6.4.2/clipper.js"></script>
+<style>
+:root{
+  --bg:#0f1115; --panel:#171a21; --panel2:#1e222c; --border:#2a2f3a;
+  --text:#e6e8ec; --muted:#9aa2b1; --accent:#4f8cff; --accent2:#2fd08a;
+  --danger:#ff5c5c; --mono:'Consolas','SFMono-Regular',Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  padding:28px 20px;display:flex;justify-content:center
+}
+.wrap{width:100%;max-width:1440px;margin:0 auto}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:22px}
+h1{font-size:21px;font-weight:650;margin:0 0 4px}
+.sub{color:var(--muted);font-size:12px;margin:0}
+.top-actions{display:flex;gap:8px}
+.top-actions button{margin:0!important;width:auto!important}
+.grid{display:grid;grid-template-columns:minmax(0,1fr);gap:16px}
+.card{
+  background:var(--panel);border:1px solid var(--border);border-radius:12px;
+  padding:18px
+}
+.card + .card{margin-top:16px}
+h2{
+  font-size:14px;font-weight:600;margin:0 0 14px;color:var(--text);
+  display:flex;align-items:center;justify-content:space-between
+}
+label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px;margin-top:12px}
+label:first-of-type{margin-top:0}
+input,select,textarea.list-input{
+  width:100%;background:var(--panel2);border:1px solid var(--border);color:var(--text);
+  padding:9px 10px;border-radius:7px;font-size:13px;outline:none;font-family:inherit
+}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+button{
+  cursor:pointer;border:none;border-radius:7px;padding:9px 14px;
+  font-size:13px;font-weight:600
+}
+.btn-primary{background:var(--accent);color:#fff;width:100%;margin-top:16px;padding:12px}
+.btn-primary:hover{background:#3d7ae0}
+.btn-accent2{background:var(--accent2);color:#06251a;width:100%;margin-top:16px;padding:12px}
+.btn-accent2:hover{background:#28b87a}
+.btn-secondary{background:var(--panel2);color:var(--text);border:1px solid var(--border)}
+.btn-secondary:hover{border-color:var(--accent)}
+.btn-danger{background:transparent;color:var(--danger);border:1px solid #4a2b2b}
+.btn-small{padding:5px 9px;font-size:11px}
+.tabs{display:flex;gap:6px;margin-bottom:18px}
+.tab{
+  padding:8px 18px;border-radius:7px;background:var(--panel2);
+  border:1px solid var(--border);font-size:12.5px;cursor:pointer
+}
+.tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.tabpanel{display:none}.tabpanel.active{display:block}
+.preset-list{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:10px}
+.preset-chip{
+  background:var(--panel2);border:1px solid var(--border);border-radius:20px;
+  padding:6px 11px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:8px
+}
+.preset-chip.active{border-color:var(--accent);color:var(--accent)}
+.preset-chip .x{color:var(--danger);font-weight:bold}
+.preset-save{display:flex;gap:8px}.preset-save input{flex:1}
+.tool-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+.tool-table th,.tool-table td{padding:6px 4px;text-align:center;border-bottom:1px solid var(--border)}
+.tool-table th{color:var(--muted);font-weight:500;font-size:10.5px}
+.tool-table input{padding:6px 4px;font-size:11.5px;text-align:center}
+.tool-table td:first-child{width:26%}.tool-table td.name-cell input{text-align:left}
+.tool-header-row{display:flex;justify-content:space-between;align-items:center}
+.row-error td{background:rgba(255,92,92,.12)}
+.row-error td:first-child{box-shadow:inset 3px 0 0 var(--danger)}
+textarea{
+  width:100%;background:#0b0d11;color:#c9f7d9;border:1px solid var(--border);
+  border-radius:8px;padding:14px;font-family:var(--mono);font-size:12.5px;
+  line-height:1.5;resize:vertical;outline:none
+}
+#output{height:300px}
+#batchList{height:180px;color:var(--text);background:var(--panel2);font-family:var(--mono);font-size:12px}
+.out-actions{display:flex;gap:10px;margin-top:10px}.out-actions button{flex:1}
+.badge{background:var(--panel2);color:var(--muted);font-size:11px;padding:3px 8px;border-radius:12px;border:1px solid var(--border)}
+.hint{font-size:11px;color:var(--muted);margin-top:6px}
+.err,.ok{font-size:12px;margin-top:10px;display:none;white-space:pre-line}
+.err{color:var(--danger)}.ok{color:var(--accent2)}
+.icon-btn{background:transparent;border:none;color:var(--danger);font-size:14px;cursor:pointer;padding:2px 6px}
+.add-row-btn{margin-top:10px;width:100%}
+.settings-card,.tools-card{
+  display:none;
+  position:fixed;
+  z-index:1001;
+  left:50%;
+  top:50%;
+  transform:translate(-50%,-50%);
+  width:min(900px,calc(100vw - 40px));
+  max-height:calc(100vh - 60px);
+  overflow:auto;
+  margin:0;
+  border-radius:14px;
+  box-shadow:0 20px 70px rgba(0,0,0,.55);
+}
+.settings-card .card,.tools-card .card{margin:0}
+.modal-backdrop{
+  display:none;
+  position:fixed;
+  inset:0;
+  z-index:1000;
+  background:rgba(0,0,0,.62);
+  backdrop-filter:blur(3px);
+}
+.modal-backdrop.open{display:block}
+.settings-card.open,.tools-card.open{display:block}
+.modal-title{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:16px;
+}
+.modal-title h2{margin:0}
+.modal-close{
+  width:32px!important;
+  height:32px;
+  padding:0!important;
+  margin:0!important;
+  border:1px solid var(--border);
+  background:var(--panel2);
+  color:var(--muted);
+  font-size:18px;
+}
+.modal-close:hover{color:var(--text);border-color:var(--accent)}
+.section-toggle{
+  width:100%;display:flex;align-items:center;justify-content:space-between;
+  background:var(--panel);border:1px solid var(--border);color:var(--text);
+  padding:12px 14px;text-align:left
+}
+.section-toggle:hover{border-color:var(--accent)}
+.section-toggle .arrow{transition:.2s}
+.section-toggle.open .arrow{transform:rotate(180deg)}
+.main-card{width:100%;max-width:1180px;margin:0 auto}
+
+
+.measure-summary{font-size:12px;color:var(--muted);margin-top:10px}
+.nesting-grid{display:grid;grid-template-columns:360px minmax(0,1fr);gap:18px;align-items:start}
+.nesting-settings{display:flex;flex-direction:column;gap:12px}
+.nesting-settings .card-lite{background:var(--panel2);border:1px solid var(--border);border-radius:9px;padding:12px}
+.nesting-settings h3{font-size:12px;margin:0 0 10px}
+.parts-table{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
+.parts-table th{font-size:9.5px;color:var(--muted);font-weight:500;padding:6px 2px;text-align:left}
+.parts-table td{padding:4px 2px;border-top:1px solid var(--border)}
+.parts-table th:nth-child(1){width:32%}
+.parts-table th:nth-child(2),.parts-table th:nth-child(3){width:16%}
+.parts-table th:nth-child(4){width:12%}
+.parts-table th:nth-child(5){width:12%}
+.parts-table th:nth-child(6){width:8%}
+.parts-table input{padding:7px 4px;font-size:11.5px;min-width:0;width:100%;box-sizing:border-box}
+.parts-table .num,.parts-table .qty,.parts-table .part-name{width:100%;min-width:0;text-align:center}
+.parts-table .part-name{text-align:left}
+.parts-table .lock-cell{text-align:center}
+.parts-table .lock-cell input{width:auto;cursor:pointer}
+.remove-part{display:block;width:26px;height:26px;padding:0;background:transparent;color:var(--danger);border:1px solid var(--border);border-radius:6px;line-height:24px;text-align:center}
+.nesting-preview{
+  min-height:440px;background:#0b0d11;border:1px solid var(--border);border-radius:10px;
+  padding:12px;display:flex;align-items:center;justify-content:center;overflow:auto
+}
+#nestCanvas{display:block;max-width:100%;height:auto}
+.nesting-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px;margin-top:10px}
+.stat{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:9px}
+.stat b{display:block;font-size:16px;margin-bottom:2px}.stat span{font-size:10px;color:var(--muted)}
+.checkbox-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);margin-top:10px}
+.checkbox-row input{width:auto}
+.nesting-actions{display:flex;gap:8px}.nesting-actions button{flex:1}
+.plate-label{font-size:11px;color:var(--muted);margin-bottom:8px}
+.legend-chip{display:inline-flex;align-items:center;gap:5px;margin-right:12px}
+.legend-dot{width:9px;height:9px;border-radius:2px;display:inline-block}
+.mode-switch{display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:8px 12px}
+.mode-switch .mode-label{font-size:11.5px;color:var(--muted)}
+.mode-switch .mode-label.active{color:var(--text);font-weight:600}
+.switch-track{position:relative;width:40px;height:22px;background:var(--border);border-radius:11px;cursor:pointer;flex:none;transition:.2s}
+.switch-track.on{background:var(--accent)}
+.switch-track .knob{position:absolute;top:2px;left:2px;width:18px;height:18px;background:#fff;border-radius:50%;transition:.2s}
+.switch-track.on .knob{left:20px}
+@media(max-width:900px){
+  .nesting-grid{grid-template-columns:1fr}
+  .nesting-preview{min-height:300px}
+  .nesting-stats{grid-template-columns:1fr 1fr}
+}
+
+@media(min-width:1100px){
+  .main-card{max-width:1180px}
+  .card{padding:20px}
+}
+@media(min-width:1500px){
+  .main-card{max-width:1280px}
+}
+
+@media(max-width:900px){
+  .settings-card,.tools-card{width:calc(100vw - 24px);max-height:calc(100vh - 30px)}
+
+  body{padding:18px 14px}
+  .topbar{align-items:flex-start;flex-direction:column}
+  .top-actions{width:100%}.top-actions button{flex:1}
+  .row2,.row3{grid-template-columns:1fr}
+  .tool-table{font-size:10px}
+  .tool-table th:nth-child(1),.tool-table td:nth-child(1){min-width:110px}
+}
+
+/* ---------- Main menu ---------- */
+.menu-wrap{min-height:calc(100vh - 56px);display:flex;align-items:center;justify-content:center}
+.menu-card{width:100%;max-width:640px;text-align:center}
+.menu-title{font-size:28px;font-weight:700;margin:0 0 6px}
+.menu-sub{color:var(--muted);font-size:13px;margin-bottom:30px}
+.menu-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:600px){.menu-grid{grid-template-columns:1fr}}
+.module-btn{
+  background:var(--panel);border:1px solid var(--border);border-radius:14px;
+  padding:30px 18px;display:flex;flex-direction:column;align-items:center;gap:9px;
+  cursor:pointer;color:var(--text);transition:.15s;font-family:inherit
+}
+.module-btn:hover{border-color:var(--accent);transform:translateY(-2px)}
+.module-icon{font-size:34px;line-height:1}
+.module-name{font-size:14.5px;font-weight:650}
+.module-desc{font-size:11.5px;color:var(--muted);line-height:1.4}
+.module-btn.disabled{opacity:.4;cursor:not-allowed}
+.module-btn.disabled:hover{border-color:var(--border);transform:none}
+.module-soon{font-size:9.5px;color:var(--accent);border:1px solid var(--accent);border-radius:10px;padding:1px 8px;margin-top:2px}
+.app-screen{display:none}
+.app-screen.active{display:block}
+</style>
+</head>
+<body>
+<div class="modal-backdrop" id="modalBackdrop" onclick="closePanels()"></div>
+
+<div class="menu-wrap" id="mainMenu">
+  <div class="menu-card">
+    <h1 class="menu-title">Empire CNC</h1>
+    <div class="menu-sub">Devam etmek için bir modül seç.</div>
+    <div class="menu-grid">
+      <button type="button" class="module-btn" onclick="openModule('kapak')">
+        <span class="module-icon">🚪</span>
+        <span class="module-name">Kapak Modelleri</span>
+        <span class="module-desc">Ölçü gir, parçaları nest et, plaka başına CNC dosyası üret.</span>
+      </button>
+      <button type="button" class="module-btn" onclick="openModule('cam')">
+        <span class="module-icon">🪟</span>
+        <span class="module-name">Cam Modelleri</span>
+        <span class="module-desc">Göz ızgarası kesimi + kenar taraması (deneysel).</span>
+      </button>
+      <button type="button" class="module-btn" onclick="openModule('panjur')">
+        <span class="module-icon">▤</span>
+        <span class="module-name">Panjur Kapak</span>
+        <span class="module-desc">Ölçü + offset gir, eğimli panjur taraması ve uç deliklerini otomatik üret.</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="wrap app-screen" id="appKapak">
+  <div class="topbar">
+    <div>
+      <h1>Empire CNC — G-code Üretici</h1>
+      <div class="sub">Ölçü gir, parçaları nest et ve plaka başına CNC dosyalarını otomatik üret.</div>
+    </div>
+    <div class="top-actions">
+      <button class="btn-secondary" onclick="backToMenu()">← Ana Menü</button>
+      <button class="btn-secondary" onclick="togglePanel('settings')">⚙ Ayarlar</button>
+      <button class="btn-secondary" onclick="togglePanel('tools')">🔧 Bıçaklar</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="main-card">
+
+      <div class="card">
+        <div class="tabs">
+          <div class="tab active" id="tabSingleBtn" onclick="switchTab('single')">Tek Ölçü</div>
+          <div class="tab" id="tabBatchBtn" onclick="switchTab('batch')">Toplu Liste</div>
+          <div class="tab" id="tabNestingBtn" onclick="switchTab('nesting')">Nesting</div>
+          <div class="tab" id="tabCircleBtn" onclick="switchTab('circle')">Daire Kesimi</div>
+          <div class="tab" id="tabDerzBtn" onclick="switchTab('derz')">Derz Bölme</div>
+        </div>
+
+        <div class="tabpanel active" id="tabSingle">
+          <div class="row2">
+            <div>
+              <label>Genişlik X (mm)</label>
+              <input type="number" id="width" value="500" step="1">
+            </div>
+            <div>
+              <label>Yükseklik Y (mm)</label>
+              <input type="number" id="height" value="500" step="1">
+            </div>
+          </div>
+          <div class="measure-summary" id="singleSummary">500 × 500 mm</div>
+          <button class="btn-primary" onclick="generateSingle()">G-code Üret</button>
+        </div>
+
+        <div class="tabpanel" id="tabBatch">
+          <label>Ölçü listesi — her satır bir parça: GENİŞLİK-YÜKSEKLİK</label>
+          <textarea class="list-input" id="batchList" placeholder="327-656&#10;351-720&#10;373-715&#10;760-702-2"></textarea>
+          <button class="btn-accent2" onclick="generateBatch()">Toplu Üret (.zip)</button>
+        </div>
+
+
+        <div class="tabpanel" id="tabNesting">
+          <div class="nesting-grid">
+            <div class="nesting-settings">
+              <div class="card-lite">
+                <h3>Plaka</h3>
+                <div class="row2">
+                  <div>
+                    <label>Plaka genişliği X (mm)</label>
+                    <input type="number" id="plateWidth" value="2440" min="1" step="1">
+                  </div>
+                  <div>
+                    <label>Plaka yüksekliği Y (mm)</label>
+                    <input type="number" id="plateHeight" value="1220" min="1" step="1">
+                  </div>
+                </div>
+              </div>
+
+              <div class="card-lite">
+                <h3>Boşluklar</h3>
+                <div class="row2">
+                  <div>
+                    <label>Dış kenar boşluğu (mm)</label>
+                    <input type="number" id="edgeMargin" value="10" min="0" step="0.1">
+                  </div>
+                  <div>
+                    <label>Parçalar arası boşluk (mm)</label>
+                    <input type="number" id="partGap" value="5" min="0" step="0.1">
+                  </div>
+                </div>
+                <label class="checkbox-row">
+                  <input type="checkbox" id="allowRotate" checked>
+                  Parçaları 90° döndürmeye izin ver
+                </label>
+              </div>
+
+              <div class="card-lite">
+                <h3>Parçalar</h3>
+                <table class="parts-table" id="nestPartsTable">
+                  <thead>
+                    <tr><th>Parça</th><th>Gen.</th><th>Yük.</th><th>Ad.</th><th title="Döndürmeyi engelle (desen/damar yönü)">🔒</th><th></th></tr>
+                  </thead>
+                  <tbody id="nestPartsBody"></tbody>
+                </table>
+                <div style="display:flex;gap:8px;margin-top:10px">
+                  <button class="btn-secondary add-row-btn" style="flex:1" onclick="addNestPart()">+ Parça Ekle</button>
+                  <button class="btn-secondary add-row-btn" style="flex:1" onclick="document.getElementById('nestTxtFile').click()">📄 İçe Aktar</button>
+                </div>
+                <input type="file" id="nestTxtFile" accept=".txt,.csv,text/plain,text/csv" style="display:none" onchange="importNestFile(this)">
+                <div class="hint">TXT: her satıra <b>500-454-2</b> yaz (mm × mm, adet). CSV: <b>isim,genişlik,yükseklik,adet</b> sütunları da desteklenir.</div>
+              </div>
+
+              <div class="nesting-actions">
+                <button class="btn-primary" onclick="calculateNesting()">Nesting Hesapla</button>
+              </div>
+              <div class="nesting-actions" style="margin-top:8px">
+                <button class="btn-accent2" onclick="downloadNestingFiles()" id="nestDownloadBtn" disabled>CNC Dosyalarını İndir</button>
+              </div>
+              <div class="hint">Sığmayan parçalar otomatik olarak sonraki plakaya aktarılır. Önce hesapla, sonuçtan memnunsan "CNC Dosyalarını İndir" ile her plaka için ayrı .nc dosyası indir.</div>
+            </div>
+
+            <div>
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+                <div class="plate-label" id="nestPreviewLabel" style="margin:0;flex:1">Henüz nesting hesaplanmadı.</div>
+                <label class="checkbox-row" style="margin:0" title="Bıçak offsetlerine göre gerçek kesim çizgilerini göster">
+                  <input type="checkbox" id="showToolpaths" onchange="drawSelectedNestingPlate()">
+                  Kesim yolları
+                </label>
+                <select id="nestPlateSelect" onchange="drawSelectedNestingPlate()" style="width:130px;display:none"></select>
+                <button class="btn-secondary btn-small" onclick="exportNestingPNG()" id="nestPngBtn" style="display:none">🖼 PNG</button>
+              </div>
+              <div class="nesting-preview">
+                <canvas id="nestCanvas" width="900" height="450"></canvas>
+              </div>
+              <div class="hint" id="toolpathLegend" style="display:none;margin-top:8px"></div>
+              <div class="nesting-stats" id="nestingStatsGrid">
+                <div class="stat"><b id="nestPlateCount">0</b><span>Plaka</span></div>
+                <div class="stat"><b id="nestPartCount">0</b><span>Parça</span></div>
+                <div class="stat"><b id="nestAreaUsed">0%</b><span>Toplam kullanım</span></div>
+                <div class="stat"><b id="nestWaste">0</b><span>Boş alan m²</span></div>
+                <div class="stat"><b id="nestTime">0</b><span>Tahmini süre (dk)</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tabpanel" id="tabCircle">
+          <label>Kesim türü</label>
+          <select id="circleMode" onchange="updateCircleModeUI()">
+            <option value="solid">Düz Daire (tek kesim)</option>
+            <option value="ring">Çember (dış-iç arası parçayı al)</option>
+          </select>
+
+          <div class="row2">
+            <div>
+              <label>Dış çap (mm)</label>
+              <input type="number" id="circleOuterDia" value="500" min="1" step="1">
+            </div>
+            <div id="circleInnerDiaWrap" style="display:none">
+              <label>İç çap (mm)</label>
+              <input type="number" id="circleInnerDia" value="400" min="1" step="1">
+            </div>
+          </div>
+
+          <div class="row2">
+            <div>
+              <label>Soldan boşluk (mm)</label>
+              <input type="number" id="circleLeft" value="10" min="0" step="1">
+            </div>
+            <div>
+              <label>Alttan boşluk (mm)</label>
+              <input type="number" id="circleBottom" value="10" min="0" step="1">
+            </div>
+          </div>
+
+          <div class="row3">
+            <div>
+              <label>Bıçak çapı (mm)</label>
+              <input type="number" id="circleToolDia" value="6" min="0.1" step="0.5">
+            </div>
+            <div>
+              <label>Tool No</label>
+              <input type="number" id="circleToolNo" value="1" min="1" step="1">
+            </div>
+            <div>
+              <label>Kesim derinliği (mm)</label>
+              <input type="number" id="circleDepth" value="18" min="0.1" step="0.1">
+            </div>
+          </div>
+
+          <div class="measure-summary" id="circleSummary"></div>
+          <div class="hint">Offset otomatik olarak bıçak yarıçapı kadar uygulanır: dış çember <b>+</b>yarıçap kadar dışarı, iç çember <b>-</b>yarıçap kadar içeri kayar — böylece aradaki parça tam nominal ölçüsünde kalır.</div>
+          <button class="btn-primary" onclick="generateCircle()">G-code Üret</button>
+        </div>
+
+        <div class="tabpanel" id="tabDerz">
+          <div class="row2">
+            <div>
+              <label>Parça Genişliği X (mm)</label>
+              <input type="number" id="derzWidth" value="500" min="1" step="1">
+            </div>
+            <div>
+              <label>Parça Yüksekliği Y (mm)</label>
+              <input type="number" id="derzHeight" value="500" min="1" step="1">
+            </div>
+          </div>
+
+          <label>Yön</label>
+          <select id="derzYon">
+            <option value="dikey">Dikey (yukarı-aşağı çizgiler)</option>
+            <option value="yatay">Yatay (sağa-sola çizgiler)</option>
+          </select>
+
+          <div class="row2">
+            <div>
+              <label>Dışarıdan boşluk (mm) — ilk çizgi buradan başlar</label>
+              <input type="number" id="derzMargin" value="60" min="0" step="1">
+            </div>
+            <div>
+              <label>Çizgiler arası mesafe (mm)</label>
+              <input type="number" id="derzSpacing" value="60" min="0.1" step="0.5">
+            </div>
+          </div>
+
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:10px;">
+            <input type="checkbox" id="derzAutoFit" checked style="width:auto;" onchange="updateDerzSummary()">
+            Aralığı kenara tam sığacak şekilde otomatik ayarla (kapalıysa girdiğin mesafe birebir kullanılır, son aralık farklı kalabilir)
+          </label>
+
+          <div class="row3">
+            <div>
+              <label>Bıçak çapı (mm)</label>
+              <input type="number" id="derzToolDia" value="4" min="0.1" step="0.5">
+            </div>
+            <div>
+              <label>Tool No</label>
+              <input type="number" id="derzToolNo" value="1" min="1" step="1">
+            </div>
+            <div>
+              <label>Derinlik (mm)</label>
+              <input type="number" id="derzDepth" value="2" min="0.1" step="0.1">
+            </div>
+          </div>
+
+          <div class="row2">
+            <div>
+              <label>Taşma payı (mm) — boyuna: her çizginin üst/alt (dikeyde) ya da sol/sağ (yatayda) ucu bu kadar dışarı taşar</label>
+              <input type="number" id="derzOvershoot" value="1" min="0" step="0.5">
+            </div>
+            <div>
+              <label>Kenar payı azaltma (mm) — enine: en dıştaki (ilk/son) çizgi, kenara normal boşluktan bu kadar daha yakın/dışarı olur</label>
+              <input type="number" id="derzEdgeExtra" value="0" min="0" step="0.5">
+            </div>
+          </div>
+          <div>
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" id="derzOuterFrame" style="width:auto;"> Dış çerçeveyi de kes
+            </label>
+          </div>
+
+          <div class="measure-summary" id="derzSummary"></div>
+          <button class="btn-primary" onclick="generateDerz()">G-code Üret</button>
+        </div>
+
+        <div class="err" id="errBox"></div>
+        <div class="ok" id="okBox"></div>
+      </div>
+
+      <div class="card" id="singleOutputCard">
+        <h2>G-code Çıktısı</h2>
+        <textarea id="output" spellcheck="false" placeholder="G-code burada görünecek..."></textarea>
+        <div class="out-actions">
+          <button class="btn-secondary" onclick="copyOutput()">Kopyala</button>
+          <button class="btn-secondary" onclick="downloadOutput()">.nc indir</button>
+        </div>
+      </div>
+
+      <div class="settings-card" id="settingsPanel">
+        <div class="card">
+          <div class="modal-title">
+            <h2>⚙ Makine ve İşleme Ayarları</h2>
+            <button class="modal-close" onclick="closePanels()" title="Kapat">×</button>
+          </div>
+          <div class="row2">
+            <div>
+              <label>Malzeme kalınlığı (mm)</label>
+              <input type="number" id="thickness" value="18" step="0.1">
+            </div>
+            <div>
+              <label>Spindle hızı S (RPM)</label>
+              <input type="number" id="spindleSpeed" value="18000" step="100">
+            </div>
+          </div>
+          <div class="row3">
+            <div>
+              <label>Safe Z</label>
+              <input type="number" id="safeZ" value="30" step="0.1">
+            </div>
+            <div>
+              <label>Tool-change Z</label>
+              <input type="number" id="toolChangeZ" value="30" step="0.1">
+            </div>
+            <div>
+              <label>Home Z</label>
+              <input type="number" id="homeZ" value="30" step="0.1">
+            </div>
+          </div>
+          <div class="row2">
+            <div>
+              <label>Dalış feed (F)</label>
+              <input type="number" id="plungeFeed" value="3000" step="50">
+            </div>
+            <div>
+              <label>Kesim feed (F)</label>
+              <input type="number" id="cutFeed" value="6000" step="50">
+            </div>
+          </div>
+
+          <div style="border-top:1px solid var(--border);margin-top:18px;padding-top:16px">
+            <h2 style="margin-bottom:10px">Presetler</h2>
+
+            <div class="preset-list" id="presetList">
+              <span class="hint">Preset dosyasını bağlayınca presetler burada görünecek.</span>
+            </div>
+
+            <div class="preset-save" style="margin-top:10px">
+              <input type="text" id="presetNameInput" placeholder="Yeni preset adı">
+              <button class="btn-secondary" onclick="saveCurrentAsPreset()">Kaydet</button>
+            </div>
+          </div>
+
+          <div style="border-top:1px solid var(--border);margin-top:18px;padding-top:16px">
+            <h2 style="margin-bottom:8px">Preset Dosyası</h2>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <span class="badge" id="presetFileStatus">● Bağlı değil</span>
+              <button class="btn-secondary" onclick="choosePresetFile()">💾 Preset Dosyasını Bağla</button>
+            </div>
+            <div class="hint">presets.json dosyasını bir kez bağla. Presetler doğrudan bu dosyaya kaydedilir.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tools-card" id="toolsPanel">
+        <div class="card">
+          <div class="modal-title">
+            <h2>🔧 Bıçak Sırası</h2>
+            <button class="modal-close" onclick="closePanels()" title="Kapat">×</button>
+          </div>
+          <div class="tool-header-row">
+            <h2>Bıçak Sırası</h2>
+            <span class="badge" id="toolCountBadge">0 bıçak</span>
+          </div>
+
+          <div class="mode-switch" style="margin-bottom:14px">
+            <span class="mode-label" id="modeLabelRelative">Göreceli (kümülatif)</span>
+            <div class="switch-track" id="offsetModeSwitch" onclick="toggleOffsetMode()"><div class="knob"></div></div>
+            <span class="mode-label" id="modeLabelAbsolute">Mutlak (en dıştan)</span>
+          </div>
+
+          <table class="tool-table" id="toolTable">
+            <thead>
+              <tr><th>Bıçak Adı</th><th>Tool No</th><th>Derinlik</th><th id="offsetColHeader">Adım Offset</th><th>Kümülatif</th><th>Z</th><th></th></tr>
+            </thead>
+            <tbody id="toolTableBody"></tbody>
+          </table>
+          <button class="btn-secondary add-row-btn" onclick="addToolRow()">+ Bıçak Ekle</button>
+          <div class="hint" id="offsetModeHint">Sıra dıştan içe. Adım offset değerleri kümülatif olarak toplanır (her satır bir öncekinin üstüne eklenir).</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+
+<div class="wrap app-screen" id="appPanjur">
+  <div class="topbar">
+    <div>
+      <h1>Empire CNC — Panjur Kapak</h1>
+      <div class="sub">Dış ölçüden offseti çıkarır, panjur boylarını otomatik böler ve referans NC'deki eğimli raster mantığıyla G-code üretir.</div>
+    </div>
+    <div class="top-actions">
+      <button class="btn-secondary" onclick="backToMenu()">← Ana Menü</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="main-card">
+      <div class="card">
+        <h2>1. Dış ölçü ve offset</h2>
+        <div class="row2">
+          <div>
+            <label>Net dış genişlik X (mm)</label>
+            <input type="number" id="panjurWidth" value="200" min="1" step="1" oninput="updatePanjurSummary()">
+          </div>
+          <div>
+            <label>Net dış yükseklik Y (mm)</label>
+            <input type="number" id="panjurHeight" value="200" min="1" step="1" oninput="updatePanjurSummary()">
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label>Offset modu</label>
+            <select id="panjurOffsetMode" onchange="updatePanjurOffsetUI()">
+              <option value="normal">Normal — 4 kenar aynı</option>
+              <option value="detailed">Ayrıntılı — her kenar ayrı</option>
+            </select>
+          </div>
+          <div>
+            <label>Panjur yönü</label>
+            <select id="panjurDirection" onchange="updatePanjurSummary()">
+              <option value="y">Y yönünde panjur boyu</option>
+              <option value="x">X yönünde panjur boyu</option>
+            </select>
+          </div>
+        </div>
+        <div id="panjurNormalOffsetWrap" class="row2" style="margin-top:10px">
+          <div>
+            <label>Dıştan offset — 4 kenar (mm)</label>
+            <input type="number" id="panjurOffset" value="60" min="0" step="1" oninput="updatePanjurSummary()">
+          </div>
+          <div class="hint" style="margin:0;align-self:end">Dört kenara aynı mesafe uygulanır.</div>
+        </div>
+        <div id="panjurDetailedOffsetWrap" style="display:none;margin-top:10px">
+          <div class="row2">
+            <div>
+              <label>Soldan offset (mm)</label>
+              <input type="number" id="panjurOffsetLeft" value="60" min="0" step="0.1" oninput="updatePanjurSummary()">
+            </div>
+            <div>
+              <label>Sağdan offset (mm)</label>
+              <input type="number" id="panjurOffsetRight" value="60" min="0" step="0.1" oninput="updatePanjurSummary()">
+            </div>
+          </div>
+          <div class="row2" style="margin-top:10px">
+            <div>
+              <label>Alttan offset (mm)</label>
+              <input type="number" id="panjurOffsetBottom" value="60" min="0" step="0.1" oninput="updatePanjurSummary()">
+            </div>
+            <div>
+              <label>Üstten offset (mm)</label>
+              <input type="number" id="panjurOffsetTop" value="60" min="0" step="0.1" oninput="updatePanjurSummary()">
+            </div>
+          </div>
+          <div class="row2" style="margin-top:10px">
+            <div>
+              <label>Ortada düz alan (mm)</label>
+              <input type="number" id="panjurCenterFlat" value="0" min="0" step="0.1" oninput="updatePanjurSummary()">
+            </div>
+            <div class="hint" style="margin:0;align-self:end">Uzun kapaklarda panjurları ortada bu genişlikte düz bir bant bırakarak iki taraftan üretir. 0 = düz alan yok.</div>
+          </div>
+        </div>
+        <div class="measure-summary" id="panjurSummary"></div>
+      </div>
+
+      <div class="card">
+        <h2>2. Panjur geometrisi</h2>
+        <div class="row3">
+          <div>
+            <label>Panjur kademesi (mm)</label>
+            <input type="number" id="panjurPitch" value="40.5" min="0.1" step="0.1" oninput="updatePanjurSummary()">
+          </div>
+          <div>
+            <label>Rölyef çıkış payı (mm)</label>
+            <input type="number" id="panjurExitGap" value="0.45" min="0" step="0.01" oninput="updatePanjurSummary()">
+          </div>
+          <div>
+            <label>Raster stepover (mm)</label>
+            <input type="number" id="panjurStepover" value="0.468" min="0.05" step="0.001">
+          </div>
+        </div>
+        <div class="row3">
+          <div>
+            <label>Başlangıç Z (üst yüzey)</label>
+            <input type="number" id="panjurStartZ" value="17.937" step="0.001">
+          </div>
+          <div>
+            <label>Son Z / en derin nokta</label>
+            <input type="number" id="panjurEndZ" value="3.105" step="0.001">
+          </div>
+          <div>
+            <label>Raster feed F</label>
+            <input type="number" id="panjurFeed" value="20000" min="1" step="100">
+          </div>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:10px">
+          <input type="checkbox" id="panjurGroundEntry" style="width:auto" onchange="updatePanjurGroundUI()">
+          Zemine kadar in / alt çıkışı T4 ile en son aç
+        </label>
+        <div class="row2" id="panjurGroundOptions" style="display:none;margin-top:10px">
+          <div>
+            <label>Çıkış kesimi (mm)</label>
+            <input type="number" id="panjurExitCut" value="4" min="0.1" step="0.1">
+          </div>
+          <div>
+            <label>T4 Z</label>
+            <input type="number" id="panjurT4Z" value="0" readonly>
+          </div>
+        </div>
+        <div class="hint">Panjur kademesi, bir panjur başlangıcından sonraki panjur başlangıcına hedef mesafedir. Sistem offsetlerden kalan alanı ve bu kademeyi kullanarak panjur sayısını ve gerçek panjur uzunluğunu otomatik hesaplar; çıkış payı panjurlar arasındaki boşluktur.</div>
+      </div>
+
+      <div class="card">
+        <h2>3. Takım ve makine</h2>
+        <div class="row3">
+          <div>
+            <label>Panjur takımı</label>
+            <input type="number" id="panjurToolNo" value="14" min="1" step="1">
+          </div>
+          <div>
+            <label>Spindle S</label>
+            <input type="number" id="panjurSpindle" value="12000" min="1" step="100">
+          </div>
+          <div>
+            <label>Dalış F</label>
+            <input type="number" id="panjurPlunge" value="3000" min="1" step="50">
+          </div>
+        </div>
+        <div class="row3">
+          <div>
+            <label>Uç delme takımı</label>
+            <input type="number" id="panjurDrillTool" value="4" min="1" step="1">
+          </div>
+          <div>
+            <label>Uç bıçağı çapı (mm)</label>
+            <input type="number" id="panjurExitToolDia" value="4" min="0.5" step="0.5">
+          </div>
+          <div>
+            <label>Uç delme S</label>
+            <input type="number" id="panjurDrillSpindle" value="12000" min="1" step="100">
+          </div>
+        </div>
+        <div class="row3" style="margin-top:10px; padding-top:10px; border-top:1px solid var(--border);">
+          <div>
+            <label>T14 uç çapı (mm, ballnose)</label>
+            <input type="number" id="panjurT14TipDia" value="2" min="0.1" step="0.1">
+          </div>
+          <div>
+            <label>T14 gövde çapı (mm)</label>
+            <input type="number" id="panjurT14BodyDia" value="12" min="1" step="0.5">
+          </div>
+          <div>
+            <label>T14 konik yükseklik (mm)</label>
+            <input type="number" id="panjurT14Height" value="65" min="1" step="1">
+          </div>
+        </div>
+        <div class="hint">Zemine giriş açıksa her panjur T14 ile kendi eğimli boyunda bitirilir; taşmayı önlemek için T14'ün konik/ballnose profiline göre raster sınırları içeri çekilir. Ardından T4, yeni panjura geçmeden önce yalnızca son "çıkış kesimi" mm'lik bölümü Z0'a kadar açar (girilen uç bıçağı çapına göre otomatik ortalanır/raster'lanır).</div>
+      </div>
+
+      <div class="card">
+        <button class="btn-primary" style="margin-top:0" onclick="generatePanjur()">Panjur G-code Üret</button>
+        <div class="err" id="panjurErrBox"></div>
+        <div class="ok" id="panjurOkBox"></div>
+      </div>
+
+      <div class="card">
+        <h2>G-code Çıktısı</h2>
+        <textarea id="panjurOutput" spellcheck="false" placeholder="Panjur G-code burada görünecek..."></textarea>
+        <div class="out-actions">
+          <button class="btn-secondary" onclick="copyTextarea('panjurOutput')">Kopyala</button>
+          <button class="btn-secondary" onclick="downloadTextarea('panjurOutput','panjur.nc')">.nc indir</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap app-screen" id="appCam">
+  <div class="topbar">
+    <div>
+      <h1>Empire CNC — Cam Modelleri (deneysel)</h1>
+      <div class="sub">Göz ızgarası kesimi + Clipper.js tabanlı offset kenar taraması. Köşelerdeki dekoratif rozet/fileto şekli henüz taklit edilmiyor — köşeler şu an keskin (kare).</div>
+    </div>
+    <div class="top-actions">
+      <button class="btn-secondary" onclick="backToMenu()">← Ana Menü</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="main-card">
+      <div class="card">
+        <h2>Ölçü ve Izgara</h2>
+        <div class="row2">
+          <div>
+            <label>Dış Genişlik X (mm)</label>
+            <input type="number" id="camWidth" value="500" step="1">
+          </div>
+          <div>
+            <label>Dış Yükseklik Y (mm)</label>
+            <input type="number" id="camHeight" value="1000" step="1">
+          </div>
+        </div>
+        <div class="row3">
+          <div>
+            <label>Göz sayısı</label>
+            <input type="number" id="camGozSayisi" value="6" min="1" step="1">
+          </div>
+          <div>
+            <label>Sütun sayısı</label>
+            <input type="number" id="camKolonSayisi" value="2" min="1" step="1">
+          </div>
+          <div>
+            <label>Dışarıdan (mm, nominal)</label>
+            <input type="number" id="camDisMargin" value="60" step="1">
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label>İçeriden — çıtalar arası (mm, nominal)</label>
+            <input type="number" id="camIcerGap" value="20" step="1">
+          </div>
+          <div>
+            <label>Oturma payı (mm) — tarama dış kenardan bu kadar fazla içeri</label>
+            <input type="number" id="camOturmaPayi" value="10" step="1">
+          </div>
+        </div>
+        <div class="hint">Göz sayısı sütun sayısına tam bölünmeli (örn. 6 göz / 2 sütun = 3 satır). Dış kenarda tarama sınırı = Dışarıdan − Oturma payı; iç çıtalarda (gözler arası) tarama, kesim ile aynı nominal sınırı kullanır (ekstra oturma payı yok).</div>
+      </div>
+
+      <div class="card">
+        <h2>Takım ve İşleme</h2>
+        <div class="row3">
+          <div>
+            <label>Malzeme kalınlığı (mm)</label>
+            <input type="number" id="camThickness" value="18" step="0.1">
+          </div>
+          <div>
+            <label>Spindle S (RPM)</label>
+            <input type="number" id="camSpindleSpeed" value="18000" step="100">
+          </div>
+          <div>
+            <label>Bıçak çapı (mm)</label>
+            <input type="number" id="camToolDia" value="6" step="0.5">
+          </div>
+        </div>
+        <div class="row3">
+          <div>
+            <label>Kesim Tool No</label>
+            <input type="number" id="camKesimToolNo" value="6" step="1">
+          </div>
+          <div>
+            <label>Tarama Tool No</label>
+            <input type="number" id="camTaramaToolNo" value="6" step="1">
+          </div>
+          <div>
+            <label>Tarama finiş derinliği (mm)</label>
+            <input type="number" id="camTaramaDepth" value="9" step="0.1">
+          </div>
+        </div>
+        <div class="row3">
+          <div>
+            <label>Tarama stepover (mm)</label>
+            <input type="number" id="camStepover" value="3" step="0.5">
+          </div>
+          <div>
+            <label>Dalış feed</label>
+            <input type="number" id="camPlungeFeed" value="3000" step="50">
+          </div>
+          <div>
+            <label>Kesim feed</label>
+            <input type="number" id="camCutFeed" value="5000" step="50">
+          </div>
+        </div>
+        <div class="row3">
+          <div>
+            <label>Safe Z</label>
+            <input type="number" id="camSafeZ" value="61" step="0.1">
+          </div>
+          <div>
+            <label>Home Z</label>
+            <input type="number" id="camHomeZ" value="96" step="0.1">
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex; gap:10px;">
+          <button class="btn-primary" style="margin-top:0" onclick="generateCamKesim()">Kesim G-code Üret</button>
+          <button class="btn-accent2" style="margin-top:0" onclick="generateCamTarama()">Tarama G-code Üret (deneysel)</button>
+        </div>
+        <div class="err" id="camErrBox"></div>
+        <div class="ok" id="camOkBox"></div>
+      </div>
+
+      <div class="card">
+        <h2>Kesim Çıktısı</h2>
+        <textarea id="camKesimOutput" spellcheck="false"></textarea>
+        <div class="out-actions">
+          <button class="btn-secondary" onclick="copyTextarea('camKesimOutput')">Kopyala</button>
+          <button class="btn-secondary" onclick="downloadTextarea('camKesimOutput','kesim.nc')">.nc indir</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Tarama Çıktısı</h2>
+        <textarea id="camTaramaOutput" spellcheck="false"></textarea>
+        <div class="out-actions">
+          <button class="btn-secondary" onclick="copyTextarea('camTaramaOutput')">Kopyala</button>
+          <button class="btn-secondary" onclick="downloadTextarea('camTaramaOutput','tarama.nc')">.nc indir</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+
+// ---------- Main menu / module switching ----------
+function openModule(name){
+  document.getElementById('mainMenu').style.display = 'none';
+  const screen = document.getElementById('app' + name.charAt(0).toUpperCase() + name.slice(1));
+  if(screen) screen.classList.add('active');
+}
+
+function backToMenu(){
+  document.querySelectorAll('.app-screen.active').forEach(el=> el.classList.remove('active'));
+  closePanels();
+  document.getElementById('mainMenu').style.display = 'flex';
+}
+
+// Presetler presets.json dosyasında saklanır.
+let activePresetName = null;
+let rowIdCounter = 0;
+
+// ---------- Offset mode ----------
+// 'relative'  : her satırın Adım Offset değeri bir öncekinin kümülatif toplamına eklenir.
+// 'absolute'  : her satırın Adım Offset değeri, satırın kendisi, doğrudan en dış kenardan mesafedir (toplama yapılmaz).
+let offsetMode = 'relative';
+
+function toggleOffsetMode(){
+  offsetMode = (offsetMode === 'relative') ? 'absolute' : 'relative';
+  updateOffsetModeUI();
+  recalcAll();
+}
+
+function updateOffsetModeUI(){
+  const sw = document.getElementById('offsetModeSwitch');
+  const lblRel = document.getElementById('modeLabelRelative');
+  const lblAbs = document.getElementById('modeLabelAbsolute');
+  const header = document.getElementById('offsetColHeader');
+  const hint = document.getElementById('offsetModeHint');
+  const isAbsolute = offsetMode === 'absolute';
+
+  sw.classList.toggle('on', isAbsolute);
+  lblRel.classList.toggle('active', !isAbsolute);
+  lblAbs.classList.toggle('active', isAbsolute);
+
+  if(isAbsolute){
+    header.textContent = 'Offset (dıştan)';
+    hint.textContent = 'Sıra dıştan içe. Her satırın offseti, o satırın kendi değeridir — bir önceki satırdan bağımsız, doğrudan en dış kenardan ölçülür.';
+  }else{
+    header.textContent = 'Adım Offset';
+    hint.textContent = 'Sıra dıştan içe. Adım offset değerleri kümülatif olarak toplanır (her satır bir öncekinin üstüne eklenir).';
+  }
+}
+
+// Verilen stepOffset dizisinden mod'a göre kümülatif (gerçek) offset listesini üretir.
+function computeCumOffsets(rows){
+  let cum = 0;
+  return rows.map(r=>{
+    if(offsetMode === 'absolute'){
+      cum = r.stepOffset;
+    }else{
+      cum += r.stepOffset;
+    }
+    return cum;
+  });
+}
+
+function switchTab(which){
+  document.getElementById('tabSingleBtn').classList.toggle('active', which==='single');
+  document.getElementById('tabBatchBtn').classList.toggle('active', which==='batch');
+  document.getElementById('tabNestingBtn').classList.toggle('active', which==='nesting');
+  document.getElementById('tabCircleBtn').classList.toggle('active', which==='circle');
+  document.getElementById('tabDerzBtn').classList.toggle('active', which==='derz');
+  document.getElementById('tabSingle').classList.toggle('active', which==='single');
+  document.getElementById('tabBatch').classList.toggle('active', which==='batch');
+  document.getElementById('tabNesting').classList.toggle('active', which==='nesting');
+  document.getElementById('tabCircle').classList.toggle('active', which==='circle');
+  document.getElementById('tabDerz').classList.toggle('active', which==='derz');
+  document.getElementById('singleOutputCard').style.display = (which==='single' || which==='circle' || which==='derz') ? 'block' : 'none';
+  hideMessages();
+}
+
+function hideMessages(){
+  document.getElementById('errBox').style.display = 'none';
+  document.getElementById('okBox').style.display = 'none';
+}
+function showError(msg){
+  const e = document.getElementById('errBox');
+  e.textContent = msg; e.style.display = 'block';
+  document.getElementById('okBox').style.display = 'none';
+}
+function showOk(msg){
+  const o = document.getElementById('okBox');
+  o.textContent = msg; o.style.display = 'block';
+  document.getElementById('errBox').style.display = 'none';
+}
+
+// ---------- Tool rows ----------
+function addToolRow(row){
+  row = row || {name:'', toolNo:'', depth:'', stepOffset:''};
+  const id = 'r' + (rowIdCounter++);
+  const tbody = document.getElementById('toolTableBody');
+  const tr = document.createElement('tr');
+  tr.dataset.rowid = id;
+  tr.innerHTML = `
+    <td class="name-cell"><input type="text" data-field="name" value="${row.name}" placeholder="30mm yuvarlama"></td>
+    <td><input type="number" data-field="toolNo" value="${row.toolNo}" style="width:50px"></td>
+    <td><input type="number" step="0.1" data-field="depth" value="${row.depth}" style="width:60px" oninput="recalcRow('${id}')"></td>
+    <td><input type="number" step="0.1" data-field="stepOffset" value="${row.stepOffset}" style="width:60px" oninput="recalcAll()"></td>
+    <td class="cum-cell">0</td>
+    <td class="z-cell">0</td>
+    <td><button class="icon-btn" onclick="removeToolRow('${id}')">✕</button></td>
+  `;
+  tbody.appendChild(tr);
+  recalcAll();
+}
+
+function removeToolRow(id){
+  const tr = document.querySelector(`tr[data-rowid="${id}"]`);
+  if(tr) tr.remove();
+  recalcAll();
+}
+
+function recalcRow(id){ recalcAll(); }
+
+function recalcAll(){
+  const thickness = parseFloat(document.getElementById('thickness').value) || 0;
+  const rows = document.querySelectorAll('#toolTableBody tr');
+  const steps = [...rows].map(tr=> parseFloat(tr.querySelector('[data-field="stepOffset"]').value) || 0);
+  const cums = computeCumOffsets(steps.map(s=>({stepOffset:s})));
+
+  const w = parseFloat(document.getElementById('width').value) || 0;
+  const h = parseFloat(document.getElementById('height').value) || 0;
+
+  rows.forEach((tr, i)=>{
+    const depth = parseFloat(tr.querySelector('[data-field="depth"]').value) || 0;
+    tr.querySelector('.cum-cell').textContent = cums[i].toFixed(2);
+    tr.querySelector('.z-cell').textContent = (thickness - depth).toFixed(2);
+
+    const invalid = w>0 && h>0 && (w - 2*cums[i] <= 0 || h - 2*cums[i] <= 0);
+    tr.classList.toggle('row-error', invalid);
+    tr.title = invalid ? `Bu offset (${cums[i].toFixed(1)}mm), Tek Ölçü sekmesindeki ${w}×${h} parçayı dışarı taşırıyor.` : '';
+  });
+  document.getElementById('toolCountBadge').textContent = rows.length + ' bıçak';
+}
+document.getElementById('thickness').addEventListener('input', recalcAll);
+
+function getToolRows(){
+  const rows = [];
+  document.querySelectorAll('#toolTableBody tr').forEach(tr=>{
+    rows.push({
+      name: tr.querySelector('[data-field="name"]').value,
+      toolNo: tr.querySelector('[data-field="toolNo"]').value,
+      depth: parseFloat(tr.querySelector('[data-field="depth"]').value),
+      stepOffset: parseFloat(tr.querySelector('[data-field="stepOffset"]').value)
+    });
+  });
+  return rows;
+}
+
+function setToolRows(rows){
+  document.getElementById('toolTableBody').innerHTML = '';
+  rows.forEach(r=> addToolRow(r));
+  recalcAll();
+}
+
+// ---------- Presets ----------
+function readFormConfig(){
+  return {
+    thickness: parseFloat(document.getElementById('thickness').value),
+    spindleSpeed: parseFloat(document.getElementById('spindleSpeed').value),
+    safeZ: parseFloat(document.getElementById('safeZ').value),
+    toolChangeZ: parseFloat(document.getElementById('toolChangeZ').value),
+    homeZ: parseFloat(document.getElementById('homeZ').value),
+    plungeFeed: parseFloat(document.getElementById('plungeFeed').value),
+    cutFeed: parseFloat(document.getElementById('cutFeed').value),
+    offsetMode: offsetMode,
+    rows: getToolRows()
+  };
+}
+
+function applyConfigToForm(cfg){
+  document.getElementById('thickness').value = cfg.thickness;
+  document.getElementById('spindleSpeed').value = cfg.spindleSpeed;
+  document.getElementById('safeZ').value = cfg.safeZ;
+  document.getElementById('toolChangeZ').value = cfg.toolChangeZ;
+  document.getElementById('homeZ').value = cfg.homeZ;
+  document.getElementById('plungeFeed').value = cfg.plungeFeed;
+  document.getElementById('cutFeed').value = cfg.cutFeed;
+  offsetMode = (cfg.offsetMode === 'absolute') ? 'absolute' : 'relative';
+  updateOffsetModeUI();
+  setToolRows(cfg.rows || []);
+}
+
+let presetFileHandle = null;
+let presetData = {};
+
+function loadPresets(){
+  return presetData;
+}
+
+async function choosePresetFile(){
+  if(!window.showOpenFilePicker){
+    alert('Bu özellik için Chrome/Edge gibi File System Access API destekleyen bir tarayıcı kullan.');
+    return;
+  }
+
+  try{
+    const [handle] = await window.showOpenFilePicker({
+      multiple:false,
+      types:[{
+        description:'Preset JSON',
+        accept:{'application/json':['.json']}
+      }]
+    });
+
+    presetFileHandle = handle;
+    const file = await handle.getFile();
+    const text = await file.text();
+
+    if(text.trim()){
+      const parsed = JSON.parse(text);
+      presetData = parsed && typeof parsed === 'object' ? parsed : {};
+    }else{
+      presetData = {};
+      await writePresetsFile();
+    }
+
+    renderPresetChips();
+    updatePresetFileStatus();
+    alert('Preset dosyası bağlandı.');
+  }catch(e){
+    if(e && e.name !== 'AbortError'){
+      alert('Preset dosyası açılamadı: ' + e.message);
+    }
+  }
+}
+
+async function writePresetsFile(){
+  if(!presetFileHandle) return false;
+
+  try{
+    const writable = await presetFileHandle.createWritable();
+    await writable.write(JSON.stringify(presetData, null, 2));
+    await writable.close();
+    return true;
+  }catch(e){
+    alert('Preset dosyasına yazılamadı. Dosya iznini kontrol et.');
+    return false;
+  }
+}
+
+function updatePresetFileStatus(){
+  const el = document.getElementById('presetFileStatus');
+  if(!el) return;
+
+  if(presetFileHandle){
+    el.textContent = '● Bağlı';
+    el.style.color = 'var(--accent2)';
+  }else{
+    el.textContent = '● Bağlı değil';
+    el.style.color = 'var(--muted)';
+  }
+}
+// Not: localStorage bu dosyayı doğrudan (çift tıkla / dosya olarak) veya normal bir
+// web sunucusunda açtığında sorunsuz çalışır. Sadece Claude.ai artifact sandbox'ı
+// içindeyken kullanılamaz — presetler o durumda sayfa yenilenince silinir, geri kalan
+// her şey (üretim, indirme) yine çalışır.
+
+function renderPresetChips(){
+  const presets = loadPresets();
+  const list = document.getElementById('presetList');
+  list.innerHTML = '';
+
+  const names = Object.keys(presets);
+
+  if(names.length === 0){
+    list.innerHTML = presetFileHandle
+      ? '<span class="hint">Henüz preset yok.</span>'
+      : '<span class="hint">Preset dosyasını bağlayınca presetler burada görünecek.</span>';
+    updatePresetFileStatus();
+    return;
+  }
+
+  names.forEach(name=>{
+    const chip = document.createElement('div');
+    chip.className = 'preset-chip' + (name === activePresetName ? ' active' : '');
+    chip.innerHTML = `<span>${name}</span><span class="x" title="Sil">✕</span>`;
+
+    chip.querySelector('span:first-child').onclick = ()=> loadPreset(name);
+
+    chip.querySelector('.x').onclick = (e)=>{
+      e.stopPropagation();
+      deletePreset(name);
+    };
+
+    list.appendChild(chip);
+  });
+
+  updatePresetFileStatus();
+}
+
+async function saveCurrentAsPreset(){
+  if(!presetFileHandle){
+    alert('Önce "Preset Dosyasını Bağla" ile presets.json dosyasını seç.');
+    return;
+  }
+
+  const nameInput = document.getElementById('presetNameInput');
+  const name = nameInput.value.trim();
+
+  if(!name){
+    alert('Preset için bir isim yaz.');
+    return;
+  }
+
+  presetData[name] = readFormConfig();
+
+  const saved = await writePresetsFile();
+  if(!saved) return;
+
+  activePresetName = name;
+  nameInput.value = '';
+  renderPresetChips();
+}
+
+function loadPreset(name){
+  const presets = loadPresets();
+  if(!presets[name]) return;
+  activePresetName = name;
+  applyConfigToForm(presets[name]);
+  renderPresetChips();
+}
+
+async function deletePreset(name){
+  if(!presetFileHandle){
+    alert('Önce preset dosyasını bağla.');
+    return;
+  }
+
+  if(!confirm(`"${name}" presetini silmek istediğine emin misin?`)) return;
+
+  delete presetData[name];
+
+  const saved = await writePresetsFile();
+  if(!saved) return;
+
+  if(activePresetName === name) activePresetName = null;
+  renderPresetChips();
+}
+
+// ---------- G-code generation ----------
+function fmt(n){ return Number(n).toFixed(2); }
+
+function validateRows(width, height, rows){
+  if(rows.length === 0) return 'En az bir bıçak tanımla.';
+  for(const r of rows){
+    if(isNaN(r.toolNo) || r.toolNo === '') return `Bir satırda Tool No eksik.`;
+    if(isNaN(r.depth)) return `${r.name || 'bir bıçak'} için derinlik eksik.`;
+    if(isNaN(r.stepOffset)) return `${r.name || 'bir bıçak'} için adım offset eksik.`;
+  }
+  const cums = computeCumOffsets(rows);
+  for(let i=0;i<rows.length;i++){
+    const r = rows[i], cum = cums[i];
+    if(width - 2*cum <= 0 || height - 2*cum <= 0){
+      return `${width}x${height} ölçüsünde T${r.toolNo} (${r.name}) offseti (${cum.toFixed(1)}mm) dışarı taşıyor.`;
+    }
+  }
+  return null;
+}
+
+function buildGcode(width, height, cfg, offsetX=0, offsetY=0){
+  const rows = cfg.rows;
+  const lines = [];
+  lines.push('makro');
+  const cums = computeCumOffsets(rows);
+  let prevToolNo = null;
+  rows.forEach((r, i)=>{
+    const cum = cums[i];
+    const x1 = offsetX + cum, y1 = offsetY + cum;
+    const x2 = offsetX + width - cum, y2 = offsetY + height - cum;
+    const z = +(cfg.thickness - r.depth).toFixed(3);
+
+    const sameToolAsPrev = i > 0 && String(r.toolNo) === String(prevToolNo);
+    if(!sameToolAsPrev){
+      lines.push(`M6T${r.toolNo}`);
+    }
+    lines.push(`M3 S${cfg.spindleSpeed}`);
+    if(i > 0){
+      lines.push(`G0Z${fmt(cfg.toolChangeZ)}`);
+    }
+    lines.push(`G0 X${fmt(x1)} Y${fmt(y1)} Z${fmt(cfg.safeZ)}`);
+    lines.push(`G1   Z${fmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
+    lines.push(`G1 X${fmt(x2)}   F${cfg.cutFeed.toFixed(1)}`);
+    lines.push(` Y${fmt(y2)} `);
+    lines.push(`X${fmt(x1)}  `);
+    lines.push(` Y${fmt(y1)} `);
+    lines.push(`G0   Z${fmt(cfg.safeZ)}`);
+    lines.push('M5');
+    prevToolNo = r.toolNo;
+  });
+  lines.push(`G0 Z${fmt(cfg.homeZ)}`);
+  lines.push(`G0 X0.00 Y0.00`);
+  lines.push('M5');
+  lines.push('M16');
+  lines.push('M30');
+  return lines.join('\n');
+}
+
+// ---------- Circle / ring cutting ----------
+
+function updateCircleModeUI(){
+  const isRing = document.getElementById('circleMode').value === 'ring';
+  document.getElementById('circleInnerDiaWrap').style.display = isRing ? 'block' : 'none';
+  updateCircleSummary();
+updatePanjurGroundUI();
+updatePanjurSummary();
+}
+
+function readCircleParams(){
+  const mode = document.getElementById('circleMode').value;
+  const outerDia = parseFloat(document.getElementById('circleOuterDia').value);
+  const innerDia = parseFloat(document.getElementById('circleInnerDia').value);
+  const left = parseFloat(document.getElementById('circleLeft').value);
+  const bottom = parseFloat(document.getElementById('circleBottom').value);
+  const toolDia = parseFloat(document.getElementById('circleToolDia').value);
+  const toolNo = document.getElementById('circleToolNo').value;
+  const depth = parseFloat(document.getElementById('circleDepth').value);
+
+  const toolR = toolDia / 2;
+  const nominalR = outerDia / 2;
+  const centerX = left + nominalR;
+  const centerY = bottom + nominalR;
+  const outerR = nominalR + toolR;
+  const innerR = mode === 'ring' ? (innerDia / 2 - toolR) : null;
+
+  return {mode, outerDia, innerDia, left, bottom, toolDia, toolNo, depth, toolR, outerR, centerX, centerY, innerR};
+}
+
+function updateCircleSummary(){
+  const p = readCircleParams();
+  const el = document.getElementById('circleSummary');
+  if(!isFinite(p.outerR) || !isFinite(p.centerX)){
+    el.textContent = '';
+    return;
+  }
+  let txt = `Dış kesim çapı: ${(p.outerR*2).toFixed(1)} mm — Merkez: X${p.centerX.toFixed(1)} Y${p.centerY.toFixed(1)}`;
+  if(p.mode === 'ring'){
+    if(isFinite(p.innerR) && p.innerR > 0){
+      txt += ` — İç kesim çapı: ${(p.innerR*2).toFixed(1)} mm`;
+    }else{
+      txt += ` — İç çap/bıçak ölçüsü geçersiz (iç kesim çapı 0 veya altında).`;
+    }
+  }
+  el.textContent = txt;
+}
+
+['circleMode','circleOuterDia','circleInnerDia','circleLeft','circleBottom','circleToolDia','circleToolNo','circleDepth']
+  .forEach(id=> document.getElementById(id).addEventListener('input', updateCircleSummary));
+
+function buildCircleGcode(p, cfg){
+  const lines = ['makro'];
+  const z = +(cfg.thickness - p.depth).toFixed(3);
+
+  lines.push(`M6T${p.toolNo}`);
+  lines.push(`M3 S${cfg.spindleSpeed}`);
+
+  // Full circle as two 180° arcs (G2, clockwise). Most controllers won't
+  // accept a single G2/G3 whose start and end point are identical, so the
+  // circle is split at the 3 o'clock / 9 o'clock points. I/J are relative
+  // to the arc's start point (incremental), pointing from start to center.
+  function cutLoop(r){
+    const startX = p.centerX + r, startY = p.centerY;
+    const midX = p.centerX - r, midY = p.centerY;
+
+    lines.push(`G0 X${fmt(startX)} Y${fmt(startY)} Z${fmt(cfg.safeZ)}`);
+    lines.push(`G1   Z${fmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
+    lines.push(`G2 X${fmt(midX)} Y${fmt(midY)} I${fmt(-r)} J0.00   F${cfg.cutFeed.toFixed(1)}`);
+    lines.push(`G2 X${fmt(startX)} Y${fmt(startY)} I${fmt(r)} J0.00`);
+    lines.push(`G0   Z${fmt(cfg.safeZ)}`);
+  }
+
+  if(p.mode === 'ring'){
+    // Inner first: the outer perimeter is what frees the ring from the
+    // surrounding stock, so cutting it last keeps the part anchored (no
+    // shifting) while the inner hole is being cut.
+    cutLoop(p.innerR);
+  }
+  cutLoop(p.outerR);
+
+  lines.push('M5');
+  lines.push(`G0 Z${fmt(cfg.homeZ)}`);
+  lines.push(`G0 X0.00 Y0.00`);
+  lines.push('M5');
+  lines.push('M16');
+  lines.push('M30');
+  return lines.join('\n');
+}
+
+function generateCircle(){
+  hideMessages();
+  const p = readCircleParams();
+  const cfg = readFormConfig();
+
+  if(!isFinite(p.outerDia) || p.outerDia <= 0){
+    showError('Geçerli bir dış çap gir.');
+    return;
+  }
+  if(!isFinite(p.toolDia) || p.toolDia <= 0){
+    showError('Geçerli bir bıçak çapı gir.');
+    return;
+  }
+  if(!isFinite(p.left) || !isFinite(p.bottom) || p.left < 0 || p.bottom < 0){
+    showError('Geçerli bir soldan/alttan boşluk gir.');
+    return;
+  }
+  if(isNaN(p.toolNo) || p.toolNo === ''){
+    showError('Tool No eksik.');
+    return;
+  }
+  if(!isFinite(p.depth) || p.depth <= 0){
+    showError('Geçerli bir kesim derinliği gir.');
+    return;
+  }
+  if(p.mode === 'ring'){
+    if(!isFinite(p.innerDia) || p.innerDia <= 0){
+      showError('Geçerli bir iç çap gir.');
+      return;
+    }
+    if(p.innerDia >= p.outerDia){
+      showError('İç çap, dış çaptan küçük olmalı.');
+      return;
+    }
+    if(p.innerR <= 0){
+      showError(`İç çap (${p.innerDia}mm) bu bıçak çapıyla (${p.toolDia}mm) kesilemeyecek kadar küçük.`);
+      return;
+    }
+  }
+
+  document.getElementById('output').value = buildCircleGcode(p, cfg);
+  showOk('G-code üretildi.');
+}
+
+function generateDerz(){
+  hideMessages();
+  const width = parseFloat(document.getElementById('derzWidth').value);
+  const height = parseFloat(document.getElementById('derzHeight').value);
+  const yon = document.getElementById('derzYon').value;
+  const margin = parseFloat(document.getElementById('derzMargin').value);
+  const spacing = parseFloat(document.getElementById('derzSpacing').value);
+  const toolDia = parseFloat(document.getElementById('derzToolDia').value);
+  const toolNo = document.getElementById('derzToolNo').value;
+  const depth = parseFloat(document.getElementById('derzDepth').value);
+  const overshoot = parseFloat(document.getElementById('derzOvershoot').value);
+  const edgeExtra = parseFloat(document.getElementById('derzEdgeExtra').value);
+  const outerFrame = document.getElementById('derzOuterFrame').checked;
+  const cfg = readFormConfig();
+
+  if(!isFinite(width) || !isFinite(height) || width<=0 || height<=0){
+    showError('Geçerli bir parça genişliği/yüksekliği gir.'); return;
+  }
+  if(!isFinite(margin) || margin<0){ showError('Geçerli bir dışarıdan boşluk gir.'); return; }
+  if(!isFinite(spacing) || spacing<=0){ showError('Geçerli bir çizgiler arası mesafe gir.'); return; }
+  if(!isFinite(toolDia) || toolDia<=0){ showError('Geçerli bir bıçak çapı gir.'); return; }
+  if(isNaN(toolNo) || toolNo===''){ showError('Tool No eksik.'); return; }
+  if(!isFinite(depth) || depth<=0){ showError('Geçerli bir derinlik gir.'); return; }
+  if(!isFinite(overshoot) || overshoot<0){ showError('Geçerli bir taşma payı gir.'); return; }
+  if(!isFinite(edgeExtra) || edgeExtra<0){ showError('Geçerli bir kenar payı azaltma değeri gir.'); return; }
+
+  const span = yon === 'dikey' ? width : height;
+  const effectiveMargin = margin - edgeExtra;
+  if(effectiveMargin > span - effectiveMargin){
+    showError('Bu boşluk/kenar payı kombinasyonu bu ölçüde hiç çizgi bırakmıyor.'); return;
+  }
+
+  const autoFit = document.getElementById('derzAutoFit').checked;
+
+  // Requested spacing rarely divides the available length evenly.
+  // Auto-fit mode: pick the interval count closest to the requested
+  // spacing, then use the EXACT resulting spacing so the last line always
+  // lands precisely at (span - effectiveMargin) — never overshoots past
+  // the edge). Literal mode: use the entered spacing as-is; the last gap
+  // may end up shorter than the rest.
+  // "effectiveMargin" (= margin - edgeExtra) is what actually places the
+  // lines, so the outermost lines land edgeExtra mm further out/in than
+  // the plain margin would.
+  const availableLength = span - 2*effectiveMargin;
+  let positions = [];
+  let exactSpacing = spacing;
+  if(autoFit){
+    const numIntervals = Math.max(1, Math.round(availableLength / spacing));
+    exactSpacing = availableLength / numIntervals;
+    for(let i=0; i<=numIntervals; i++){
+      positions.push(+(effectiveMargin + i*exactSpacing).toFixed(3));
+    }
+  } else {
+    for(let pos = effectiveMargin; pos <= span - effectiveMargin + 1e-6; pos += spacing){
+      positions.push(+pos.toFixed(3));
+    }
+  }
+  if(positions.length === 0){
+    showError('Bu ayarlarla hiç çizgi üretilmedi.'); return;
+  }
+
+  const z = +(cfg.thickness - depth).toFixed(3);
+  const lines = ['makro'];
+  lines.push(`M6T${toolNo}`);
+  lines.push(`M3 S${cfg.spindleSpeed}`);
+
+  positions.forEach((pos, i)=>{
+    let x1,y1,x2,y2;
+    if(yon === 'dikey'){
+      x1 = pos; x2 = pos;
+      y1 = -overshoot; y2 = height + overshoot;
+    } else {
+      y1 = pos; y2 = pos;
+      x1 = -overshoot; x2 = width + overshoot;
+    }
+    if(i === 0){
+      lines.push(`G0 X${fmt(x1)} Y${fmt(y1)} Z${fmt(cfg.safeZ)}`);
+    } else {
+      lines.push(`G0 X${fmt(x1)} Y${fmt(y1)} `);
+    }
+    lines.push(`G1   Z${fmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
+    lines.push(`G1 X${fmt(x2)} Y${fmt(y2)}   F${cfg.cutFeed.toFixed(1)}`);
+    lines.push(`G0   Z${fmt(cfg.safeZ)}`);
+  });
+
+  if(outerFrame){
+    lines.push(`G0 X0.00 Y0.00 `);
+    lines.push(`G1   Z0.00 F${cfg.plungeFeed.toFixed(1)}`);
+    lines.push(`G1 X${fmt(width)} Y0.00   F${cfg.cutFeed.toFixed(1)}`);
+    lines.push(` Y${fmt(height)} `);
+    lines.push(`X0.00  `);
+    lines.push(` Y0.00 `);
+    lines.push(`G0   Z${fmt(cfg.safeZ)}`);
+  }
+
+  lines.push(`G0 Z${fmt(cfg.homeZ)}`);
+  lines.push(`G0 X0.00 Y0.00`);
+  lines.push('M5');
+  lines.push('M16');
+  lines.push('M30');
+
+  document.getElementById('output').value = lines.join('\n');
+  const spacingNote = autoFit ? `gerçek aralık ~${exactSpacing.toFixed(2)}mm` : `sabit aralık ${spacing}mm`;
+  showOk(`G-code üretildi (${positions.length} çizgi, ${spacingNote}${outerFrame ? ' + dış çerçeve' : ''}).`);
+}
+
+function updateDerzSummary(){
+  const el = document.getElementById('derzSummary');
+  if(!el) return;
+  const width = parseFloat(document.getElementById('derzWidth').value);
+  const height = parseFloat(document.getElementById('derzHeight').value);
+  const yon = document.getElementById('derzYon').value;
+  const margin = parseFloat(document.getElementById('derzMargin').value);
+  const spacing = parseFloat(document.getElementById('derzSpacing').value);
+  const edgeExtra = parseFloat(document.getElementById('derzEdgeExtra').value) || 0;
+  const autoFit = document.getElementById('derzAutoFit').checked;
+  if(!isFinite(width) || !isFinite(height) || !isFinite(margin) || !isFinite(spacing) || spacing<=0){
+    el.textContent = ''; return;
+  }
+  const span = yon === 'dikey' ? width : height;
+  const effectiveMargin = margin - edgeExtra;
+  const availableLength = span - 2*effectiveMargin;
+  if(availableLength <= 0){ el.textContent = 'Bu ölçüde hiç çizgi bırakmıyor.'; return; }
+  if(autoFit){
+    const numIntervals = Math.max(1, Math.round(availableLength / spacing));
+    const exactSpacing = availableLength / numIntervals;
+    el.textContent = `${numIntervals+1} çizgi — ilk/son çizgi kenardan ${effectiveMargin}mm, aralık ~${exactSpacing.toFixed(2)}mm.`;
+  } else {
+    let count = 0;
+    for(let pos = effectiveMargin; pos <= span - effectiveMargin + 1e-6; pos += spacing) count++;
+    el.textContent = `${count} çizgi — ilk/son çizgi kenardan ${effectiveMargin}mm, sabit ${spacing}mm aralık (son aralık farklı kalabilir).`;
+  }
+}
+['derzWidth','derzHeight','derzYon','derzMargin','derzSpacing','derzEdgeExtra']
+  .forEach(id=> document.getElementById(id).addEventListener('input', updateDerzSummary));
+document.getElementById('derzYon').addEventListener('change', updateDerzSummary);
+updateDerzSummary();
+
+function generateSingle(){
+
+
+  hideMessages();
+  const width = parseFloat(document.getElementById('width').value);
+  const height = parseFloat(document.getElementById('height').value);
+  const cfg = readFormConfig();
+
+  if(isNaN(width) || isNaN(height) || width <= 0 || height <= 0){
+    showError('Geçerli bir dış genişlik/yükseklik gir.');
+    return;
+  }
+  const err = validateRows(width, height, cfg.rows);
+  if(err){ showError(err); return; }
+
+  document.getElementById('output').value = buildGcode(width, height, cfg);
+  showOk('G-code üretildi.');
+}
+
+function copyOutput(){
+  const out = document.getElementById('output');
+  out.select();
+  document.execCommand('copy');
+}
+
+function downloadOutput(){
+  const text = document.getElementById('output').value;
+  if(!text.trim()) return;
+  const blob = new Blob([text], {type:'text/plain'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'output.nc';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ---------- Batch ----------
+function parseBatchLine(line){
+  const parts = line.trim().split('-').map(s=>s.trim()).filter(s=>s.length>0);
+  if(parts.length < 2) return null;
+  const w = parseFloat(parts[0]);
+  const h = parseFloat(parts[1]);
+  if(isNaN(w) || isNaN(h)) return null;
+  return {width:w, height:h, raw: line.trim()};
+}
+
+async function generateBatch(){
+  hideMessages();
+  if(typeof JSZip === 'undefined'){
+    showError('ZIP kütüphanesi yüklenemedi (internet bağlantısı gerekiyor). Tek tek indirmek için "Tek Ölçü" sekmesini kullan.');
+    return;
+  }
+  const cfg = readFormConfig();
+  const raw = document.getElementById('batchList').value;
+  const linesRaw = raw.split('\n').map(l=>l.trim()).filter(l=>l.length>0);
+
+  if(linesRaw.length === 0){ showError('Liste boş.'); return; }
+
+  const zip = new JSZip();
+  const errors = [];
+  let okCount = 0;
+  const usedNames = {};
+
+  linesRaw.forEach((line, idx)=>{
+    const parsed = parseBatchLine(line);
+    if(!parsed){
+      errors.push(`Satır ${idx+1} ("${line}") okunamadı, atlandı.`);
+      return;
+    }
+    const err = validateRows(parsed.width, parsed.height, cfg.rows);
+    if(err){
+      errors.push(`Satır ${idx+1} ("${line}"): ${err}`);
+      return;
+    }
+    const gcode = buildGcode(parsed.width, parsed.height, cfg);
+    let fname = `${parsed.width}-${parsed.height}`;
+    if(usedNames[fname] !== undefined){
+      usedNames[fname]++;
+      fname = `${fname}_${usedNames[fname]}`;
+    } else {
+      usedNames[fname] = 0;
+    }
+    zip.file(`${fname}.nc`, gcode);
+    okCount++;
+  });
+
+  if(okCount === 0){
+    showError('Hiçbir satır üretilemedi.\n' + errors.join('\n'));
+    return;
+  }
+
+  const content = await zip.generateAsync({type:'blob'});
+  const url = URL.createObjectURL(content);
+  const a = document.createElement('a');
+  a.href = url;
+  const presetPart = activePresetName ? activePresetName.replace(/[^a-zA-Z0-9_-]/g,'_') + '_' : '';
+  a.download = `${presetPart}gcode_batch.zip`;
+  a.click();
+  URL.revokeObjectURL(url);
+
+  let msg = `${okCount} dosya üretildi ve zip indirildi.`;
+  if(errors.length > 0){
+    msg += `\n\n${errors.length} satır atlandı:\n` + errors.join('\n');
+  }
+  showOk(msg);
+}
+
+
+
+// ---------- Nesting ----------
+let nestPartId = 1;
+let lastNestingResult = null;
+
+function addNestPart(part){
+  part = part || {name:'Parça ' + nestPartId, width:'', height:'', qty:1, lockRotation:false};
+  const id = 'np' + (nestPartId++);
+  const tbody = document.getElementById('nestPartsBody');
+  const tr = document.createElement('tr');
+  tr.dataset.partid = id;
+  tr.innerHTML = `
+    <td><input class="part-name" data-field="name" type="text" value="${escapeHtml(part.name || '')}" placeholder="Kapak"></td>
+    <td><input class="num" data-field="width" type="number" min="1" step="1" value="${part.width || ''}" placeholder="500"></td>
+    <td><input class="num" data-field="height" type="number" min="1" step="1" value="${part.height || ''}" placeholder="500"></td>
+    <td><input class="qty" data-field="qty" type="number" min="1" step="1" value="${part.qty || 1}"></td>
+    <td class="lock-cell"><input data-field="lockRotation" type="checkbox" title="Döndürmeyi engelle" ${part.lockRotation ? 'checked' : ''}></td>
+    <td><button type="button" class="remove-part" title="Parçayı sil" onclick="removeNestPart('${id}')">×</button></td>
+  `;
+  tbody.appendChild(tr);
+}
+
+
+function removeNestPart(id){
+  const tr = document.querySelector(`#nestPartsBody tr[data-partid="${id}"]`);
+  if(tr) tr.remove();
+}
+
+function importNestFile(input){
+  const file = input.files && input.files[0];
+  if(!file) return;
+
+  const isCsv = /\.csv$/i.test(file.name);
+  const reader = new FileReader();
+
+  reader.onload = function(){
+    const text = String(reader.result || '');
+    const lines = text.split(/\r?\n/);
+
+    let added = 0;
+    const errors = [];
+
+    lines.forEach((raw, index)=>{
+      const line = raw.trim();
+      if(!line || line.startsWith('#')) return;
+
+      // CSV: isim,genislik,yukseklik,adet  OR  genislik,yukseklik,adet  OR  genislik,yukseklik
+      if(isCsv || line.includes(',') || line.includes(';')){
+        const cells = line.split(/[,;]/).map(c=>c.trim()).filter(c=>c.length>0);
+        const nums = cells.map(c=>parseFloat(c.replace(',','.')));
+        const numericCells = cells.filter((c,i)=>isFinite(nums[i]));
+
+        // Skip an obvious header row (fewer than 2 numeric cells)
+        if(numericCells.length < 2){
+          if(index>0 || !/genişlik|width|yükseklik|height|isim|ad/i.test(line)) errors.push(index+1);
+          return;
+        }
+
+        let name, width, height, qty=1;
+        if(cells.length >= 4 && !isFinite(parseFloat(cells[0].replace(',','.')))){
+          name = cells[0];
+          width = parseFloat(cells[1].replace(',','.'));
+          height = parseFloat(cells[2].replace(',','.'));
+          qty = parseInt(cells[3],10) || 1;
+        }else if(cells.length >= 3){
+          width = parseFloat(cells[0].replace(',','.'));
+          height = parseFloat(cells[1].replace(',','.'));
+          qty = parseInt(cells[2],10) || 1;
+          name = `${width}×${height}`;
+        }else{
+          width = parseFloat(cells[0].replace(',','.'));
+          height = parseFloat(cells[1].replace(',','.'));
+          name = `${width}×${height}`;
+        }
+
+        if(!isFinite(width) || !isFinite(height) || width<=0 || height<=0 || qty<=0){
+          errors.push(index+1);
+          return;
+        }
+        addNestPart({name, width, height, qty});
+        added++;
+        return;
+      }
+
+      // Legacy TXT: 500-454-2  => 500 mm x 454 mm, 2 adet
+      const match = line.match(/^(\d+(?:[.,]\d+)?)\s*-\s*(\d+(?:[.,]\d+)?)\s*-\s*(\d+)$/);
+
+      if(!match){
+        errors.push(index + 1);
+        return;
+      }
+
+      const width = parseFloat(match[1].replace(',', '.'));
+      const height = parseFloat(match[2].replace(',', '.'));
+      const qty = parseInt(match[3], 10);
+
+      if(width <= 0 || height <= 0 || qty <= 0){
+        errors.push(index + 1);
+        return;
+      }
+
+      addNestPart({
+        name: `${width}×${height}`,
+        width,
+        height,
+        qty
+      });
+      added++;
+    });
+
+    input.value = '';
+
+    if(added && errors.length){
+      alert(`${added} satır içe aktarıldı. Geçersiz satırlar: ${errors.join(', ')}`);
+    }else if(!added && errors.length){
+      alert('Geçerli ölçü bulunamadı. TXT örnek: 500-454-2  •  CSV örnek: isim,genişlik,yükseklik,adet');
+    }else if(added){
+      showOk(`${added} ölçü satırı içe aktarıldı.`);
+    }
+  };
+
+  reader.onerror = function(){
+    alert('Dosya okunamadı.');
+    input.value = '';
+  };
+
+  reader.readAsText(file, 'UTF-8');
+}
+
+
+function getNestParts(){
+  const rows = [...document.querySelectorAll('#nestPartsBody tr')];
+  const parts = [];
+  rows.forEach((tr, idx)=>{
+    const name = tr.querySelector('[data-field="name"]').value.trim() || `Parça ${idx+1}`;
+    const width = parseFloat(tr.querySelector('[data-field="width"]').value);
+    const height = parseFloat(tr.querySelector('[data-field="height"]').value);
+    const qty = Math.max(1, parseInt(tr.querySelector('[data-field="qty"]').value,10) || 1);
+    const lockRotation = tr.querySelector('[data-field="lockRotation"]').checked;
+    if(isFinite(width) && isFinite(height) && width > 0 && height > 0){
+      for(let q=1;q<=qty;q++){
+        parts.push({name, width, height, itemNo:q, originalIndex:idx, lockRotation});
+      }
+    }
+  });
+  return parts;
+}
+
+// Simple deterministic shelf/row nesting.
+// It is intentionally conservative: parts never overlap and each new plate is created automatically.
+// ---------- MaxRects bin packing ----------
+// Best-Area-Fit MaxRects: significantly denser than simple shelf packing,
+// especially with mixed part sizes. Free-rectangle list is kept per plate.
+function rectsIntersect(a,b){
+  return a.x < b.x+b.w-1e-9 && a.x+a.w > b.x+1e-9 && a.y < b.y+b.h-1e-9 && a.y+a.h > b.y+1e-9;
+}
+function rectContains(a,b){
+  return a.x<=b.x+1e-9 && a.y<=b.y+1e-9 && a.x+a.w>=b.x+b.w-1e-9 && a.y+a.h>=b.y+b.h-1e-9;
+}
+function pruneContainedRects(rects){
+  const out = [];
+  for(let i=0;i<rects.length;i++){
+    let contained = false;
+    for(let j=0;j<rects.length;j++){
+      if(i===j) continue;
+      if(rectContains(rects[j], rects[i])){ contained = true; break; }
+    }
+    if(!contained) out.push(rects[i]);
+  }
+  return out.filter(r=>r.w>1e-6 && r.h>1e-6);
+}
+
+function tryPackPlateMaxRects(plate, part, gap, rotate){
+  const orientations = [{w:part.width, h:part.height, rotated:false}];
+  if(rotate && !part.lockRotation && part.width !== part.height){
+    orientations.push({w:part.height, h:part.width, rotated:true});
+  }
+
+  let best = null;
+  plate.freeRects.forEach(fr=>{
+    orientations.forEach(o=>{
+      const pw = o.w+gap, ph = o.h+gap;
+      if(pw <= fr.w+1e-9 && ph <= fr.h+1e-9){
+        const leftoverW = fr.w-pw, leftoverH = fr.h-ph;
+        const shortSideFit = Math.min(leftoverW, leftoverH);
+        const areaFit = fr.w*fr.h - pw*ph;
+        if(!best || areaFit < best.areaFit-1e-9 || (Math.abs(areaFit-best.areaFit)<1e-9 && shortSideFit < best.shortSideFit)){
+          best = {x:fr.x, y:fr.y, w:o.w, h:o.h, rotated:o.rotated, areaFit, shortSideFit};
+        }
+      }
+    });
+  });
+  if(!best) return false;
+
+  const footprint = {x:best.x, y:best.y, w:best.w+gap, h:best.h+gap};
+  const newFree = [];
+  plate.freeRects.forEach(fr=>{
+    if(!rectsIntersect(fr, footprint)){ newFree.push(fr); return; }
+    if(footprint.x > fr.x) newFree.push({x:fr.x, y:fr.y, w:footprint.x-fr.x, h:fr.h});
+    if(footprint.x+footprint.w < fr.x+fr.w) newFree.push({x:footprint.x+footprint.w, y:fr.y, w:(fr.x+fr.w)-(footprint.x+footprint.w), h:fr.h});
+    if(footprint.y > fr.y) newFree.push({x:fr.x, y:fr.y, w:fr.w, h:footprint.y-fr.y});
+    if(footprint.y+footprint.h < fr.y+fr.h) newFree.push({x:fr.x, y:footprint.y+footprint.h, w:fr.w, h:(fr.y+fr.h)-(footprint.y+footprint.h)});
+  });
+  plate.freeRects = pruneContainedRects(newFree);
+
+  plate.parts.push({...part, x:best.x, y:best.y, placedWidth:best.w, placedHeight:best.h, rotated:best.rotated});
+  return true;
+}
+
+// Greedy nearest-neighbor visiting order to reduce total rapid-travel distance
+// between parts when the same tool is cutting all of them in sequence.
+function orderPartsByProximity(parts){
+  if(parts.length <= 2) return parts.slice();
+  const remaining = parts.slice();
+  const ordered = [];
+  let cx = 0, cy = 0;
+  while(remaining.length){
+    let bestIdx = 0, bestDist = Infinity;
+    for(let i=0;i<remaining.length;i++){
+      const p = remaining[i];
+      const px = p.x + p.placedWidth/2, py = p.y + p.placedHeight/2;
+      const d = (px-cx)*(px-cx) + (py-cy)*(py-cy);
+      if(d < bestDist){ bestDist = d; bestIdx = i; }
+    }
+    const chosen = remaining.splice(bestIdx,1)[0];
+    ordered.push(chosen);
+    cx = chosen.x + chosen.placedWidth/2;
+    cy = chosen.y + chosen.placedHeight/2;
+  }
+  return ordered;
+}
+
+function calculateNesting(){
+  hideMessages();
+
+  const plateW = parseFloat(document.getElementById('plateWidth').value);
+  const plateH = parseFloat(document.getElementById('plateHeight').value);
+  const edge = Math.max(0, parseFloat(document.getElementById('edgeMargin').value) || 0);
+  const gap = Math.max(0, parseFloat(document.getElementById('partGap').value) || 0);
+  const rotate = document.getElementById('allowRotate').checked;
+  const parts = getNestParts();
+
+  if(!isFinite(plateW) || !isFinite(plateH) || plateW <= 0 || plateH <= 0){
+    showError('Geçerli bir plaka ölçüsü gir.');
+    return;
+  }
+  if(edge * 2 >= plateW || edge * 2 >= plateH){
+    showError('Dış kenar boşluğu plakayı kullanılmaz hale getiriyor.');
+    return;
+  }
+  if(parts.length === 0){
+    showError('En az bir geçerli parça ekle.');
+    return;
+  }
+
+  // Largest-first gives a better practical result than input order.
+  parts.sort((a,b)=> (b.width*b.height) - (a.width*a.height));
+
+  const usableW = plateW - edge*2;
+  const usableH = plateH - edge*2;
+  const plates = [];
+
+  function newPlate(){
+    return {number:plates.length+1, width:plateW, height:plateH, parts:[], freeRects:[{x:edge, y:edge, w:usableW, h:usableH}]};
+  }
+
+  for(const part of parts){
+    let placed = false;
+    for(const plate of plates){
+      if(tryPackPlateMaxRects(plate, part, gap, rotate)){
+        placed = true;
+        break;
+      }
+    }
+    if(!placed){
+      const plate = newPlate();
+      if(!tryPackPlateMaxRects(plate, part, gap, rotate)){
+        const canNormal = part.width <= usableW && part.height <= usableH;
+        const canRotated = rotate && !part.lockRotation && part.height <= usableW && part.width <= usableH;
+        showError(`${part.name} (${part.width}×${part.height}) tek başına bile plakanın kullanılabilir alanına sığmıyor.` +
+          ((!canNormal && !canRotated) ? '' : ' Yerleşim algoritması bu parçayı yerleştiremedi.'));
+        return;
+      }
+      plates.push(plate);
+    }
+  }
+
+  // Reorder each plate's part list by proximity so both the ZIP g-code and the
+  // toolpath preview follow a shorter travel path instead of insertion order.
+  plates.forEach(p=>{
+    p.parts = orderPartsByProximity(p.parts);
+    delete p.freeRects;
+  });
+
+  lastNestingResult = {plateW, plateH, edge, gap, plates};
+  drawNestingPreview(lastNestingResult);
+  updateNestingStats(lastNestingResult);
+
+  const cfg = readFormConfig();
+  const toolErr = cfg.rows.length ? null : 'En az bir bıçak tanımla.';
+  if(toolErr){
+    document.getElementById('nestDownloadBtn').disabled = false;
+    showError('Nesting hesaplandı fakat CNC dosyası üretmek için Ayarlar → Bıçaklar bölümünden en az bir bıçak tanımlamalısın.');
+    return;
+  }
+
+  const toolValidate = plates.some(p=>p.parts.some(part=>{
+    return !!validateRows(part.placedWidth, part.placedHeight, cfg.rows);
+  }));
+  document.getElementById('nestDownloadBtn').disabled = false;
+  if(toolValidate){
+    showError('Nesting hesaplandı fakat bazı parçalar için bıçak ayarları geçersiz.');
+    return;
+  }
+
+  updateEstimatedTime(lastNestingResult, cfg);
+  showOk(`${plates.length} plaka bulundu. Sonuçtan memnunsan "CNC Dosyalarını İndir" butonuna bas.`);
+}
+
+async function downloadNestingFiles(){
+  hideMessages();
+  if(!lastNestingResult){
+    showError('Önce "Nesting Hesapla" ile bir sonuç üret.');
+    return;
+  }
+  const cfg = readFormConfig();
+  if(!cfg.rows.length){
+    showError('CNC dosyası üretmek için Ayarlar → Bıçaklar bölümünden en az bir bıçak tanımlamalısın.');
+    return;
+  }
+  const toolValidate = lastNestingResult.plates.some(p=>p.parts.some(part=>{
+    return !!validateRows(part.placedWidth, part.placedHeight, cfg.rows);
+  }));
+  if(toolValidate){
+    showError('Bazı parçalar için bıçak ayarları geçersiz. Ayarlar → Bıçaklar bölümünü kontrol et.');
+    return;
+  }
+  updateEstimatedTime(lastNestingResult, cfg);
+  await generateNestingFiles(lastNestingResult, cfg);
+}
+
+async function generateNestingFiles(result, cfg){
+  if(typeof JSZip === 'undefined'){
+    showError('ZIP kütüphanesi yüklenemedi. İnternet bağlantısını kontrol et.');
+    return;
+  }
+
+  const zip = new JSZip();
+
+  const cums = computeCumOffsets(cfg.rows);
+
+  result.plates.forEach((plate)=>{
+    const lines = ['makro'];
+
+    // IMPORTANT: tool-first ordering.
+    // Every part on the plate is processed with the same tool before changing tools.
+    let prevToolNo = null;
+    cfg.rows.forEach((r, rowIdx)=>{
+      const cum = cums[rowIdx];
+      const z = +(cfg.thickness - r.depth).toFixed(3);
+
+      const sameToolAsPrev = String(r.toolNo) === String(prevToolNo);
+      if(!sameToolAsPrev){
+        lines.push(`M6T${r.toolNo}`);
+      }
+      lines.push(`M3 S${cfg.spindleSpeed}`);
+
+      plate.parts.forEach((part)=>{
+        const x1 = part.x + cum;
+        const y1 = part.y + cum;
+        const x2 = part.x + part.placedWidth - cum;
+        const y2 = part.y + part.placedHeight - cum;
+
+        lines.push(`G0 X${fmt(x1)} Y${fmt(y1)} Z${fmt(cfg.safeZ)}`);
+        lines.push(`G1   Z${fmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
+        lines.push(`G1 X${fmt(x2)}   F${cfg.cutFeed.toFixed(1)}`);
+        lines.push(` Y${fmt(y2)} `);
+        lines.push(`X${fmt(x1)}  `);
+        lines.push(` Y${fmt(y1)} `);
+        lines.push(`G0   Z${fmt(cfg.safeZ)}`);
+      });
+
+      lines.push(`G0Z${fmt(cfg.toolChangeZ)}`);
+      lines.push('M5');
+      prevToolNo = r.toolNo;
+    });
+
+    lines.push(`G0 Z${fmt(cfg.homeZ)}`);
+    lines.push(`G0 X0.00 Y0.00`);
+    lines.push('M5');
+    lines.push('M16');
+    lines.push('M30');
+
+    zip.file(`plaka_${plate.number}.nc`, lines.join('\n'));
+  });
+
+  const content = await zip.generateAsync({type:'blob'});
+  const url = URL.createObjectURL(content);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `nesting_${result.plates.length}_plaka.zip`;
+  a.click();
+  URL.revokeObjectURL(url);
+
+  showOk(`${result.plates.length} plaka için ${result.plates.length} ayrı CNC dosyası oluşturuldu ve ZIP indirildi. Aynı bıçak, her plakada tüm parçaları işledikten sonra değişiyor.`);
+}
+
+function drawNestingPreview(result){
+  lastNestingResult = result;
+  const select = document.getElementById('nestPlateSelect');
+  select.innerHTML = '';
+  result.plates.forEach((p, i)=>{
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = `Plaka ${p.number}`;
+    select.appendChild(opt);
+  });
+  select.style.display = result.plates.length > 1 ? 'block' : 'none';
+  select.value = '0';
+  document.getElementById('nestPngBtn').style.display = 'inline-block';
+  drawSelectedNestingPlate();
+}
+
+// Stable color per part name so identical parts always share the same color,
+// instead of a color that depends on placement order.
+function hashHue(str){
+  let h = 0;
+  for(let i=0;i<str.length;i++){
+    h = (h*31 + str.charCodeAt(i)) & 0xffffffff;
+  }
+  return Math.abs(h) % 360;
+}
+
+// Snap a rect to the pixel grid so 1px strokes render as a single crisp
+// line instead of a blurred 2px band across anti-aliased sub-pixel edges.
+function crispRect(x,y,w,h){
+  const x1 = Math.round(x), y1 = Math.round(y);
+  const x2 = Math.round(x+w), y2 = Math.round(y+h);
+  return {x:x1+0.5, y:y1+0.5, w:Math.max(1,x2-x1-1), h:Math.max(1,y2-y1-1)};
+}
+
+function drawSelectedNestingPlate(){
+  if(!lastNestingResult) return;
+
+  const result = lastNestingResult;
+  const select = document.getElementById('nestPlateSelect');
+  const index = Math.max(0, parseInt(select.value,10) || 0);
+  const plate = result.plates[index];
+
+  const canvas = document.getElementById('nestCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Render at a high internal resolution (independent of the on-screen box
+  // size, which CSS scales via max-width:100%) so lines stay crisp and
+  // real gaps between parts are still visible when the PNG is zoomed in.
+  const maxW = 2700, maxH = 1350;
+  const scale = Math.min(maxW/result.plateW, maxH/result.plateH);
+  canvas.width = Math.max(900, Math.round(result.plateW*scale));
+  canvas.height = Math.max(660, Math.round(result.plateH*scale));
+
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle = '#171a21';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  ctx.strokeStyle = '#4f8cff';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(1,1,canvas.width-2,canvas.height-2);
+
+  plate.parts.forEach((part, idx)=>{
+    const x = part.x*scale, y = part.y*scale;
+    const w = part.placedWidth*scale, h = part.placedHeight*scale;
+    const r = crispRect(x,y,w,h);
+
+    ctx.strokeStyle = `hsl(${hashHue(part.name)} 70% 62%)`;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(r.x, r.y, r.w, r.h);
+
+    ctx.fillStyle = '#e6e8ec';
+    ctx.font = `${Math.max(9,Math.min(14,Math.min(w,h)/7))}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    const label = `${idx+1}. ${part.name}${part.rotated ? ' ↻' : ''}`;
+    ctx.fillText(label, x+w/2, y+h/2);
+  });
+
+  const legend = document.getElementById('toolpathLegend');
+  const showPaths = document.getElementById('showToolpaths').checked;
+
+  if(showPaths){
+    const cfg = readFormConfig();
+    if(cfg.rows.length){
+      const cums = computeCumOffsets(cfg.rows);
+      const toolColors = cfg.rows.map((r,i)=> `hsl(${(i*67)%360} 90% 62%)`);
+
+      cfg.rows.forEach((r, rowIdx)=>{
+        const cum = cums[rowIdx];
+        ctx.strokeStyle = toolColors[rowIdx];
+        ctx.lineWidth = 1;
+        ctx.setLineDash(cum < 0 ? [4,3] : []);
+        plate.parts.forEach(part=>{
+          const x1 = (part.x+cum)*scale, y1 = (part.y+cum)*scale;
+          const w2 = (part.placedWidth-2*cum)*scale, h2 = (part.placedHeight-2*cum)*scale;
+          const cr = crispRect(x1, y1, w2, h2);
+          ctx.strokeRect(cr.x, cr.y, cr.w, cr.h);
+        });
+      });
+      ctx.setLineDash([]);
+
+      legend.style.display = 'block';
+      legend.innerHTML = 'Kesim yolları: ' + cfg.rows.map((r,i)=>
+        `<span class="legend-chip"><span class="legend-dot" style="background:${toolColors[i]}"></span>T${r.toolNo} ${escapeHtml(r.name||'')}${cums[i]<0 ? ' (kesikli = dışarıda)' : ''}</span>`
+      ).join('');
+    }else{
+      legend.style.display = 'none';
+    }
+  }else{
+    legend.style.display = 'none';
+  }
+
+  document.getElementById('nestPreviewLabel').textContent =
+    `Önizleme: Plaka ${plate.number} / ${result.plates.length} — ${result.plateW} × ${result.plateH} mm — sıra: gezinme mesafesine göre optimize`;
+}
+
+function exportNestingPNG(){
+  const canvas = document.getElementById('nestCanvas');
+  canvas.toBlob(blob=>{
+    if(!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const select = document.getElementById('nestPlateSelect');
+    const idx = Math.max(0, parseInt(select.value,10) || 0);
+    const plateNum = lastNestingResult ? lastNestingResult.plates[idx].number : 1;
+    a.download = `nesting_plaka_${plateNum}.png`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, 'image/png');
+}
+
+function updateNestingStats(result){
+  const totalArea = result.plateW * result.plateH * result.plates.length;
+  const usedArea = result.plates.reduce((sum,p)=>
+    sum + p.parts.reduce((s,part)=>s + part.placedWidth*part.placedHeight,0),0);
+  const pct = totalArea ? (usedArea/totalArea*100) : 0;
+  const wasteM2 = Math.max(0,totalArea-usedArea)/1000000;
+
+  document.getElementById('nestPlateCount').textContent = result.plates.length;
+  document.getElementById('nestPartCount').textContent = result.plates.reduce((s,p)=>s+p.parts.length,0);
+  document.getElementById('nestAreaUsed').textContent = pct.toFixed(1) + '%';
+  document.getElementById('nestWaste').textContent = wasteM2.toFixed(2);
+}
+
+// Rough machining-time estimate: cut length / feed + plunge time + a fixed
+// per-toolchange allowance. Rapid moves use an assumed 15 m/min rapid speed
+// since actual rapid feed isn't part of the machine settings.
+const ASSUMED_RAPID_MM_MIN = 15000;
+const TOOLCHANGE_SECONDS = 6;
+
+function updateEstimatedTime(result, cfg){
+  const cums = computeCumOffsets(cfg.rows);
+  let cutLenMm = 0, plungeCount = 0, rapidMm = 0, toolChanges = 0;
+
+  result.plates.forEach(plate=>{
+    let cx = 0, cy = 0;
+    cfg.rows.forEach((r, rowIdx)=>{
+      toolChanges++;
+      const cum = cums[rowIdx];
+      plate.parts.forEach(part=>{
+        const x1 = part.x+cum, y1 = part.y+cum;
+        const x2 = part.x+part.placedWidth-cum, y2 = part.y+part.placedHeight-cum;
+        rapidMm += Math.hypot(x1-cx, y1-cy);
+        cutLenMm += 2*(Math.abs(x2-x1) + Math.abs(y2-y1));
+        plungeCount++;
+        cx = x1; cy = y1;
+      });
+    });
+  });
+
+  const cutMinTotal = cfg.rows.reduce((sum,r,rowIdx)=>{
+    const rowsCutLen = result.plates.reduce((s,plate)=>
+      s + plate.parts.reduce((s2,part)=>{
+        const cum = cums[rowIdx];
+        const w2 = Math.abs(part.placedWidth-2*cum), h2 = Math.abs(part.placedHeight-2*cum);
+        return s2 + 2*(w2+h2);
+      },0),0);
+    return sum + rowsCutLen / Math.max(1, cfg.cutFeed);
+  },0);
+
+  const plungeMinTotal = cfg.rows.reduce((sum,r)=>{
+    const count = result.plates.reduce((s,plate)=>s+plate.parts.length,0);
+    return sum + (count * r.depth) / Math.max(1, cfg.plungeFeed);
+  },0);
+
+  const rapidMinTotal = rapidMm / ASSUMED_RAPID_MM_MIN;
+  const toolChangeMinTotal = (toolChanges * TOOLCHANGE_SECONDS) / 60;
+
+  const totalMin = cutMinTotal + plungeMinTotal + rapidMinTotal + toolChangeMinTotal;
+  document.getElementById('nestTime').textContent = totalMin.toFixed(1);
+  return totalMin;
+}
+
+function escapeHtml(str){
+  return String(str).replace(/[&<>"']/g, s=>({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'
+  }[s]));
+}
+
+
+// ---------- UI ----------
+function togglePanel(which){
+  const panel = document.getElementById(which === 'settings' ? 'settingsPanel' : 'toolsPanel');
+  const other = document.getElementById(which === 'settings' ? 'toolsPanel' : 'settingsPanel');
+  const backdrop = document.getElementById('modalBackdrop');
+
+  const willOpen = !panel.classList.contains('open');
+  other.classList.remove('open');
+  panel.classList.toggle('open', willOpen);
+  backdrop.classList.toggle('open', willOpen);
+
+  document.body.style.overflow = willOpen ? 'hidden' : '';
+}
+
+function closePanels(){
+  document.getElementById('settingsPanel').classList.remove('open');
+  document.getElementById('toolsPanel').classList.remove('open');
+  document.getElementById('modalBackdrop').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Escape') closePanels();
+  if(e.ctrlKey && e.key === 'Enter'){
+    e.preventDefault();
+    if(document.getElementById('tabSingle').classList.contains('active')) generateSingle();
+    else if(document.getElementById('tabBatch').classList.contains('active')) generateBatch();
+    else if(document.getElementById('tabNesting').classList.contains('active')) calculateNesting();
+    else if(document.getElementById('tabCircle').classList.contains('active')) generateCircle();
+    else if(document.getElementById('tabDerz').classList.contains('active')) generateDerz();
+  }
+})
+function updateSingleSummary(){
+  const w = document.getElementById('width').value;
+  const h = document.getElementById('height').value;
+  document.getElementById('singleSummary').textContent = `${w || 0} × ${h || 0} mm`;
+}
+document.getElementById('width').addEventListener('input', ()=>{ updateSingleSummary(); recalcAll(); });
+document.getElementById('height').addEventListener('input', ()=>{ updateSingleSummary(); recalcAll(); });
+updateSingleSummary();
+
+// ---------- Preset file compatibility ----------
+if(!window.showOpenFilePicker){
+  const status = document.getElementById('presetFileStatus');
+  if(status){
+    status.textContent = 'Tarayıcı desteklemiyor';
+    status.style.color = 'var(--danger)';
+  }
+}
+
+
+// ---------- Nesting defaults ----------
+addNestPart({name:'Kapak', width:500, height:500, qty:1});
+// ---------- init ----------
+addToolRow({name:'30mm yuvarlama', toolNo:7, depth:2.5, stepOffset:52});
+addToolRow({name:'10mm balmumu', toolNo:2, depth:2, stepOffset:16});
+addToolRow({name:'20mm tabla bıçağı', toolNo:9, depth:5.5, stepOffset:9});
+addToolRow({name:'20mm tabla bıçağı', toolNo:9, depth:5.5, stepOffset:8});
+addToolRow({name:'135° bıçak', toolNo:12, depth:5.5, stepOffset:5});
+renderPresetChips();
+updatePresetFileStatus();
+updateOffsetModeUI();
+updateCircleSummary();
+updatePanjurOffsetUI();
+updatePanjurSummary();
+
+
+// ==================== PANJUR MODÜLÜ ====================
+function panjurShowError(msg){
+  const e=document.getElementById('panjurErrBox'); e.textContent=msg; e.style.display='block';
+  document.getElementById('panjurOkBox').style.display='none';
+}
+function panjurShowOk(msg){
+  const o=document.getElementById('panjurOkBox'); o.textContent=msg; o.style.display='block';
+  document.getElementById('panjurErrBox').style.display='none';
+}
+function panjurHideMessages(){
+  document.getElementById('panjurErrBox').style.display='none'; document.getElementById('panjurOkBox').style.display='none';
+}
+function updatePanjurGroundUI(){
+  const on=document.getElementById('panjurGroundEntry').checked;
+  document.getElementById('panjurGroundOptions').style.display=on?'grid':'none';
+}
+function updatePanjurOffsetUI(){
+  const detailed=document.getElementById('panjurOffsetMode').value==='detailed';
+  document.getElementById('panjurNormalOffsetWrap').style.display=detailed?'none':'grid';
+  document.getElementById('panjurDetailedOffsetWrap').style.display=detailed?'block':'none';
+  updatePanjurSummary();
+}
+function readPanjurConfig(){
+  const detailed=document.getElementById('panjurOffsetMode').value==='detailed';
+  const normalOffset=parseFloat(document.getElementById('panjurOffset').value);
+  return {
+    width:parseFloat(document.getElementById('panjurWidth').value), height:parseFloat(document.getElementById('panjurHeight').value),
+    offset:normalOffset, offsetMode:detailed?'detailed':'normal',
+    offsetLeft:detailed?parseFloat(document.getElementById('panjurOffsetLeft').value):normalOffset,
+    offsetRight:detailed?parseFloat(document.getElementById('panjurOffsetRight').value):normalOffset,
+    offsetBottom:detailed?parseFloat(document.getElementById('panjurOffsetBottom').value):normalOffset,
+    offsetTop:detailed?parseFloat(document.getElementById('panjurOffsetTop').value):normalOffset,
+    centerFlat:detailed?parseFloat(document.getElementById('panjurCenterFlat').value):0,
+    direction:document.getElementById('panjurDirection').value,
+    pitch:parseFloat(document.getElementById('panjurPitch').value), exitGap:parseFloat(document.getElementById('panjurExitGap').value),
+    stepover:parseFloat(document.getElementById('panjurStepover').value), startZ:parseFloat(document.getElementById('panjurStartZ').value),
+    endZ:parseFloat(document.getElementById('panjurEndZ').value), feed:parseFloat(document.getElementById('panjurFeed').value),
+    plunge:parseFloat(document.getElementById('panjurPlunge').value), toolNo:document.getElementById('panjurToolNo').value,
+    spindle:parseFloat(document.getElementById('panjurSpindle').value), groundEntry:document.getElementById('panjurGroundEntry').checked,
+    exitCut:parseFloat(document.getElementById('panjurExitCut').value), t4Z:parseFloat(document.getElementById('panjurT4Z').value),
+    drillTool:document.getElementById('panjurDrillTool').value, drillSpindle:parseFloat(document.getElementById('panjurDrillSpindle').value),
+    exitToolDia:parseFloat(document.getElementById('panjurExitToolDia').value),
+    t14TipDia:parseFloat(document.getElementById('panjurT14TipDia').value),
+    t14BodyDia:parseFloat(document.getElementById('panjurT14BodyDia').value),
+    t14Height:parseFloat(document.getElementById('panjurT14Height').value),
+    safeZ:parseFloat(document.getElementById('safeZ').value)||30, toolChangeZ:parseFloat(document.getElementById('toolChangeZ').value)||30, homeZ:parseFloat(document.getElementById('homeZ').value)||30
+  };
+}
+function panjurGroups(c){
+  const crossSpan=c.direction==='y'?c.width:c.height;
+  const alongSpan=c.direction==='y'?c.height:c.width;
+  const crossStart=c.direction==='y'?c.offsetLeft:c.offsetBottom;
+  const crossEnd=c.direction==='y'?c.width-c.offsetRight:c.height-c.offsetTop;
+  const alongStart=c.direction==='y'?c.offsetBottom:c.offsetLeft;
+  const alongEnd=c.direction==='y'?c.height-c.offsetTop:c.width-c.offsetRight;
+  const usableAlong=alongEnd-alongStart;
+  if(crossStart<0||crossEnd<=crossStart) throw new Error('Sağ/sol veya alt/üst offsetler kullanılabilir enine alan bırakmıyor.');
+  if(usableAlong<=0) throw new Error('Alt/üst veya sol/sağ offsetler kullanılabilir boy bırakmıyor.');
+  if(c.pitch<=0) throw new Error('Panjur kademesi 0’dan büyük olmalı.');
+  if(c.exitGap<0) throw new Error('Rölyef çıkış payı negatif olamaz.');
+  if(c.pitch<=c.exitGap) throw new Error('Panjur kademesi, çıkış payından büyük olmalı.');
+
+  const flat=Math.max(0,c.centerFlat||0);
+  if(flat>=usableAlong) throw new Error('Ortadaki düz alan kullanılabilir boydan küçük olmalı.');
+  const available=usableAlong-flat;
+  const groups=[];
+
+  // Kademeyi hedef olarak kullanıyoruz. Önce bu alana en yakın tam panjur
+  // sayısını buluyor, ardından kalan alanı panjur boyuna dağıtıp bölgeyi
+  // tam dolduruyoruz. Böylece offsetler birebir korunuyor ve ayrıca
+  // kullanıcıdan ayrı bir “panjur uzunluğu” girmesi gerekmiyor.
+  const makeFromStart=(start,limit,side)=>{
+    const gap=c.exitGap;
+    const rawCount=(limit+gap)/c.pitch;
+    const count=Math.max(1,Math.round(rawCount));
+    const length=(limit-(count-1)*gap)/count;
+    if(length<=0) throw new Error('Seçilen panjur kademesi bu alana sığmıyor.');
+
+    let pos=start;
+    for(let i=0;i<count;i++){
+      const end=pos+length;
+      groups.push({start:pos,end,side});
+      pos=end+(i<count-1?gap:0);
+    }
+  };
+
+  if(flat>0){
+    const lowerSpan=available/2;
+    const upperSpan=available-lowerSpan;
+    makeFromStart(alongStart,lowerSpan,'start');
+    const upperStart=alongStart+lowerSpan+flat;
+    makeFromStart(upperStart,upperSpan,'end');
+  }else{
+    makeFromStart(alongStart,usableAlong,'single');
+  }
+
+  groups.sort((a,b)=>a.start-b.start);
+  const actualLengths=[...new Set(groups.map(g=>Number((g.end-g.start).toFixed(6))))];
+  const actualLength=actualLengths.length===1?actualLengths[0]:Math.min(...actualLengths);
+  const actualPitch=actualLength+c.exitGap;
+  return {crossSpan,alongSpan,crossStart,crossEnd,alongStart,alongEnd,usableAlong,centerFlat:flat,groups,actualLength,actualPitch};
+}
+
+function updatePanjurSummary(){
+  const el=document.getElementById('panjurSummary'); if(!el)return;
+  try{
+    const c=readPanjurConfig(), g=panjurGroups(c);
+    const w=g.crossEnd-g.crossStart, h=g.alongEnd-g.alongStart;
+    const flat=g.centerFlat>0?` — ortada ${g.centerFlat.toFixed(1)} mm düz alan`:'';
+    const lengths=[...new Set(g.groups.map(x=>Number((x.end-x.start).toFixed(3))))];
+    const lenText=lengths.length===1?`${lengths[0].toFixed(3)} mm`:`${lengths.map(v=>v.toFixed(3)).join(' / ')} mm`;
+    el.textContent=`İşleme alanı: ${w.toFixed(1)} × ${h.toFixed(1)} mm — ${g.groups.length} panjur — gerçek boy ${lenText} — hedef kademe ${c.pitch.toFixed(2)} mm — çıkış payı ${c.exitGap.toFixed(2)} mm${flat} — ${c.groundEntry?'zemine giriş + T'+c.drillTool:'zemine giriş kapalı'}.`;
+  }catch(e){el.textContent=e.message;}
+}
+
+function generatePanjur(){
+  panjurHideMessages();
+  try{
+    const c=readPanjurConfig();
+    const nums=[c.width,c.height,c.offset,c.pitch,c.exitGap,c.stepover,c.startZ,c.endZ,c.feed,c.plunge,c.spindle,c.exitCut,c.t4Z,c.drillSpindle,c.exitToolDia,c.t14TipDia,c.t14BodyDia,c.t14Height];
+    if(nums.some(v=>!Number.isFinite(v))) throw new Error('Eksik veya geçersiz bir değer var.');
+    if(c.width<=0||c.height<=0||c.offset<0) throw new Error('Dış ölçüler ve offset geçerli olmalı.');
+    if(c.offsetMode==='normal' && c.offset*2>=Math.min(c.width,c.height)) throw new Error('Offset parçanın kullanılabilir alanını sıfırlıyor.');
+    if([c.offsetLeft,c.offsetRight,c.offsetBottom,c.offsetTop,c.centerFlat].some(v=>v<0 || !Number.isFinite(v))) throw new Error('Ayrıntılı offset veya orta düz alan değeri geçersiz.');
+    if(c.offsetLeft+c.offsetRight>=c.width) throw new Error('Sol + sağ offset toplamı genişliği sıfırlıyor.');
+    if(c.offsetBottom+c.offsetTop>=c.height) throw new Error('Alt + üst offset toplamı yüksekliği sıfırlıyor.');
+    if(c.stepover<=0) throw new Error('Raster adımı 0’dan büyük olmalı.');
+    if(c.endZ>=c.startZ) throw new Error('Son Z, başlangıç Z’den daha düşük olmalı.');
+    if(c.groundEntry && (c.exitCut<=0 || c.t4Z!==0)) throw new Error('Çıkış kesimi 0’dan büyük olmalı ve T4 Z değeri 0 olmalı.');
+    if(c.t14TipDia<=0||c.t14BodyDia<c.t14TipDia||c.t14Height<=0) throw new Error('T14 uç/gövde çapı ve konik yükseklik geçerli olmalı.');
+    if(c.groundEntry && c.exitToolDia<=0) throw new Error('Uç bıçağı çapı 0’dan büyük olmalı.');
+    if(c.groundEntry && c.exitCut<c.exitToolDia) throw new Error('Çıkış kesimi, uç bıçağı çapından küçük olamaz (bıçak alana sığmaz).');
+
+    const g=panjurGroups(c);
+    const lines=['%','O2000','N1 G0 G17 G40 G49 G80 G90 G54'];
+    let n=2;
+    const x0=g.crossStart, x1=g.crossEnd, y0=g.alongStart, y1=g.alongEnd;
+
+    // ---- T14 (konik ballnose) geometrisi ----
+    const r_tip=c.t14TipDia/2, r_body=c.t14BodyDia/2;
+    const taperTan=(r_body-r_tip)/c.t14Height;
+    const maxDepth=c.startZ-c.endZ; 
+    const r_eff=Math.min(r_body, r_tip+maxDepth*taperTan); 
+    const toolRT4=c.exitToolDia/2;
+
+    // =========================================================
+    // 1. AŞAMA: TÜM T14 RÖLYEF TARAMALARI (HEPSİ BİRDEN)
+    // =========================================================
+    lines.push(`N${n++} M6T${c.toolNo}`);
+    lines.push(`N${n++} S${c.spindle} M3`);
+    lines.push(`N${n++} M7`);
+
+    g.groups.forEach((grp, gi)=>{
+      const start=grp.start, end=grp.end;
+      const safeStart=start;
+      const safeEnd=end;
+      const span=safeEnd-safeStart;
+      if(span<=0) throw new Error(`Panjur boyu (${(end-start).toFixed(1)} mm), T14 takımının konik yarıçapı için yetersiz. Daha kısa panjur, daha ince takım veya daha az dalış derinliği gerekli.`);
+
+      const passes=Math.max(2,Math.ceil(span/c.stepover)+1);
+      const step=span/(passes-1);
+
+      if(c.direction==='y'){
+        lines.push(`N${n++} G0 X${fmt(x0)} Y${fmt(safeStart)}`);
+        lines.push(`N${n++} G0 Z${fmt(c.safeZ)}`);
+        lines.push(`N${n++} G0 Z${fmt(c.startZ)}`);
+        for(let i=0;i<passes;i++){
+          const t=i/(passes-1), y=safeStart+i*step;
+          const z=c.startZ+(c.endZ-c.startZ)*t;
+          const x=i%2===0?x1:x0;
+          lines.push(`N${n++} G1 X${fmt(x)} F${c.feed}`);
+          if(i<passes-1){
+            const yn=safeStart+(i+1)*step;
+            const zn=c.startZ+(c.endZ-c.startZ)*((i+1)/(passes-1));
+            lines.push(`N${n++} G1 Y${fmt(yn)}`);
+            lines.push(`N${n++} G1 Z${fmt(zn)}`);
+          }
+        }
+      }else{
+        lines.push(`N${n++} G0 X${fmt(safeStart)} Y${fmt(y0)}`);
+        lines.push(`N${n++} G0 Z${fmt(c.safeZ)}`);
+        lines.push(`N${n++} G0 Z${fmt(c.startZ)}`);
+        for(let i=0;i<passes;i++){
+          const t=i/(passes-1), x=safeStart+i*step;
+          const z=c.startZ+(c.endZ-c.startZ)*t;
+          const y=i%2===0?y1:y0;
+          lines.push(`N${n++} G1 Y${fmt(y)} F${c.feed}`);
+          if(i<passes-1){
+            const xn=safeStart+(i+1)*step;
+            const zn=c.startZ+(c.endZ-c.startZ)*((i+1)/(passes-1));
+            lines.push(`N${n++} G1 X${fmt(xn)}`);
+            lines.push(`N${n++} G1 Z${fmt(zn)}`);
+          }
+        }
+      }
+      lines.push(`N${n++} G0 Z${fmt(c.safeZ)}`);
+    });
+
+    // =========================================================
+    // 2. AŞAMA: TÜM T4 ÇIKIŞ KESİMLERİ (HEPSİ BİRDEN)
+    // =========================================================
+    if(c.groundEntry){
+      lines.push(`N${n++} M5`); // T14'ü durdur
+      lines.push(`N${n++} G0 Z${fmt(c.toolChangeZ)}`); // Takım değiştirme yüksekliğine çık
+      lines.push(`N${n++} M6T${c.drillTool}`); // T4'ü al
+      lines.push(`N${n++} S${c.drillSpindle} M3`);
+      lines.push(`N${n++} M7`);
+
+      g.groups.forEach((grp, gi)=>{
+        const end=grp.end;
+        const targetCenter = end - toolRT4; 
+
+        if(c.direction==='y'){
+          lines.push(`N${n++} G0 X${fmt(x0-toolRT4)} Y${fmt(targetCenter)} Z${fmt(c.safeZ)}`);
+          lines.push(`N${n++} G1 Z0.000 F${c.plunge}`);
+          lines.push(`N${n++} G1 X${fmt(x1+toolRT4)} F${c.feed}`);
+        }else{
+          lines.push(`N${n++} G0 X${fmt(targetCenter)} Y${fmt(y0-toolRT4)} Z${fmt(c.safeZ)}`);
+          lines.push(`N${n++} G1 Z0.000 F${c.plunge}`);
+          lines.push(`N${n++} G1 Y${fmt(y1+toolRT4)} F${c.feed}`);
+        }
+        lines.push(`N${n++} G0 Z${fmt(c.safeZ)}`);
+      });
+      lines.push(`N${n++} M5`); // T4'ü durdur
+    }
+
+    // =========================================================
+    // 3. AŞAMA: GÜVENLİ BİTİŞ
+    // =========================================================
+    lines.push(`N${n++} G0 Z${fmt(c.homeZ)}`);
+    lines.push(`N${n++} G0 X0.00 Y0.00`);
+    lines.push(`N${n++} M9`);
+    lines.push(`N${n++} M16`);
+    lines.push(`N${n++} M30`);
+    lines.push('%');
+
+    document.getElementById('panjurOutput').value=lines.join('\n');
+    const approx=(g.groups.length?Math.abs(g.groups[0].end-g.groups[0].start)/Math.max(1,Math.ceil(Math.abs(g.groups[0].end-g.groups[0].start)/c.stepover)):0);
+    panjurShowOk(`${g.groups.length} panjur grubu üretildi. Raster adımı ~${approx.toFixed(3)} mm.${c.groundEntry?' En son tüm panjurlar için T4 ile '+c.exitCut.toFixed(1)+' mm Z0 çıkışları tek seferde açıldı.':''}`);
+  }catch(e){panjurShowError(e.message);}
+}
+
+// ==================== CAM MODÜLÜ (deneysel) ====================
+
+function camFmt(n){ return Number(n).toFixed(3); }
+
+function copyTextarea(id){
+  const el = document.getElementById(id);
+  el.select();
+  document.execCommand('copy');
+}
+
+function downloadTextarea(id, filename){
+  const text = document.getElementById(id).value;
+  if(!text.trim()) return;
+  const blob = new Blob([text], {type:'text/plain'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function camShowError(msg){
+  const e = document.getElementById('camErrBox');
+  e.textContent = msg; e.style.display = 'block';
+  document.getElementById('camOkBox').style.display = 'none';
+}
+function camShowOk(msg){
+  const o = document.getElementById('camOkBox');
+  o.textContent = msg; o.style.display = 'block';
+  document.getElementById('camErrBox').style.display = 'none';
+}
+function camHideMessages(){
+  document.getElementById('camErrBox').style.display = 'none';
+  document.getElementById('camOkBox').style.display = 'none';
+}
+
+function readCamConfig(){
+  return {
+    width: parseFloat(document.getElementById('camWidth').value),
+    height: parseFloat(document.getElementById('camHeight').value),
+    gozSayisi: parseInt(document.getElementById('camGozSayisi').value),
+    kolonSayisi: parseInt(document.getElementById('camKolonSayisi').value),
+    disMargin: parseFloat(document.getElementById('camDisMargin').value),
+    icerGap: parseFloat(document.getElementById('camIcerGap').value),
+    oturmaPayi: parseFloat(document.getElementById('camOturmaPayi').value),
+    thickness: parseFloat(document.getElementById('camThickness').value),
+    spindleSpeed: parseFloat(document.getElementById('camSpindleSpeed').value),
+    toolDia: parseFloat(document.getElementById('camToolDia').value),
+    kesimToolNo: document.getElementById('camKesimToolNo').value,
+    taramaToolNo: document.getElementById('camTaramaToolNo').value,
+    taramaDepth: parseFloat(document.getElementById('camTaramaDepth').value),
+    stepover: parseFloat(document.getElementById('camStepover').value),
+    plungeFeed: parseFloat(document.getElementById('camPlungeFeed').value),
+    cutFeed: parseFloat(document.getElementById('camCutFeed').value),
+    safeZ: parseFloat(document.getElementById('camSafeZ').value),
+    homeZ: parseFloat(document.getElementById('camHomeZ').value)
+  };
+}
+
+// Returns the NOMINAL (finished-part) rectangle for each opening — this is
+// what the glass sees, i.e. the same edges the "kesim" pass cuts to (after
+// tool-radius compensation is undone). No tool radius baked in here.
+function camComputeOpenings(cfg){
+  const cols = cfg.kolonSayisi;
+  if(cfg.gozSayisi % cols !== 0){
+    throw new Error(`Göz sayısı (${cfg.gozSayisi}) sütun sayısına (${cols}) tam bölünmüyor.`);
+  }
+  const rows = cfg.gozSayisi / cols;
+  const innerW = cfg.width - 2*cfg.disMargin - (cols-1)*cfg.icerGap;
+  const innerH = cfg.height - 2*cfg.disMargin - (rows-1)*cfg.icerGap;
+  if(innerW <= 0 || innerH <= 0){
+    throw new Error('Bu ölçü + margin + boşluk kombinasyonuyla göz için yer kalmıyor.');
+  }
+  const cellW = innerW / cols;
+  const cellH = innerH / rows;
+
+  const openings = [];
+  for(let r=0; r<rows; r++){
+    for(let c=0; c<cols; c++){
+      const x1 = cfg.disMargin + c*(cellW + cfg.icerGap);
+      const y1 = cfg.disMargin + r*(cellH + cfg.icerGap);
+      openings.push({x1, y1, x2: x1+cellW, y2: y1+cellH});
+    }
+  }
+  return {openings, cols, rows};
+}
+
+// ---------- Kesim (straightforward — same pattern as deneme files) ----------
+function generateCamKesim(){
+  camHideMessages();
+  try{
+    const cfg = readCamConfig();
+    const toolR = cfg.toolDia/2;
+    const {openings} = camComputeOpenings(cfg);
+
+    const lines = ['makro'];
+    lines.push(`M6T${cfg.kesimToolNo}`);
+    lines.push(`M3 S${cfg.spindleSpeed}`);
+    openings.forEach((o, i)=>{
+      // toolpath is inset from the nominal opening by toolR on every side
+      // (standard internal-pocket cutter compensation).
+      const x1 = o.x1 + toolR, y1 = o.y1 + toolR;
+      const x2 = o.x2 - toolR, y2 = o.y2 - toolR;
+      if(i === 0){
+        lines.push(`G0 X${camFmt(x1)} Y${camFmt(y1)} Z${camFmt(cfg.safeZ)}`);
+      } else {
+        lines.push(`G0 X${camFmt(x1)} Y${camFmt(y1)} `);
+      }
+      lines.push(`G1   Z0.00 F${cfg.plungeFeed.toFixed(1)}`);
+      lines.push(`G1 X${camFmt(x2)}   F${cfg.cutFeed.toFixed(1)}`);
+      lines.push(` Y${camFmt(y2)} `);
+      lines.push(`X${camFmt(x1)}  `);
+      lines.push(` Y${camFmt(y1)} `);
+      lines.push(`G0   Z${camFmt(cfg.safeZ)}`);
+    });
+    lines.push(`G0 Z${camFmt(cfg.homeZ)}`);
+    lines.push(`G0 X0.00 Y0.00`);
+    lines.push('M5');
+    lines.push('M16');
+    lines.push('M30');
+
+    document.getElementById('camKesimOutput').value = lines.join('\n');
+    camShowOk('Kesim G-code üretildi.');
+  }catch(err){
+    camShowError(err.message);
+  }
+}
+
+// ---------- Tarama (Clipper.js offset pocket clearing) ----------
+const CAM_SCALE = 1000; // mm -> integer units for Clipper
+
+function camRectToPath(x1,y1,x2,y2){
+  return [
+    {X: Math.round(x1*CAM_SCALE), Y: Math.round(y1*CAM_SCALE)},
+    {X: Math.round(x2*CAM_SCALE), Y: Math.round(y1*CAM_SCALE)},
+    {X: Math.round(x2*CAM_SCALE), Y: Math.round(y2*CAM_SCALE)},
+    {X: Math.round(x1*CAM_SCALE), Y: Math.round(y2*CAM_SCALE)}
+  ];
+}
+
+// Builds the region to clear (outer frame ring, ledge applied only on the
+// outer boundary, minus each opening at its nominal kesim size), then
+// repeatedly offsets it inward by the tool radius and then by successive
+// stepovers, collecting each resulting contour as one toolpath ring —
+// this is the same idea as ArtCAM's "Ofset" pocket-clearing strategy.
+// NOTE: corners come out square here, not the rounded/rosette detail seen
+// in the real ArtCAM files — that decorative detail isn't replicated yet.
+function camBuildTaramaRings(cfg){
+  const {openings} = camComputeOpenings(cfg);
+  const toolR = cfg.toolDia/2;
+  const ledgeMargin = cfg.disMargin - cfg.oturmaPayi;
+  if(ledgeMargin <= 0){
+    throw new Error('Oturma payı, dışarıdan margin\'den büyük olamaz.');
+  }
+
+  const outerPath = camRectToPath(ledgeMargin, ledgeMargin, cfg.width-ledgeMargin, cfg.height-ledgeMargin);
+
+  const clipper = new ClipperLib.Clipper();
+  clipper.AddPath(outerPath, ClipperLib.PolyType.ptSubject, true);
+  openings.forEach(o=>{
+    clipper.AddPath(camRectToPath(o.x1,o.y1,o.x2,o.y2), ClipperLib.PolyType.ptClip, true);
+  });
+  const region = new ClipperLib.Paths();
+  clipper.Execute(ClipperLib.ClipType.ctDifference, region, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
+
+  if(region.length === 0){
+    throw new Error('Taranacak alan bulunamadı (oturma payı/margin ayarlarını kontrol et).');
+  }
+
+  const rings = [];
+  let k = 0;
+  const maxIterations = 500;
+  while(k < maxIterations){
+    const delta = -(toolR + k*cfg.stepover) * CAM_SCALE;
+    const co = new ClipperLib.ClipperOffset();
+    co.AddPaths(region, ClipperLib.JoinType.jtMiter, ClipperLib.EndType.etClosedPolygon);
+    const offsetted = new ClipperLib.Paths();
+    co.Execute(offsetted, delta);
+    if(!offsetted || offsetted.length === 0) break;
+    // drop degenerate slivers
+    const cleaned = offsetted.filter(p => Math.abs(ClipperLib.Clipper.Area(p)) > (0.1*CAM_SCALE*CAM_SCALE));
+    if(cleaned.length === 0) break;
+    cleaned.forEach(p=>{
+      rings.push(p.map(pt => ({x: pt.X/CAM_SCALE, y: pt.Y/CAM_SCALE})));
+    });
+    k++;
+  }
+  return rings;
+}
+
+function generateCamTarama(){
+  camHideMessages();
+  if(typeof ClipperLib === 'undefined'){
+    camShowError('Clipper.js yüklenemedi (internet bağlantısı gerekiyor).');
+    return;
+  }
+  try{
+    const cfg = readCamConfig();
+    const rings = camBuildTaramaRings(cfg);
+    if(rings.length === 0){
+      camShowError('Hiç toolpath halkası üretilemedi — stepover/bıçak çapı bu ölçü için çok büyük olabilir.');
+      return;
+    }
+
+    const z = +(cfg.thickness - cfg.taramaDepth).toFixed(3);
+    const lines = ['makro'];
+    lines.push(`M6T${cfg.taramaToolNo}`);
+    lines.push(`M3 S${cfg.spindleSpeed}`);
+
+    rings.forEach((ring, i)=>{
+      if(ring.length < 3) return;
+      const start = ring[0];
+      if(i === 0){
+        lines.push(`G0 X${camFmt(start.x)} Y${camFmt(start.y)} Z${camFmt(cfg.safeZ)}`);
+      } else {
+        lines.push(`G0 X${camFmt(start.x)} Y${camFmt(start.y)} `);
+      }
+      lines.push(`G1   Z${camFmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
+      for(let j=1;j<ring.length;j++){
+        lines.push(`G1 X${camFmt(ring[j].x)} Y${camFmt(ring[j].y)}   F${cfg.cutFeed.toFixed(1)}`);
+      }
+      lines.push(`G1 X${camFmt(start.x)} Y${camFmt(start.y)} `);
+      lines.push(`G0   Z${camFmt(cfg.safeZ)}`);
+    });
+
+    lines.push(`G0 Z${camFmt(cfg.homeZ)}`);
+    lines.push(`G0 X0.00 Y0.00`);
+    lines.push('M5');
+    lines.push('M16');
+    lines.push('M30');
+
+    document.getElementById('camTaramaOutput').value = lines.join('\n');
+    camShowOk(`Tarama G-code üretildi (${rings.length} halka). Köşeler şu an keskin — ArtCAM'deki rozet detayı yok.`);
+  }catch(err){
+    camShowError(err.message);
+  }
+}
+
+</script>
+</body>
+</html>
