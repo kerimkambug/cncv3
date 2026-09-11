@@ -138,6 +138,10 @@ def process_depth_for_cnc(
     as_16bit: bool = True,
     foreground_gain: float = 0.0,
     background_mask: Optional[np.ndarray] = None,
+    background_mask_floor: float = 0.35,
+    low_mask_coverage_threshold: float = 0.40,
+    low_mask_floor: float = 0.70,
+    mask_diagnostics: Optional[dict[str, Any]] = None,
 ) -> np.ndarray:
     """
     SculptOK Seviyesinde Çok Katmanlı 3D Bas-Rölyef Derinlik İşleme Hattı:
@@ -160,12 +164,25 @@ def process_depth_for_cnc(
     # izleyebileceği ramp elde edilir.
     if background_mask is not None and background_mask.shape == depth_np.shape:
         m = np.clip(background_mask.astype(np.float32), 0.0, 1.0)
+        coverage = float(np.mean(m >= 0.5))
         if HAS_CV2 and smooth_radius > 0:
             feather = max(1, smooth_radius * 3)
+            if feather % 2 == 0:
+                feather += 1
             m = cv2.GaussianBlur(m, (feather, feather), feather / 3.0)
-        elif HAS_SCIPY:
+        elif HAS_SCIPY and smooth_radius > 0:
             m = gaussian_filter(m, sigma=1.5)
-        norm_macro = norm_macro * m
+        normal_floor = float(np.clip(background_mask_floor, 0.0, 1.0))
+        fallback_floor = float(np.clip(low_mask_floor, normal_floor, 1.0))
+        low_coverage = coverage < float(np.clip(low_mask_coverage_threshold, 0.0, 1.0))
+        effective_floor = fallback_floor if low_coverage else normal_floor
+        norm_macro = norm_macro * (effective_floor + (1.0 - effective_floor) * m)
+        if mask_diagnostics is not None:
+            mask_diagnostics.update({
+                "coverage": round(coverage, 4),
+                "floor": round(effective_floor, 3),
+                "lowCoverage": low_coverage,
+            })
 
     # 3. AI depth'i temiz tut: RGB parlaklığını geometriye eklemek, özellikle
     # gökyüzü/duvar gibi aydınlık arka planları sahte tepeye dönüştürebilir.
@@ -293,6 +310,7 @@ async def generate_depth(
     contrast: float = 1.15,
     sharpen: float = 0.35,
     bit_depth: int = 16,
+    use_background_mask: bool = True,
 ):
     """
     Kullanıcının yüklediği RGB görselden Depth Anything V2 modeliyle
@@ -313,7 +331,9 @@ async def generate_depth(
         infer_w, infer_h = infer_image.size
         orig_w, orig_h = raw_image.size
         # rembg (U²-Net) arka plan maskesi — CPU-bound olduğundan thread pool'da çalışır.
-        background_mask = await asyncio.to_thread(gen_foreground_mask, infer_image)
+        background_mask = None
+        if use_background_mask:
+            background_mask = await asyncio.to_thread(gen_foreground_mask, infer_image)
         if background_mask is not None:
             print(f"[Empire CNC AI] Arka plan maskesi hazır: {background_mask.shape}")
 
@@ -342,6 +362,7 @@ async def generate_depth(
                 background_mask = np.asarray(m_pil, dtype=np.float32) / 255.0
         # 16-bit / 8-bit CNC & CAD Optimizasyon Filtresi
         is_16 = (bit_depth == 16)
+        mask_diagnostics: dict[str, Any] = {}
         optimized_depth = process_depth_for_cnc(
             raw_depth_np,
             smooth_radius=smooth,
@@ -352,6 +373,10 @@ async def generate_depth(
             as_16bit=is_16,
             foreground_gain=0.0,
             background_mask=background_mask,
+            background_mask_floor=0.35,
+            low_mask_coverage_threshold=0.40,
+            low_mask_floor=0.70,
+            mask_diagnostics=mask_diagnostics,
         )
 
         depth_float = optimized_depth.astype(np.float32) / (65535.0 if is_16 else 255.0)
@@ -361,6 +386,13 @@ async def generate_depth(
         if not first_qc["clean"]:
             depth_float, second_qc = analyze_and_verify_depth(depth_float, 2)
             qc_report.append(second_qc)
+        if mask_diagnostics.get("lowCoverage"):
+            qc_report.append({
+                "pass": "background-mask",
+                "clean": False,
+                "notes": ["arka plan maskesi düşük kapsama nedeniyle zayıflatıldı"],
+                "metrics": mask_diagnostics,
+            })
 
         # PNG yalnızca önizleme için uygundur: browser canvas 16-bit PNG'yi
         # tekrar 8-bit RGBA'ya indirir. STL hattı için hassasiyeti kayıpsız

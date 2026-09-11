@@ -63,6 +63,7 @@ export const DEFAULT_RELIEF_CONFIG = {
   preset: 'wood_mdf',     // Otomatik CNC Preset
   backgroundMode: 'natural', // Sürekli çok düzlemli yüzey; 'flat'/'zero' legacy
   invert: false,          // Siyah/Beyaz derinlik ters çevirme
+  useBackgroundMask: true, // AI arka plan maskesi
   contrast: 1.0,          // Kontrast çarpanı
   brightness: 0,          // Parlaklık ofseti
   detailBoost: 0.15,      // İnce detay güçlendirme (pürüzsüz & tırtıksız)

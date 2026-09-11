@@ -58,12 +58,14 @@ router.post('/ai-depth', upload.single('image'), async (req, res) => {
     const contrast = req.query.contrast || req.body?.contrast || '1.15';
     const sharpen = req.query.sharpen || req.body?.sharpen || '0.35';
     const bitDepth = req.query.bit_depth || req.body?.bit_depth || '16';
+    const useBackgroundMask = req.query.use_background_mask || req.body?.use_background_mask || 'true';
 
     const queryParams = new URLSearchParams({
       smooth: String(smooth),
       contrast: String(contrast),
       sharpen: String(sharpen),
       bit_depth: String(bitDepth),
+      use_background_mask: String(useBackgroundMask),
     });
 
     const aiResponse = await fetch(`${AI_SERVICE_URL}/generate-depth?${queryParams}`, {

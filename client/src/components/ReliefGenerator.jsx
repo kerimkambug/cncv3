@@ -261,6 +261,7 @@ export default function ReliefGenerator({ onBackToMenu }) {
         contrast: String(cfg.contrast ?? 1.0),
         sharpen: String(cfg.edgeCrispness ?? 0.25),
         bit_depth: '16',
+        use_background_mask: String(cfg.useBackgroundMask !== false),
       });
 
       const resp = await fetch(`/api/relief/ai-depth?${queryParams}`, {
@@ -711,6 +712,21 @@ export default function ReliefGenerator({ onBackToMenu }) {
                     anatomik derinliği pürüzsüzce ayırarak 0-255 derinlik haritasına dönüştürür.
                   </p>
                 </div>
+
+                <div className="checkbox-row" style={{ marginTop: 10 }}>
+                  <input
+                    type="checkbox"
+                    id="useBackgroundMaskCheck"
+                    checked={cfg.useBackgroundMask !== false}
+                    onChange={(e) => updateField('useBackgroundMask', e.target.checked)}
+                  />
+                  <label htmlFor="useBackgroundMaskCheck" style={{ margin: 0, cursor: 'pointer', fontSize: 13 }}>
+                    Arka plan maskesini kullan
+                  </label>
+                </div>
+                <small style={{ display: 'block', color: '#94a3b8', marginTop: 5, fontSize: 11 }}>
+                  Çok karakterli veya yoğun posterlerde kapatmak, ikinci figür ve yazı detaylarının korunmasına yardımcı olur.
+                </small>
 
                 {isAiLoading && (
                   <div className="ai-progress-wrap">
