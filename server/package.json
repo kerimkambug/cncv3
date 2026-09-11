@@ -5,7 +5,9 @@
   "private": true,
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js"
+    "dev": "node --watch index.js",
+    "ai": "ai_service\\venv\\Scripts\\python.exe ai_service\\main.py",
+    "dev:all": "concurrently -n SERVER,AI -c blue,green --kill-others \"npm:dev\" \"npm:ai\""
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -13,5 +15,11 @@
     "express": "^4.19.2",
     "mongoose": "^8.4.0",
     "multer": "^2.2.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5"
   }
 }
