@@ -643,7 +643,7 @@ export function buildDepthGridFromExternalMap(imgData, options = {}) {
     invert = false,
     smoothRadius = 0,
     backgroundMode = 'flat',
-    bgThreshold = 245,
+    bgThreshold = 18,
   } = options;
 
   const w = imgData.width;
@@ -669,13 +669,19 @@ export function buildDepthGridFromExternalMap(imgData, options = {}) {
     : rawLuma;
 
   const finalDepth = new Float32Array(total);
+  const mode = ['natural', 'flat', 'zero'].includes(backgroundMode) ? backgroundMode : 'flat';
+  const threshold = Math.max(0, Math.min(255, Number(bgThreshold) || 0)) / 255;
   for (let i = 0; i < total; i++) {
     let d = smoothed[i];
     const a = alphaMask[i];
-    const lumVal = rawLuma[i] * 255;
 
-    // Harici map de tam görüntü yüzeyidir: eşik tabanlı arka plan kesimi yoktur.
     if (invert) d = 1.0 - d;
+    if (mode === 'zero') {
+      d = d <= threshold ? 0 : d;
+    } else if (mode === 'flat') {
+      // Koyu fonu düz tabana alırken nesnenin kalan aralığını koru.
+      d = d <= threshold ? 0 : (d - threshold) / Math.max(1e-6, 1 - threshold);
+    }
     if (a < 1) d *= Math.max(0.05, a);
 
     finalDepth[i] = Math.max(0, Math.min(1, d));

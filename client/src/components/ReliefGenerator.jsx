@@ -417,12 +417,13 @@ export default function ReliefGenerator({ onBackToMenu }) {
       let res;
       if (isCustom) {
         // Harici depth map: sentez/AI harmanlama yok, sadece isteğe bağlı
-        // hafif pürüzsüzleştirme + arka plan/invert.
+        // hafif pürüzsüzleştirme + arka plan/invert. Custom modda
+        // SculptOK tipi siyah fonlar için güvenli varsayılanlar kullanılır.
         res = buildDepthGridFromExternalMap(imgData, {
           invert: Boolean(cfg.invert),
           smoothRadius: Number(cfg.smoothRadius),
-          backgroundMode: cfg.backgroundMode,
-          bgThreshold: Number(cfg.threshold),
+          backgroundMode: cfg.backgroundMode === 'natural' ? 'flat' : cfg.backgroundMode,
+          bgThreshold: Number(cfg.externalBgThreshold ?? 18),
         });
       } else {
         // Execute Bas-Relief Pipeline (luminance-based, no AI)
@@ -787,10 +788,9 @@ export default function ReliefGenerator({ onBackToMenu }) {
                 <div className="ai-engine-info">
                   <b>📥 Harici Derinlik Haritası</b>
                   <p>
-                    Arka planı temizlenmiş, tam karşıdan (perspektif düzeltilmiş) ve gri tonlamalı
-                    bir derinlik haritası yükleyin — beyaz = yüzey (en yüksek), siyah = taban (en derin).
-                    Bu görsel doğrudan derinlik olarak kullanılır; AI tahmini veya foto-detay sentezi uygulanmaz,
-                    sadece aşağıdaki Pürüzsüzleştirme ve Arka Plan ayarları devreye girer.
+                    SculptOK gibi harici bir araçtan alınmış gri tonlamalı depth map yükleyin — beyaz = yüzey,
+                    siyah = taban. Bu mod AI'ı devre dışı bırakır ve gri tonlamayı doğrudan yükseklik olarak okur;
+                    foto-detay sentezi uygulanmaz. Siyah fonlu haritalarda koyu fon varsayılan olarak düz tabana alınır.
                   </p>
                 </div>
 
