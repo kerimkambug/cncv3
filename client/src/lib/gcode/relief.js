@@ -67,6 +67,7 @@ export const DEFAULT_RELIEF_CONFIG = {
   brightness: 0,          // Parlaklık ofseti
   detailBoost: 0.15,      // İnce detay güçlendirme (pürüzsüz & tırtıksız)
   smoothRadius: 1,        // Bilateral pürüzsüzleştirme (0 - 6, net hatlar için 1)
+  externalBgThreshold: 18, // Harici depth map koyu fon eşiği (0 - 255)
   edgeCrispness: 0.20,    // Anatomik kenar keskinliği (0.0 - 1.0)
   taubinSmooth: 1,        // Taubin yüzey düzleştirme iterasyonu (0 - 4)
   stlQuality: 1024,       // STL Mesh Çözünürlüğü: 512 | 1024 | 1536

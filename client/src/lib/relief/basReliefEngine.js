@@ -674,14 +674,15 @@ export function buildDepthGridFromExternalMap(imgData, options = {}) {
   for (let i = 0; i < total; i++) {
     let d = smoothed[i];
     const a = alphaMask[i];
+    const isBackground = d <= threshold;
 
-    if (invert) d = 1.0 - d;
     if (mode === 'zero') {
-      d = d <= threshold ? 0 : d;
+      d = isBackground ? 0 : d;
     } else if (mode === 'flat') {
       // Koyu fonu düz tabana alırken nesnenin kalan aralığını koru.
-      d = d <= threshold ? 0 : (d - threshold) / Math.max(1e-6, 1 - threshold);
+      d = isBackground ? 0 : (d - threshold) / Math.max(1e-6, 1 - threshold);
     }
+    if (invert && (mode === 'natural' || !isBackground)) d = 1.0 - d;
     if (a < 1) d *= Math.max(0.05, a);
 
     finalDepth[i] = Math.max(0, Math.min(1, d));

@@ -422,7 +422,7 @@ export default function ReliefGenerator({ onBackToMenu }) {
         res = buildDepthGridFromExternalMap(imgData, {
           invert: Boolean(cfg.invert),
           smoothRadius: Number(cfg.smoothRadius),
-          backgroundMode: cfg.backgroundMode === 'natural' ? 'flat' : cfg.backgroundMode,
+          backgroundMode: cfg.backgroundMode,
           bgThreshold: Number(cfg.externalBgThreshold ?? 18),
         });
       } else {
@@ -814,6 +814,33 @@ export default function ReliefGenerator({ onBackToMenu }) {
                     ✅ <b>Harici Derinlik Haritası Yüklendi</b>
                   </div>
                 )}
+
+                <div className="row2" style={{ marginTop: 12 }}>
+                  <div>
+                    <label htmlFor="customBackgroundMode">Arka Plan İşleme</label>
+                    <select
+                      id="customBackgroundMode"
+                      value={cfg.backgroundMode || 'natural'}
+                      onChange={(e) => updateField('backgroundMode', e.target.value)}
+                    >
+                      <option value="natural">İşleme yok (Natural)</option>
+                      <option value="flat">Koyu fonu düz tabana al</option>
+                      <option value="zero">Koyu fonu sıfırla</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="customBgThreshold">Koyu Fon Eşiği (0-255)</label>
+                    <input
+                      id="customBgThreshold"
+                      type="number"
+                      min="0"
+                      max="255"
+                      step="1"
+                      value={cfg.externalBgThreshold ?? 18}
+                      onChange={(e) => updateField('externalBgThreshold', Math.max(0, Math.min(255, Number(e.target.value) || 0)))}
+                    />
+                  </div>
+                </div>
               </div>
             )}
           </div>
