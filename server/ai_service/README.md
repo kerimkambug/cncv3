@@ -23,5 +23,15 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 ## Endpoint'ler
 - `GET /health` -> Servis, model ve rembg durumu
 - `POST /generate-depth` (veya `/predict-depth`) -> Görsel alır, 16-bit ham depth verisi (Base64) döner
+
+## Benchmark
+
+Base/Large modellerini 1024, 1280, 1536 ve 2048 uzun kenar girişleriyle izole process'lerde ölçmek için proje kökünden çalıştırın:
+
+```powershell
+server\ai_service\venv\Scripts\python.exe server\ai_service\benchmark.py
+```
+
+Her hücre ayrı servis process'i açar, bir warm-up isteği ve bir sıcak istek ölçer; sonuçlar `benchmark-results.json` dosyasına yazılır. Varsayılan tekrar sayısı birdir; daha güvenilir ortalama için `--repeats 3` kullanılabilir. Benchmark, model indirme ve CPU/GPU durumunu sonuçlara yansıtır.
 ## Arka Plan Maskeleme (rembg / U²-Net)
 `rembg` paketi `requirements.txt` içindedir ve ilk çalıştırmada `u2net.onnx` modelini (~170MB) otomatik indir. Maske derinlik haritasına uygulanmadan önce Gaussian feather ile yumuşatılır; böylece gökyüzü/zemin 0 seviyesine inerken nesne kenarlarında keskin duvar yerine CNC'ye uygun yumuşak bir ramp kalır.
