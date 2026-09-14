@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
 const KAPAK_OPS = [
-  { key: 'single', label: 'Tek Ölçü' },
+  { key: 'single', label: 'Tek Kapak' },
   { key: 'batch', label: 'Toplu Liste' },
   { key: 'nesting', label: 'Nesting' },
   { key: 'circle', label: 'Daire Kesimi' },
@@ -67,6 +67,15 @@ export default function Sidebar({ activeModule, activeOp, onNavigate }) {
       >
         <span className="sidebar-nav-icon">🗿</span>
         <span className="sidebar-nav-label">3D Rölyef</span>
+      </button>
+
+      <button
+        type="button"
+        className={`sidebar-nav-btn${activeModule === 'gcode-dxf' ? ' active' : ''}`}
+        onClick={() => onNavigate('gcode-dxf')}
+      >
+        <span className="sidebar-nav-icon">📐</span>
+        <span className="sidebar-nav-label">G-code → DXF</span>
       </button>
 
     </nav>

@@ -126,8 +126,13 @@ export default function TekOlcu({ cfg, plateCfg }) {
   return (
     <div className="card">
       <div className="tool-header-row" style={{ marginBottom: 12 }}>
-        <h2 style={{ margin: 0 }}>Çoklu Ölçü</h2>
-        <span className="badge">{measurements.length} ölçü</span>
+        <div>
+          <h2 style={{ margin: 0 }}>Tek Kapak</h2>
+          <div className="hint" style={{ marginTop: 4 }}>
+            Tek kapak ölçüsünü girin. Yan yana üretim için bitişik kapak ekleyebilirsiniz.
+          </div>
+        </div>
+        <span className="badge">{measurements.length} kapak</span>
       </div>
 
       <table className="tool-table">
@@ -183,7 +188,7 @@ export default function TekOlcu({ cfg, plateCfg }) {
       </table>
 
       <button type="button" className="btn-secondary add-row-btn" onClick={addMeasurement}>
-        + Ölçü Ekle
+        + Bitişik Kapak Ekle
       </button>
 
       {summaryValid && (

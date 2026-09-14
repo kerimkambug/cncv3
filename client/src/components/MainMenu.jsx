@@ -46,6 +46,16 @@ export default function MainMenu({ onSelectModule }) {
             <span className="module-desc">Görsel yükle (PNG/JPG), derinlik haritasına çevirip 3D rölyef takım yolu üret.</span>
           </button>
 
+          <button
+            type="button"
+            className="module-btn"
+            onClick={() => onSelectModule('gcode-dxf')}
+          >
+            <span className="module-icon">📐</span>
+            <span className="module-name">G-code → DXF</span>
+            <span className="module-desc">Mevcut CNC takım yollarını okuyup katmanlı DXF dosyasına dönüştür.</span>
+          </button>
+
         </div>
       </div>
     </div>

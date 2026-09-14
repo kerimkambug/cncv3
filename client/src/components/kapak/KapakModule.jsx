@@ -10,7 +10,7 @@ import DerzBolme from './DerzBolme.jsx';
 import { DEFAULT_MACHINE_CONFIG, DEFAULT_PLATE_CONFIG } from '../../lib/gcode/common.js';
 
 const TABS = [
-  { key: 'single', label: 'Çoklu Ölçü' },
+  { key: 'single', label: 'Tek Kapak' },
   { key: 'batch', label: 'Toplu Liste' },
   { key: 'nesting', label: 'Nesting' },
   { key: 'circle', label: 'Daire Kesimi' },
