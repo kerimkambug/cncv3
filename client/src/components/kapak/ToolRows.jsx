@@ -9,6 +9,15 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
     next[idx] = { ...next[idx], [field]: field === 'name' || field === 'toolNo' || field === 'operation' ? value : parseFloat(value) || 0 };
     setRows(next);
   }
+  function updateCarving(idx, field, value) {
+    const next = rows.slice();
+    // cornerSharpenDistance: empty string => null (falls back to the row's depth)
+    const stored = field === 'cornerSharpen'
+      ? value
+      : (value === '' || value === null || value === undefined ? null : parseFloat(value) || 0);
+    next[idx] = { ...next[idx], [field]: stored, cornerSharpen: next[idx].cornerSharpen !== false };
+    setRows(next);
+  }
   function updateDerz(idx, field, value) {
     const next = rows.slice();
     next[idx] = { ...next[idx], derz: { yon: 'dikey', margin: 0, spacing: 60, autoFit: true, overshoot: 1, overshootX: 1, overshootY: 1, edgeExtra: 0, respectPreviousOffset: true, ...(next[idx].derz || {}), [field]: field === 'yon' || field === 'autoFit' || field === 'respectPreviousOffset' ? value : parseFloat(value) || 0 } };
@@ -65,7 +74,7 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
         </thead>
         <tbody>
           {rows.map((r, i) => {
-            if (r.operation === 'derz') {
+            if (r.operation === 'derz' || r.operation === 'carving') {
               cum = cum;
             } else if (isAbsolute) {
               cum = Number(r.stepOffset) || 0;
@@ -96,6 +105,7 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
                   <select value={r.operation || 'offset'} onChange={(e) => updateRow(i, 'operation', e.target.value)}>
                     <option value="offset">Offset</option>
                     <option value="derz">Derz</option>
+                    <option value="carving">Carving (V-bıçak profil)</option>
                   </select>
                 </td>
                 <td>
@@ -116,7 +126,7 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
                     style={{ width: 60 }}
                   />
                 </td>
-                <td>{r.operation === 'derz' ? '-' : cum.toFixed(2)}</td>
+                <td>{r.operation === 'derz' || r.operation === 'carving' ? '-' : cum.toFixed(2)}</td>
                 <td>{z.toFixed(2)}</td>
                 <td>
                   <button type="button" className="icon-btn" onClick={() => removeRow(i)}>
@@ -124,6 +134,17 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
                   </button>
                 </td>
               </tr>
+              {r.operation === 'carving' && (
+                <tr key={`${i}-carving`}>
+                  <td colSpan="8" className="derz-row-settings">
+                    <strong>Carving ayarları</strong>
+                    <label className="derz-auto-fit"><input type="checkbox" checked={r.cornerSharpen !== false} onChange={(e) => updateCarving(i, 'cornerSharpen', e.target.checked)} /><span>Köşeleri keskinleştir (dışa çıkış + yüzeye rampa)</span></label>
+                    {r.cornerSharpen !== false && (
+                      <label><span>Köşe çıkış mesafesi (mm) — boş = derinliğe eşit</span><input type="number" min="0" step="0.1" value={r.cornerSharpenDistance ?? ''} placeholder={String(r.depth ?? '')} onChange={(e) => updateCarving(i, 'cornerSharpenDistance', e.target.value)} /></label>
+                    )}
+                  </td>
+                </tr>
+              )}
               {r.operation === 'derz' && (
                 <tr key={`${i}-derz`}>
                   <td colSpan="8" className="derz-row-settings">

@@ -252,6 +252,129 @@ const narrowGcode = buildKapakGcode(150, 500, {
 check('adaptive kapak gcode: contains tool 7, 2, 9', narrowGcode.includes('M6T7') && narrowGcode.includes('M6T2') && narrowGcode.includes('M6T9'));
 check('adaptive kapak gcode: does not contain skipped tool 12', !narrowGcode.includes('M6T12'));
 
+// --- Curved top (semicircle / pointed) — validated against 2_NUMARA.cnc / 3_NUMARA.cnc ---
+const { computeTopCurve, emitTopCurveGcode, buildCarvingProfile } = await import('./kapak.js');
+
+// 2_NUMARA.cnc: outer offset 60, xl=60, xr=232 -> xc=146, r=86, yc=254
+const semi = computeTopCurve(60, 232, 340, 'semicircle');
+check('top semicircle: xc = 146', Math.abs(semi.xc - 146) < 1e-9);
+check('top semicircle: r = 86', Math.abs(semi.r - 86) < 1e-9);
+check('top semicircle: yc = 254 (yt - r)', Math.abs(semi.yc - 254) < 1e-9);
+check('top semicircle: apex at yt (340)', Math.abs((semi.yc + semi.r) - 340) < 1e-9);
+check('top semicircle: yEnd(xc) = apex 340', Math.abs(semi.yEnd(semi.xc) - 340) < 1e-9);
+check('top semicircle: yEnd at edges returns yc (254)', Math.abs(semi.yEnd(60) - 254) < 1e-9 && Math.abs(semi.yEnd(232) - 254) < 1e-9);
+const semiLines = emitTopCurveGcode([], semi, 12, 6000);
+check('top semicircle: emits 2 G3 quarter arcs', semiLines.filter((l) => l.startsWith('G3')).length === 2);
+check('top semicircle: arc 1 matches 2_NUMARA G3X146.00Y340.00I-86.00J-0.00', semiLines[1].includes('X146.00 Y340.00') && semiLines[1].includes('I-86.00') && semiLines[1].includes('J0.00'));
+check('top semicircle: arc 2 matches 2_NUMARA G3X60.00Y254.00I-0.00J-86.00', semiLines[2].includes('X60.00 Y254.00') && semiLines[2].includes('I0.00') && semiLines[2].includes('J-86.00'));
+
+// 3_NUMARA.cnc: outer offset 57, plate 292x400, xl=57, xr=235
+// innerW=178, rise=22.25, r~189.13, yc~153.88, yShoulder~320.75
+const pointed = computeTopCurve(57, 235, 400 - 57, 'pointed');
+check('top pointed: innerW = 178', Math.abs(pointed.innerW - 178) < 1e-9);
+check('top pointed: rise = 22.25 (innerW * 0.125)', Math.abs(pointed.rise - 22.25) < 1e-9);
+check('top pointed: r ~ 189.13', Math.abs(pointed.r - 189.13) < 0.01);
+check('top pointed: yc ~ 153.88', Math.abs(pointed.yc - 153.88) < 0.01);
+check('top pointed: yShoulder ~ 320.75', Math.abs(pointed.yShoulder - 320.75) < 0.01);
+check('top pointed: yEnd(xc) = apex yt (343)', Math.abs(pointed.yEnd(pointed.xc) - (400 - 57)) < 1e-9);
+const pointedLines = emitTopCurveGcode([], pointed, 12, 6000);
+const pArc = pointedLines.find((l) => l.startsWith('G3'));
+const pArcI = parseFloat((pArc.match(/I(-?[\d.]+)/) || [])[1]);
+const pArcJ = parseFloat((pArc.match(/J(-?[\d.]+)/) || [])[1]);
+check('top pointed: G3 X57.00 matches real file (arc lands on left shoulder)', pArc.includes('X57.00'));
+check('top pointed: G3 I-89.00 matches real file (±0.01)', Math.abs(pArcI - (-89)) < 0.01);
+check('top pointed: G3 J-166.87 matches real file (±0.01)', Math.abs(pArcJ - (-166.87)) < 0.01);
+// derz point Y327.36 (x=70.69) — top of a vertical divider ending on the pointed curve
+check('top pointed: derz point Y327.36 at x=70.69 matches real file (±0.01)', Math.abs(pointed.yEnd(70.69) - 327.36) < 0.01);
+check('top pointed: yEnd returns 0-depth clamp when outside radius (no NaN)', Number.isFinite(pointed.yEnd(-1e6)));
+
+// buildKapakGcode honours topStyle on the top edge (semicircle)
+const curvedG = buildKapakGcode(292, 400, {
+  thickness: 18, spindleSpeed: 18000, safeZ: 61, toolChangeZ: 96, homeZ: 96, plungeFeed: 3000, cutFeed: 6000,
+  topStyle: 'semicircle',
+  rows: [{ toolNo: '7', depth: 2.5, stepOffset: 60, operation: 'offset' }],
+});
+check('top semicircle gcode: emits G3 arc instead of flat top edge', curvedG.includes('G3'));
+
+// --- Carving row (single closed profile + corner sharpen) — 1_NUMARA.cnc T1 ---
+// plate 292x400, offset 56, depth 6, thickness 18 => Z=12.00, exit 6 => outward offset 50
+// Real file 1_NUMARA.cnc lines 42-56 (after the G0/G1 lead-in) must match 1:1:
+const realCarving = [
+  'G1 Z12.00',
+  'G1 X242.00 Y350.00 Z18.00',
+  'X236.00 Y344.00 Z12.00',
+  'X56.00',
+  'X50.00 Y350.00 Z18.00',
+  'X56.00 Y344.00 Z12.00',
+  ' Y56.00',
+  'X50.00 Y50.00 Z18.00',
+  'X56.00 Y56.00 Z12.00',
+  'X236.00',
+  'X242.00 Y50.00 Z18.00',
+  'X236.00 Y56.00 Z12.00',
+  ' Y344.00',
+];
+const carvingLines = buildCarvingProfile(292, 400, 56, 6, 18);
+const norm = (s) => s.replace(/\s+/g, ' ').trim();
+check('carving: default cornerSharpenDistance == depth (6mm 1:1 ratio)', buildCarvingProfile(292, 400, 56, 6, 18).join('\n') === buildCarvingProfile(292, 400, 56, 6, 18, 6).join('\n'));
+check('carving: coordinate/token match vs 1_NUMARA.cnc lines 43-55', carvingLines.map(norm).join('|') === realCarving.map(norm).join('|'));
+check('carving: 4 diagonal surface ramps at offset 50 (Z18.00)', carvingLines.filter((l) => l.includes('Z18.00')).length === 4);
+check('carving: profile runs at depth Z12.00 between corners', carvingLines.filter((l) => l.includes('Z12.00')).length === 5);
+check('carving: explicit cornerSharpenDistance overrides 1:1 (50 -> 53)', buildCarvingProfile(292, 400, 56, 6, 18, 3).includes('X53.00 Y347.00 Z18.00'));
+
+// carving row inside buildKapakGcode emits the profile and skips pocket/derz handling
+const carvingG = buildKapakGcode(292, 400, {
+  thickness: 18, spindleSpeed: 18000, safeZ: 61, toolChangeZ: 96, homeZ: 96, plungeFeed: 3000, cutFeed: 6000,
+  rows: [{ toolNo: '1', depth: 6, stepOffset: 56, operation: 'carving' }],
+});
+check('carving gcode: emits M6T1 and the closed profile', carvingG.includes('M6T1') && carvingG.includes('G0 X236.00 Y344.00 Z61.00') && carvingG.includes('G1 X242.00 Y350.00 Z18.00 F6000.0'));
+
+// --- DXF check file: curved top arc + carving layer (PresetPanel visual check) ---
+const { buildKapakPresetDxf } = await import('./kapak.js');
+const semiDxf = buildKapakPresetDxf(292, 400, {
+  topStyle: 'semicircle',
+  rows: [{ toolNo: '7', depth: 2.5, stepOffset: 60, operation: 'offset' }],
+});
+check('DXF semicircle: emits an ARC entity for the curved top', semiDxf.includes('\nARC\n'));
+check('DXF semicircle: arc centre on the panel midline (xc=146) and r=86', semiDxf.includes('146.000') && semiDxf.includes('86.000'));
+check('DXF semicircle: still valid ASCII DXF', semiDxf.startsWith('0\nSECTION') && semiDxf.endsWith('\n0\nEOF'));
+
+const pointedDxf = buildKapakPresetDxf(292, 400, {
+  topStyle: 'pointed', riseRatio: 0.125,
+  rows: [],
+});
+check('DXF pointed: emits an ARC entity for the shallow top', pointedDxf.includes('\nARC\n'));
+
+const carveDxf = buildKapakPresetDxf(292, 400, {
+  rows: [{ toolNo: '1', depth: 6, stepOffset: 56, operation: 'carving' }],
+});
+check('DXF carving: dedicated CARVING_T1_1 layer is created', carveDxf.includes('CARVING_T1_1'));
+const flatDxfNoCarve = buildKapakPresetDxf(292, 400, {
+  rows: [{ toolNo: '7', depth: 2.5, stepOffset: 60, operation: 'offset' }],
+});
+check('DXF flat: no ARC entity when topStyle is flat (unchanged rectangle)', !flatDxfNoCarve.includes('\nARC\n') && flatDxfNoCarve.includes('OFFSET_T7_1'));
+
+// --- Nesting plate G-code: carving rows + curved tops must survive the plate pipeline ---
+// (buildNestingPlateGcode is already imported above.)
+const carvePlate = { number: 1, width: 1220, height: 2440, parts: [{ name: 'K', x: 10, y: 10, placedWidth: 292, placedHeight: 400 }] };
+const carvePlateG = buildNestingPlateGcode(carvePlate, {
+  thickness: 18, spindleSpeed: 18000, plungeFeed: 3000, cutFeed: 6000, safeZ: 61, toolChangeZ: 96, homeZ: 96,
+  enableOuterCut: false,
+  rows: [
+    { toolNo: '1', depth: 6, stepOffset: 56, operation: 'carving' },
+    { toolNo: '7', depth: 2.5, stepOffset: 40, operation: 'offset' },
+  ],
+});
+check('nesting carving: emits M6T1 and the corner-ramp profile at part offset (66/354)', carvePlateG.includes('M6T1') && carvePlateG.includes('G1 X252.00 Y360.00 Z18.00') && carvePlateG.includes('X66.00 Y354.00 Z12.00'));
+check('nesting carving: offset row does not leak into the carving depth', carvePlateG.includes('M6T7') && carvePlateG.includes('G1   Z15.50 F3000.0'));
+
+const curvedPlateG = buildNestingPlateGcode(carvePlate, {
+  thickness: 18, spindleSpeed: 18000, plungeFeed: 3000, cutFeed: 6000, safeZ: 61, toolChangeZ: 96, homeZ: 96,
+  enableOuterCut: false, topStyle: 'semicircle',
+  rows: [{ toolNo: '7', depth: 2.5, stepOffset: 40, operation: 'offset' }],
+});
+check('nesting curved top: offset pass emits a G3 arc', curvedPlateG.includes('G3'));
+
 // --- Relief Generator Tests ---
 const { sampleDepthGridUV, calculateCompensatedZ, buildReliefGcodeFromImageData, estimateReliefTime, DEFAULT_RELIEF_CONFIG } = await import('./relief.js');
 

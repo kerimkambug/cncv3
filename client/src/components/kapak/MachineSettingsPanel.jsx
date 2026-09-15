@@ -12,6 +12,11 @@ export default function MachineSettingsPanel({ cfg, setCfg, plateCfg, setPlateCf
     setCfg({ ...cfg, offsetMode: isAbsolute ? 'relative' : 'absolute' });
   }
 
+  const topStyle = cfg.topStyle || 'flat';
+  function setTopStyle(style) {
+    setCfg({ ...cfg, topStyle: style });
+  }
+
   return (
     <div className="card">
       <h2>Genel Ayarlar</h2>
@@ -85,6 +90,31 @@ export default function MachineSettingsPanel({ cfg, setCfg, plateCfg, setPlateCf
         {isAbsolute
           ? 'Sıra dıştan içe. Her satırın offseti, o satırın kendi değeridir — bir önceki satırdan bağımsız, doğrudan en dış kenardan ölçülür.'
           : 'Sıra dıştan içe. Adım offset değerleri kümülatif olarak toplanır (her satır bir öncekinin üstüne eklenir).'}
+      </div>
+
+      <label style={{ marginTop: 14 }}>Üst Kenar Şekli</label>
+      <select value={topStyle} onChange={(e) => setTopStyle(e.target.value)}>
+        <option value="flat">Düz (dikdörtgen)</option>
+        <option value="semicircle">Yarım daire (tam kemer)</option>
+        <option value="pointed">Sivri / basık kemer</option>
+      </select>
+      {topStyle === 'pointed' && (
+        <div style={{ marginTop: 8 }}>
+          <label>Kemer yükseklik oranı (iç genişliğe göre)</label>
+          <input
+            type="number"
+            step="0.001"
+            min="0.001"
+            value={cfg.riseRatio ?? 0.125}
+            onChange={(e) => set('riseRatio', e.target.value)}
+          />
+          <div className="hint">Varsayılan 0.125 (1/8). Kemer yüksekliği = iç genişlik × oran.</div>
+        </div>
+      )}
+      <div className="hint">
+        {topStyle === 'flat'
+          ? 'Üst kenar düz çıkar (klasik dikdörtgen).'
+          : 'Üst kenar eğri çıkar; dikey derz çizgileri ve profil bıçaklarının üst ucu eğriyi takip eder.'}
       </div>
     </div>
   );

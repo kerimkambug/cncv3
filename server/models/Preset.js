@@ -4,9 +4,13 @@ const ToolRowSchema = new mongoose.Schema(
   {
     name: { type: String, default: '' },
     toolNo: { type: String, required: true },
-    operation: { type: String, enum: ['offset', 'derz'], default: 'offset' },
+    operation: { type: String, enum: ['offset', 'derz', 'carving'], default: 'offset' },
     depth: { type: Number, required: true },
     stepOffset: { type: Number, required: true },
+    // Carving-only: closed single-line profile (V-bit).
+    cornerSharpen: { type: Boolean, default: true },
+    // null = use the row's depth (1:1 confirmed on 1_NUMARA.cnc; override when asked)
+    cornerSharpenDistance: { type: Number, default: null },
     derz: {
       yon: { type: String, enum: ['dikey', 'yatay'], default: 'dikey' },
       margin: { type: Number, default: 0 },
@@ -40,6 +44,10 @@ const PresetSchema = new mongoose.Schema(
     plungeFeed: { type: Number, default: 3000 },
     cutFeed: { type: Number, default: 6000 },
     offsetMode: { type: String, enum: ['relative', 'absolute'], default: 'relative' },
+    // Upper edge style for kapak (door / tabla) parts.
+    topStyle: { type: String, enum: ['flat', 'semicircle', 'pointed'], default: 'flat' },
+    // Rise ratio for topStyle:'pointed' (rise = innerW * riseRatio). Ignored otherwise.
+    riseRatio: { type: Number, default: 0.125 },
     rows: { type: [ToolRowSchema], default: [] },
     // Cam-specific fields (unused for module:'kapak')
     camSettings: {

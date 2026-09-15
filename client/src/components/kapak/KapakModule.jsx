@@ -21,7 +21,7 @@ export default function KapakModule({ activeOp = 'single', onBackToMenu }) {
   const [currentTab, setCurrentTab] = useState(activeOp);
   const [activeModal, setActiveModal] = useState(null); // 'settings' | 'tools' | null
 
-  const [machineCfg, setMachineCfg] = useState({ ...DEFAULT_MACHINE_CONFIG, offsetMode: 'relative' });
+  const [machineCfg, setMachineCfg] = useState({ ...DEFAULT_MACHINE_CONFIG, offsetMode: 'relative', topStyle: 'flat', riseRatio: 0.125 });
   const [plateCfg, setPlateCfg] = useState({ ...DEFAULT_PLATE_CONFIG });
   const [rows, setRows] = useState([
     { name: '30mm yuvarlama', toolNo: '7', depth: 2.5, stepOffset: 52 },

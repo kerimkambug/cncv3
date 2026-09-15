@@ -7,7 +7,7 @@
 //    - Aşama 3 (Final Kesim - İşleme Sonrası): 6mm kesim bıçağıyla Z0'a kadar inilerek parça plakadan ayrılır.
 // 3. Sıralama: Sağ en üstteki parçadan sola doğru, satır satır yukarıdan aşağıya (sağdan sola).
 import { fmt, computeCumOffsets, emitRectCutPath } from './common.js';
-import { validateKapakSize, calculateAdaptiveOffsets } from './kapak.js';
+import { validateKapakSize, calculateAdaptiveOffsets, buildCarvingProfile, computeTopCurve, emitTopCurveGcode } from './kapak.js';
 
 function rectsIntersect(a, b) {
   return a.x < b.x + b.w - 1e-9 && a.x + a.w > b.x + 1e-9 && a.y < b.y + b.h - 1e-9 && a.y + a.h > b.y + 1e-9;
@@ -314,12 +314,17 @@ function emitOuterCutPass(lines, parts, cutToolRadius, targetZ, feed, plunge, sa
 function emitAdaptiveProfilePasses(lines, plate, cfg, { thickness, plungeFeed, cutFeed, safeZ, toolChangeZ, spindleSpeed }) {
   if (!cfg.rows || cfg.rows.length === 0) return;
   let lastEmittedToolNo = null;
+  const topStyle = cfg.topStyle || 'flat';
 
-  cfg.rows.forEach((r, rowIdx) => {
+  // Only plain offset rows participate in the (cumulative) offset chain; derz and
+  // carving rows are handled separately and must not shift the offset sequence.
+  const offsetRows = cfg.rows.filter((r) => (r.operation || 'offset') !== 'derz' && r.operation !== 'carving');
+
+  offsetRows.forEach((r, rowIdx) => {
     const z = +(thickness - r.depth).toFixed(3);
     const validPartCoords = getAdaptiveRowPartCoords(
       plate.parts,
-      cfg.rows,
+      offsetRows,
       rowIdx,
       cfg.offsetMode || 'relative'
     );
@@ -338,15 +343,47 @@ function emitAdaptiveProfilePasses(lines, plate, cfg, { thickness, plungeFeed, c
       }
 
       validPartCoords.forEach((coords) => {
+        const curve = topStyle === 'flat' ? null : computeTopCurve(coords.x1, coords.x2, coords.y2, topStyle, cfg.riseRatio);
         lines.push(`G0 X${fmt(coords.x1)} Y${fmt(coords.y1)} Z${fmt(safeZ)}`);
         lines.push(`G1   Z${fmt(z)} F${plungeFeed.toFixed(1)}`);
         lines.push(`G1 X${fmt(coords.x2)}   F${cutFeed.toFixed(1)}`);
-        lines.push(` Y${fmt(coords.y2)} `);
-        lines.push(`X${fmt(coords.x1)}  `);
-        lines.push(` Y${fmt(coords.y1)} `);
+        if (curve) {
+          emitTopCurveGcode(lines, curve, z, cutFeed);
+          lines.push(`G1 X${fmt(coords.x1)} Y${fmt(coords.y1)} F${cutFeed.toFixed(1)}`);
+        } else {
+          lines.push(` Y${fmt(coords.y2)} `);
+          lines.push(`X${fmt(coords.x1)}  `);
+          lines.push(` Y${fmt(coords.y1)} `);
+        }
         lines.push(`G0   Z${fmt(safeZ)}`);
       });
     }
+  });
+
+  // Carving rows: single closed profile line (V-bit) at a fixed offset, with an
+  // outward diagonal corner ramp back to the surface — per part.
+  cfg.rows.filter((r) => r.operation === 'carving').forEach((r) => {
+    const depth = Number(r.depth) || 0;
+    const exit = r.cornerSharpenDistance === null || r.cornerSharpenDistance === undefined ? depth : Number(r.cornerSharpenDistance);
+    const offset = Number(r.stepOffset) || 0;
+    const toolChanged = String(r.toolNo) !== String(lastEmittedToolNo);
+    if (toolChanged) {
+      if (lastEmittedToolNo !== null) {
+        lines.push(`G0Z${fmt(toolChangeZ)}`);
+        lines.push('M5');
+      }
+      lines.push(`M6T${r.toolNo}`);
+      lines.push(`M3 S${spindleSpeed}`);
+      lastEmittedToolNo = r.toolNo;
+    }
+    plate.parts.forEach((part) => {
+      lines.push(`G0 X${fmt(part.x + part.placedWidth - offset)} Y${fmt(part.y + part.placedHeight - offset)} Z${fmt(safeZ)}`);
+      buildCarvingProfile(part.placedWidth, part.placedHeight, offset, depth, thickness, exit).forEach((line) => {
+        const fed = /^G1 Z/.test(line) ? `${line} F${plungeFeed.toFixed(1)}` : `${line} F${cutFeed.toFixed(1)}`;
+        lines.push(fed.replace(/X(-?[\d.]+)/g, (m, n) => `X${fmt(Number(n) + part.x)}`).replace(/Y(-?[\d.]+)/g, (m, n) => `Y${fmt(Number(n) + part.y)}`));
+      });
+      lines.push(`G0 Z${fmt(safeZ)}`);
+    });
   });
 
   if (lastEmittedToolNo !== null) {

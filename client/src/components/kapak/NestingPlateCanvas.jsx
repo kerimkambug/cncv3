@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { computeCumOffsets } from '../../lib/gcode/common.js';
+import { calculateAdaptiveOffsets } from '../../lib/gcode/kapak.js';
 
 // Stable color per part name so identical parts always share the same
 // color, regardless of placement order.
@@ -62,22 +63,55 @@ export default function NestingPlateCanvas({ result, cfg }) {
     });
 
     if (showToolpaths && cfg.rows.length) {
-      const cums = computeCumOffsets(cfg.rows, cfg.offsetMode);
-      const toolColors = cfg.rows.map((r, i) => `hsl(${(i * 67) % 360} 90% 62%)`);
+      // Offset rows drive the adaptive profile; derz/carving rows are drawn separately
+      // and must not shift the cumulative offset chain.
+      const offsetRows = cfg.rows.filter((r) => (r.operation || 'offset') !== 'derz' && r.operation !== 'carving');
+      const carvingRows = cfg.rows.filter((r) => r.operation === 'carving');
+      const toolColors = offsetRows.map((r, i) => `hsl(${(i * 67) % 360} 90% 62%)`);
+      const curved = cfg.topStyle && cfg.topStyle !== 'flat';
 
-      cfg.rows.forEach((r, rowIdx) => {
-        const cum = cums[rowIdx];
+      offsetRows.forEach((r, rowIdx) => {
         ctx.strokeStyle = toolColors[rowIdx];
         ctx.lineWidth = 1;
-        ctx.setLineDash(cum < 0 ? [4, 3] : []);
+        ctx.setLineDash([]);
         plate.parts.forEach((part) => {
-          const x1 = (part.x + cum) * scale, y1 = (part.y + cum) * scale;
-          const w2 = (part.placedWidth - 2 * cum) * scale, h2 = (part.placedHeight - 2 * cum) * scale;
+          const adaptive = calculateAdaptiveOffsets(part.placedWidth, part.placedHeight, offsetRows, cfg.offsetMode || 'relative');
+          const adRow = adaptive[rowIdx];
+          if (!adRow || adRow.skipped) return;
+          const x1 = (part.x + adRow.leftOffset) * scale, y1 = (part.y + adRow.bottomOffset) * scale;
+          const w2 = (part.placedWidth - adRow.leftOffset - adRow.rightOffset) * scale;
+          const h2 = (part.placedHeight - adRow.bottomOffset - adRow.topOffset) * scale;
           const cr = crispRect(x1, y1, w2, h2);
+          if (curved) {
+            // Approximate preview only — the DXF export draws the exact arc.
+            // Anchor the dip using the real top-curve apex so the shape is recognisable.
+            const apexDrop = cfg.topStyle === 'semicircle' ? h2 : h2 * 0.25;
+            ctx.beginPath();
+            ctx.moveTo(cr.x, cr.y + cr.h);
+            ctx.lineTo(cr.x, cr.y);
+            ctx.quadraticCurveTo(cr.x + cr.w / 2, cr.y - apexDrop, cr.x + cr.w, cr.y);
+            ctx.lineTo(cr.x + cr.w, cr.y + cr.h);
+            ctx.closePath();
+            ctx.stroke();
+          } else {
+            ctx.strokeRect(cr.x, cr.y, cr.w, cr.h);
+          }
+        });
+      });
+
+      // Carving profilleri (tek çizgi, V-bıçak)
+      carvingRows.forEach((r) => {
+        ctx.strokeStyle = 'hsl(320 85% 62%)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([]);
+        const o = Number(r.stepOffset) || 0;
+        plate.parts.forEach((part) => {
+          const x1 = (part.x + o) * scale, y1 = (part.y + o) * scale;
+          const x2 = (part.x + part.placedWidth - o) * scale, y2 = (part.y + part.placedHeight - o) * scale;
+          const cr = crispRect(x1, y1, x2 - x1, y2 - y1);
           ctx.strokeRect(cr.x, cr.y, cr.w, cr.h);
         });
       });
-      ctx.setLineDash([]);
     }
   }, [result, plateIndex, showToolpaths, cfg]);
 

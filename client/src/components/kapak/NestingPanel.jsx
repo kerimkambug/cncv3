@@ -317,33 +317,61 @@ export default function NestingPanel({ cfg, plateCfg }) {
         ctx.setLineDash([]);
       }
 
-      // Profil / Motif Bıçakları (Adaptif Offsetli)
-      if (cfg.rows && cfg.rows.length) {
-        const toolColors = cfg.rows.map((r, i) => `hsl(${(i * 67) % 360} 90% 62%)`);
+      // Profil / Motif Bıçakları (Adaptif Offsetli) — carving satırları ayrı çizilir.
+      const offsetRows = (cfg.rows || []).filter((r) => (r.operation || 'offset') !== 'derz' && r.operation !== 'carving');
+      const carvingRows = (cfg.rows || []).filter((r) => r.operation === 'carving');
+      const offsetToolColors = offsetRows.map((r, i) => `hsl(${(i * 67) % 360} 90% 62%)`);
 
-        cfg.rows.forEach((r, rowIdx) => {
-          ctx.strokeStyle = toolColors[rowIdx];
-          ctx.lineWidth = 1;
+      offsetRows.forEach((r, rowIdx) => {
+        ctx.strokeStyle = offsetToolColors[rowIdx];
+        ctx.lineWidth = 1;
 
-          plate.parts.forEach((part) => {
-            const adaptiveRows = calculateAdaptiveOffsets(
-              part.placedWidth,
-              part.placedHeight,
-              cfg.rows,
-              cfg.offsetMode || 'relative'
-            );
-            const adRow = adaptiveRows[rowIdx];
-            if (!adRow || adRow.skipped) return;
+        plate.parts.forEach((part) => {
+          const adaptiveRows = calculateAdaptiveOffsets(
+            part.placedWidth,
+            part.placedHeight,
+            offsetRows,
+            cfg.offsetMode || 'relative'
+          );
+          const adRow = adaptiveRows[rowIdx];
+          if (!adRow || adRow.skipped) return;
 
-            const x1 = (part.x + adRow.leftOffset) * scale;
-            const y1 = (part.y + adRow.bottomOffset) * scale;
-            const w2 = (part.placedWidth - adRow.leftOffset - adRow.rightOffset) * scale;
-            const h2 = (part.placedHeight - adRow.bottomOffset - adRow.topOffset) * scale;
-            const cr = crispRect(x1, y1, w2, h2);
+          const x1 = (part.x + adRow.leftOffset) * scale;
+          const y1 = (part.y + adRow.bottomOffset) * scale;
+          const w2 = (part.placedWidth - adRow.leftOffset - adRow.rightOffset) * scale;
+          const h2 = (part.placedHeight - adRow.bottomOffset - adRow.topOffset) * scale;
+          const cr = crispRect(x1, y1, w2, h2);
+          if (cfg.topStyle && cfg.topStyle !== 'flat') {
+            // Draw the curved top edge (approximate) instead of a flat rectangle top.
+            const xc = part.x + part.placedWidth / 2;
+            const yt = (part.y + part.placedHeight - adRow.topOffset) * scale;
+            ctx.beginPath();
+            ctx.moveTo(cr.x, cr.y);
+            ctx.lineTo(cr.x + cr.w, cr.y);
+            ctx.lineTo(cr.x + cr.w, yt);
+            ctx.quadraticCurveTo(xc * scale, yt + adRow.topOffset * scale, cr.x, yt);
+            ctx.closePath();
+            ctx.stroke();
+          } else {
             ctx.strokeRect(cr.x, cr.y, cr.w, cr.h);
-          });
+          }
         });
-      }
+      });
+
+      // Carving profilleri (tek çizgi, V-bıçak)
+      carvingRows.forEach((r) => {
+        ctx.strokeStyle = 'hsl(320 85% 62%)';
+        ctx.lineWidth = 1;
+        const o = Number(r.stepOffset) || 0;
+        plate.parts.forEach((part) => {
+          const x1 = (part.x + o) * scale;
+          const y1 = (part.y + o) * scale;
+          const x2 = (part.x + part.placedWidth - o) * scale;
+          const y2 = (part.y + part.placedHeight - o) * scale;
+          const cr = crispRect(x1, y1, x2 - x1, y2 - y1);
+          ctx.strokeRect(cr.x, cr.y, cr.w, cr.h);
+        });
+      });
     }
   }, [result, selectedPlateIndex, showToolpaths, enableOuterCut, cutToolDia, cfg]);
 
@@ -369,8 +397,12 @@ export default function NestingPanel({ cfg, plateCfg }) {
     };
   })();
 
-  const cums = showToolpaths && cfg.rows && cfg.rows.length ? computeCumOffsets(cfg.rows, cfg.offsetMode || 'relative') : [];
-  const toolColors = cfg.rows ? cfg.rows.map((r, i) => `hsl(${(i * 67) % 360} 90% 62%)`) : [];
+  // Legend/colour must follow the SAME row set the canvas draws:
+  // offset rows drive the cumulative chain, carving rows are their own entries.
+  const legendOffsetRows = (cfg.rows || []).filter((r) => (r.operation || 'offset') !== 'derz' && r.operation !== 'carving');
+  const legendCarvingRows = (cfg.rows || []).filter((r) => r.operation === 'carving');
+  const cums = showToolpaths && legendOffsetRows.length ? computeCumOffsets(legendOffsetRows, cfg.offsetMode || 'relative') : [];
+  const toolColors = legendOffsetRows.map((r, i) => `hsl(${(i * 67) % 360} 90% 62%)`);
 
   return (
     <div className="card">
@@ -689,11 +721,17 @@ export default function NestingPanel({ cfg, plateCfg }) {
                   T{cutToolNo} Dış Kesim (6mm / 3mm dıştan)
                 </span>
               )}
-              {cfg.rows && cfg.rows.map((r, i) => (
-                <span key={i} className="legend-chip">
+              {legendOffsetRows.map((r, i) => (
+                <span key={`off-${i}`} className="legend-chip">
                   <span className="legend-dot" style={{ background: toolColors[i] }} />
                   T{r.toolNo} {r.name || ''}
                   {cums[i] < 0 ? ' (kesikli = dışarıda)' : ''}
+                </span>
+              ))}
+              {legendCarvingRows.map((r, i) => (
+                <span key={`carv-${i}`} className="legend-chip">
+                  <span className="legend-dot" style={{ background: 'hsl(320 85% 62%)' }} />
+                  T{r.toolNo} {r.name || 'Carving'} (V-bıçak profili)
                 </span>
               ))}
             </div>

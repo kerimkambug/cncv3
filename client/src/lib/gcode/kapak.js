@@ -4,6 +4,98 @@ import { fmt, computeCumOffsets } from './common.js';
 import { computeDerzPositions } from './derz.js';
 
 /**
+ * Computes the top-edge curve geometry for a part.
+ *
+ * Styles:
+ *  - 'flat'       : no curve (classic rectangle), returns null.
+ *  - 'semicircle' : full half-circle; centre on the mid-width, radius = half the
+ *                   inner width, top of the arc sitting at yt.
+ *  - 'pointed'    : flattened/sharp arch built from a single circular arc that
+ *                   dips `rise` mm below yt at the middle, blending into the
+ *                   straight top edge at the two "shoulder" points.
+ *
+ * Validated against real production files (2_NUMARA.cnc / 3_NUMARA.cnc).
+ *
+ * @param {number} xl inner-left X
+ * @param {number} xr inner-right X
+ * @param {number} yt top Y of the straight inner edge (arc top / arch apex height)
+ * @param {'flat'|'semicircle'|'pointed'} [topStyle='flat']
+ * @param {number} [riseRatio=0.125] - only for 'pointed': rise = innerW * riseRatio
+ * @returns {null | {
+ *   topStyle: string, xc: number, yc: number, r: number,
+ *   xl: number, xr: number, yt: number,
+ *   yShoulder: number|null, innerW: number, rise: number,
+ *   yEnd: (x:number)=>number,
+ * }}
+ */
+export function computeTopCurve(xl, xr, yt, topStyle = 'flat', riseRatio = 0.125) {
+  if (topStyle !== 'semicircle' && topStyle !== 'pointed') return null;
+
+  const innerW = xr - xl;
+  const xc = (xl + xr) / 2;
+  let r, yc, yShoulder = null, rise = 0;
+
+  if (topStyle === 'semicircle') {
+    // Full half-circle: apex at yt, radius = half the inner width.
+    r = innerW / 2;
+    yc = yt - r;
+  } else {
+    // 'pointed': rise = innerW * riseRatio (default 0.125);
+    // circle passing through shoulders (xl,yt) / (xr,yt) and dipping `rise` at centre.
+    rise = innerW * (Number(riseRatio) || 0.125);
+    r = ((innerW / 2) ** 2 + rise ** 2) / (2 * rise);
+    yc = yt - r;
+    yShoulder = yc + Math.sqrt(Math.max(0, r ** 2 - (innerW / 2) ** 2));
+  }
+
+  // Top-edge Y at any X across the part (used to end derz / vertical lines on the curve).
+  const yEnd = (x) => {
+    const rad2 = r ** 2 - (x - xc) ** 2;
+    return yc + Math.sqrt(rad2 > 0 ? rad2 : 0);
+  };
+
+  return { topStyle, xc, yc, r, xl, xr, yt, yShoulder, innerW, rise, yEnd };
+}
+
+/**
+ * Emits the G-code for a curved top edge between (xl, yEnd(xl)) and (xr, yEnd(xr)).
+ * The arc is emitted as a single G2/G3 full sweep of the top of the circle
+ * (semicircle: two quarter arcs; pointed: one shallow arc between the shoulders).
+ *
+ * @param {Array<string>} lines
+ * @param {ReturnType<typeof computeTopCurve>} curve
+ * @param {number} z - cutting Z
+ * @param {number} [feed] - only used for the introductory G1
+ * @returns {Array<string>} lines
+ */
+export function emitTopCurveGcode(lines, curve, z, feed) {
+  if (!curve) return lines;
+  const { topStyle, xc, yc, r, xl, xr, yShoulder, yEnd } = curve;
+
+  // I/J are the arc-centre offsets FROM THE ACTUAL ARC START POINT (centre - start),
+  // exactly as ArtCAM emits them in the real production files.
+  const iOf = (sx) => xc - sx;
+  const jOf = (sy) => yc - sy;
+  const jz = (n) => fmt(Math.abs(n) < 5e-3 ? 0 : n); // avoid "-0.00"
+
+  if (topStyle === 'semicircle') {
+    // Approach along the right edge to yc, then two quarter arcs: right edge ->
+    // apex -> left edge (matches 2_NUMARA.cnc: G3X146Y340I-86J0 / G3X60Y254I0J-86).
+    lines.push(`G1 X${fmt(xr)} Y${fmt(yEnd(xr))}`);
+    lines.push(`G3 X${fmt(xc)} Y${fmt(yc + r)} I${fmt(iOf(xr))} J${jz(jOf(yc))} F${Number(feed || 0).toFixed(1)}`);
+    lines.push(`G3 X${fmt(xl)} Y${fmt(yEnd(xl))} I${fmt(iOf(xc))} J${jz(jOf(yc + r))}`);
+    return lines;
+  }
+
+  // 'pointed': single arc between the two shoulders, apex at yt = yc + r.
+  // Sweep right shoulder -> left shoulder over the shallow top
+  // (matches 3_NUMARA.cnc: G3X57.00I-89.00J-166.87).
+  lines.push(`G1 X${fmt(xr)} Y${fmt(yShoulder)}`);
+  lines.push(`G3 X${fmt(xl)} Y${fmt(yShoulder)} I${fmt(iOf(xr))} J${jz(jOf(yShoulder))} F${Number(feed || 0).toFixed(1)}`);
+  return lines;
+}
+
+/**
  * Calculates adaptive toolpath coordinates for a part of given width and height.
  *
  * Rules:
@@ -135,6 +227,68 @@ export function calculateAdaptiveOffsets(width, height, rows, offsetMode = 'rela
 }
 
 /**
+ * Builds a "carving" profile: a single closed profile line (V-bit), NOT a pocket.
+ * The main pass runs at a fixed offset (e.g. 56) at the carving depth; at every
+ * corner the tool steps DIAGONALLY outwards (offset - sharpenDistance) AND ramps
+ * back to the surface (Z = thickness) at the same time, then returns to the
+ * profile — matching the verified 1_NUMARA.cnc corner treatment.
+ *
+ * Confirmed on 1_NUMARA.cnc: corner exit distance == carving depth (6mm <-> 6mm)
+ * on all 4 corners. That 1:1 ratio is NOT yet confirmed as a general rule — pass
+ * `cornerSharpenDistance` to override; when null/undefined it defaults to `depth`.
+ * (Kerim should confirm whether the exit distance is always equal to the depth or
+ * a separate parameter.)
+ *
+ * @param {number} width - part width (mm)
+ * @param {number} height - part height (mm)
+ * @param {number} offset - main profile offset from the part edge (mm)
+ * @param {number} depth - carving depth (mm)
+ * @param {number} thickness - material thickness (mm)
+ * @param {number} [cornerSharpenDistance] - diagonal exit distance; null => depth
+ * @returns {Array<string>} gcode lines for the profile
+ */
+export function buildCarvingProfile(width, height, offset, depth, thickness, cornerSharpenDistance = null) {
+  const o = Number(offset) || 0;
+  const d = Number(depth) || 0;
+  const t = Number(thickness) || 0;
+  const exit = cornerSharpenDistance === null || cornerSharpenDistance === undefined
+    ? d
+    : Number(cornerSharpenDistance);
+
+  const zCut = +(t - d).toFixed(3);       // cutting depth
+  const zSurf = +t.toFixed(3);            // back at the surface = 0 depth
+  const oi = o - exit;                    // outer diagonal corner offset (56 - 6 = 50)
+
+  const x1 = o;                // inner profile left
+  const x2 = width - o;        // inner profile right
+  const y1 = o;                // inner profile bottom
+  const y2 = height - o;       // inner profile top
+  const ox1 = oi;              // outer diagonal left
+  const ox2 = width - oi;      // outer diagonal right
+  const oy1 = oi;              // outer diagonal bottom
+  const oy2 = height - oi;     // outer diagonal top
+  // Verified order on 1_NUMARA.cnc (lines 42-56): start at the TOP-RIGHT profile
+  // corner, then walk the 4 corners CLOCKWISE (TR -> TL -> BL -> BR), each corner
+  // doing an outward diagonal ramp to the surface (Z=thickness) and immediately
+  // returning to the profile at the cutting depth. Matches byte-for-byte.
+  const lines = [];
+  lines.push(`G1 Z${fmt(zCut)}`);
+  lines.push(`G1 X${fmt(ox2)} Y${fmt(oy2)} Z${fmt(zSurf)}`); // TR outward + surface ramp
+  lines.push(`X${fmt(x2)} Y${fmt(y2)} Z${fmt(zCut)}`);       // back to TR profile
+  lines.push(`X${fmt(x1)}`);                                  // TL profile (X only)
+  lines.push(`X${fmt(ox1)} Y${fmt(oy2)} Z${fmt(zSurf)}`);    // TL outward＋rampa
+  lines.push(`X${fmt(x1)} Y${fmt(y2)} Z${fmt(zCut)}`);       // back to TL profile
+  lines.push(` Y${fmt(y1)}`);                                 // BL profile (Y only)
+  lines.push(`X${fmt(ox1)} Y${fmt(oy1)} Z${fmt(zSurf)}`);    // BL outward+ramp
+  lines.push(`X${fmt(x1)} Y${fmt(y1)} Z${fmt(zCut)}`);       // back to BL profile
+  lines.push(`X${fmt(x2)}`);                                  // BR profile (X only)
+  lines.push(`X${fmt(ox2)} Y${fmt(oy1)} Z${fmt(zSurf)}`);    // BR outward+ramp
+  lines.push(`X${fmt(x2)} Y${fmt(y1)} Z${fmt(zCut)}`);       // back to BR profile
+  lines.push(` Y${fmt(y2)}`);                                 // close back up the right edge
+  return lines;
+}
+
+/**
  * @param {number} width
  * @param {number} height
  * @param {object} cfg - machine config (thickness, spindleSpeed, safeZ, toolChangeZ, homeZ, plungeFeed, cutFeed)
@@ -147,9 +301,12 @@ export function calculateAdaptiveOffsets(width, height, rows, offsetMode = 'rela
  */
 export function buildKapakGcode(width, height, cfg, offsetX = 0, offsetY = 0, isCombined = false) {
   const rows = cfg.rows || [];
-  const offsetRows = rows.filter((row) => (row.operation || 'offset') !== 'derz');
+  const isDerzOrCarving = (row) => row.operation === 'derz' || row.operation === 'carving';
+  const offsetRows = rows.filter((row) => !isDerzOrCarving(row));
   const derzRows = rows.map((row, rowIndex) => ({ row, rowIndex })).filter(({ row }) => row.operation === 'derz');
+  const carvingRows = rows.filter((row) => row.operation === 'carving');
   const adaptiveRows = calculateAdaptiveOffsets(width, height, offsetRows, cfg.offsetMode || 'relative');
+  const topStyle = cfg.topStyle || 'flat';
   const lines = isCombined ? [] : ['makro'];
   let lastEmittedToolNo = null;
 
@@ -174,13 +331,55 @@ export function buildKapakGcode(width, height, cfg, offsetX = 0, offsetY = 0, is
       lastEmittedToolNo = r.toolNo;
     }
 
+    const curve = topStyle === 'flat' ? null : computeTopCurve(x1, x2, y2, topStyle, cfg.riseRatio);
+
     lines.push(`G0 X${fmt(x1)} Y${fmt(y1)} Z${fmt(cfg.safeZ)}`);
     lines.push(`G1   Z${fmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
     lines.push(`G1 X${fmt(x2)}   F${cfg.cutFeed.toFixed(1)}`);
-    lines.push(` Y${fmt(y2)} `);
-    lines.push(`X${fmt(x1)}  `);
-    lines.push(` Y${fmt(y1)} `);
+    if (curve) {
+      emitTopCurveGcode(lines, curve, z, cfg.cutFeed);
+      lines.push(`G1 X${fmt(x1)} Y${fmt(y1)} F${cfg.cutFeed.toFixed(1)}`);
+    } else {
+      lines.push(` Y${fmt(y2)} `);
+      lines.push(`X${fmt(x1)}  `);
+      lines.push(` Y${fmt(y1)} `);
+    }
     lines.push(`G0   Z${fmt(cfg.safeZ)}`);
+  });
+
+  carvingRows.forEach((row) => {
+    const depth = Number(row.depth) || 0;
+    const exit = row.cornerSharpenDistance === null || row.cornerSharpenDistance === undefined
+      ? depth
+      : Number(row.cornerSharpenDistance);
+    const offset = Number(row.stepOffset) || 0;
+    lines.push(`M6T${row.toolNo}`);
+    lines.push(`M3 S${cfg.spindleSpeed}`);
+    if (row.cornerSharpen === false) {
+      // Plain closed profile at depth, no corner sharpening ramps.
+      const x1 = offsetX + offset;
+      const x2 = offsetX + width - offset;
+      const y1 = offsetY + offset;
+      const y2 = offsetY + height - offset;
+      const z = +(cfg.thickness - depth).toFixed(3);
+      lines.push(`G0 X${fmt(x1)} Y${fmt(y1)} Z${fmt(cfg.safeZ)}`);
+      lines.push(`G1 Z${fmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
+      lines.push(`G1 X${fmt(x2)} Y${fmt(y1)} F${cfg.cutFeed.toFixed(1)}`);
+      lines.push(`G1 X${fmt(x2)} Y${fmt(y2)}`);
+      lines.push(`G1 X${fmt(x1)} Y${fmt(y2)}`);
+      lines.push(`G1 X${fmt(x1)} Y${fmt(y1)}`);
+      lines.push(`G0 Z${fmt(cfg.safeZ)}`);
+    } else {
+      // Lead-in to the TOP-RIGHT profile corner, matching 1_NUMARA.cnc (G0 X236 Y344 Z46).
+      lines.push(`G0 X${fmt(offsetX + width - offset)} Y${fmt(offsetY + height - offset)} Z${fmt(cfg.safeZ)}`);
+      buildCarvingProfile(width, height, offset, depth, cfg.thickness, exit).forEach((line) => {
+        // re-base the profile's absolute coords by the panel offset, and apply the cut feed
+        const fed = /^G1 Z/.test(line) ? `${line} F${cfg.plungeFeed.toFixed(1)}` : `${line} F${cfg.cutFeed.toFixed(1)}`;
+        lines.push(offsetX === 0 && offsetY === 0 ? fed : fed.replace(/X(-?[\d.]+)/g, (m, n) => `X${fmt(Number(n) + offsetX)}`).replace(/Y(-?[\d.]+)/g, (m, n) => `Y${fmt(Number(n) + offsetY)}`));
+      });
+      lines.push(`G0 Z${fmt(cfg.safeZ)}`);
+    }
+    lastEmittedToolNo = row.toolNo;
   });
 
   derzRows.forEach(({ row, rowIndex }) => {
@@ -204,12 +403,17 @@ export function buildKapakGcode(width, height, cfg, offsetX = 0, offsetY = 0, is
     const z = +(cfg.thickness - Number(row.depth || 0)).toFixed(3);
     lines.push(`M6T${row.toolNo}`);
     lines.push(`M3 S${cfg.spindleSpeed}`);
+    const curve = topStyle === 'flat' ? null : computeTopCurve(opts.margin, width - opts.margin, height - opts.margin, topStyle, cfg.riseRatio);
     positions.forEach((pos) => {
       const vertical = opts.yon === 'dikey';
       const x1 = vertical ? offsetX + pos : offsetX + opts.margin - opts.overshootX;
       const y1 = vertical ? offsetY + opts.margin - opts.overshootY : offsetY + pos;
       const x2 = vertical ? x1 : offsetX + width - opts.margin + opts.overshootX;
-      const y2 = vertical ? offsetY + height - opts.margin + opts.overshootY : y1;
+      // Vertical divider lines must END on the curve, not at the flat top edge.
+      const curvedTop = vertical && curve && pos > curve.xl && pos < curve.xr;
+      const y2 = vertical
+        ? offsetY + (curvedTop ? curve.yEnd(pos) : height - opts.margin + opts.overshootY)
+        : y1;
       lines.push(`G0 X${fmt(x1)} Y${fmt(y1)} Z${fmt(cfg.safeZ)}`);
       lines.push(`G1 Z${fmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
       lines.push(`G1 X${fmt(x2)} Y${fmt(y2)} F${cfg.cutFeed.toFixed(1)}`);
@@ -240,13 +444,40 @@ export function buildKapakGcode(width, height, cfg, offsetX = 0, offsetY = 0, is
  */
 export function buildKapakPresetDxf(width, height, cfg = {}) {
   const rows = cfg.rows || [];
+  const topStyle = cfg.topStyle || 'flat';
   const lines = ['0', 'SECTION', '2', 'HEADER', '9', '$ACADVER', '1', 'AC1009', '9', '$INSUNITS', '70', '4', '0', 'ENDSEC', '0', 'SECTION', '2', 'TABLES', '0', 'TABLE', '2', 'LAYER', '70', '2', '0', 'LAYER', '2', '0', '70', '0', '62', '7', '6', 'CONTINUOUS'];
-  const layers = ['0_NOMINAL', ...rows.map((row, index) => `${row.operation === 'derz' ? 'DERZ' : 'OFFSET'}_T${row.toolNo || index + 1}_${index + 1}`)];
+  const layerName = (row, index) => `${row.operation === 'derz' ? 'DERZ' : row.operation === 'carving' ? 'CARVING' : 'OFFSET'}_T${row.toolNo || index + 1}_${index + 1}`;
+  const layers = ['0_NOMINAL', ...rows.map(layerName)];
   layers.forEach((layer, index) => lines.push('0', 'LAYER', '2', layer, '70', '0', '62', String((index % 6) + 1), '6', 'CONTINUOUS'));
   lines.push('0', 'ENDTAB', '0', 'ENDSEC', '0', 'SECTION', '2', 'ENTITIES');
   function addLine(layer, x1, y1, x2, y2) { lines.push('0', 'LINE', '8', layer, '10', Number(x1).toFixed(3), '20', Number(y1).toFixed(3), '30', '0.000', '11', Number(x2).toFixed(3), '21', Number(y2).toFixed(3), '31', '0.000'); }
-  function addRect(layer, x1, y1, x2, y2) { addLine(layer, x1, y1, x2, y1); addLine(layer, x2, y1, x2, y2); addLine(layer, x2, y2, x1, y2); addLine(layer, x1, y2, x1, y1); }
-  addRect('0_NOMINAL', 0, 0, width, height);
+  // DXF ARC is always stored as a counter-clockwise sweep from group 50 to 51.
+  // For a clockwise sweep we swap the endpoints (DXF has no explicit direction flag).
+  function addArc(layer, cx, cy, radius, startDeg, endDeg, clockwise = false) {
+    const s = clockwise ? endDeg : startDeg;
+    const e = clockwise ? startDeg : endDeg;
+    lines.push('0', 'ARC', '8', layer, '10', Number(cx).toFixed(3), '20', Number(cy).toFixed(3), '30', '0.000', '40', Number(radius).toFixed(3), '50', Number(s).toFixed(4), '51', Number(e).toFixed(4), '210', '0.0', '220', '0.0', '230', '1.0');
+  }
+  // Rectangle whose TOP edge follows the curved-top geometry (arc drawn on the layer).
+  function addCurvedRect(layer, x1, y1, x2, y2, curve) {
+    addLine(layer, x1, y1, x2, y1);
+    addLine(layer, x2, y1, x2, curve ? curve.yEnd(x2) : y2);
+    addLine(layer, x1, y1, x1, curve ? curve.yEnd(x1) : y2);
+    if (curve) {
+      const angleAt = (x, y) => (Math.atan2(y - curve.yc, x - curve.xc) * 180) / Math.PI;
+      if (curve.topStyle === 'semicircle') {
+        // Full half-circle over the top: CCW from the right edge (0deg) to the left (180deg).
+        addArc(layer, curve.xc, curve.yc, curve.r, 0, 180, false);
+      } else if (curve.topStyle === 'pointed') {
+        // Shallow arch: CCW from the left shoulder to the right shoulder.
+        addArc(layer, curve.xc, curve.yc, curve.r, angleAt(curve.xl, curve.yShoulder), angleAt(curve.xr, curve.yShoulder), false);
+      }
+    } else {
+      addLine(layer, x2, y2, x1, y2);
+    }
+  }
+  const nominalCurve = topStyle === 'flat' ? null : computeTopCurve(0, width, height, topStyle, cfg.riseRatio);
+  addCurvedRect('0_NOMINAL', 0, 0, width, height, nominalCurve);
   let offsetRows = 0;
   rows.forEach((row, index) => {
     const layer = layers[index + 1];
@@ -261,14 +492,29 @@ export function buildKapakPresetDxf(width, height, cfg = {}) {
       const available = (yon === 'dikey' ? width : height) - margin * 2;
       const count = derz.autoFit === false ? Math.max(0, Math.floor(available / spacing) + 1) : Math.max(0, Math.round(available / spacing) + 1);
       const exact = count > 1 ? available / (count - 1) : spacing;
+      const derzCurve = topStyle === 'flat' ? null : computeTopCurve(margin, width - margin, height - margin, topStyle, cfg.riseRatio);
       for (let i = 0; i < count; i++) {
         const pos = margin + i * exact;
-        if (yon === 'dikey') addLine(layer, pos, margin - overshootY, pos, height - margin + overshootY);
-        else addLine(layer, margin - overshootX, pos, width - margin + overshootX, pos);
+        if (yon === 'dikey') {
+          // Vertical divider ends on the curve, not the flat top edge.
+          const topY = derzCurve && pos > derzCurve.xl && pos < derzCurve.xr ? derzCurve.yEnd(pos) : height - margin + overshootY;
+          addLine(layer, pos, margin - overshootY, pos, topY);
+        } else {
+          addLine(layer, margin - overshootX, pos, width - margin + overshootX, pos);
+        }
       }
+    } else if (row.operation === 'carving') {
+      // Closed single-line carving profile (V-bit) with outward corner ramps.
+      const o = Number(row.stepOffset) || 0;
+      const x1 = o; const x2 = width - o; const y1 = o; const y2 = height - o;
+      addLine(layer, x1, y1, x2, y1);
+      addLine(layer, x2, y1, x2, y2);
+      addLine(layer, x2, y2, x1, y2);
+      addLine(layer, x1, y2, x1, y1);
     } else {
       offsetRows += Number(row.stepOffset) || 0;
-      addRect(layer, offsetRows, offsetRows, width - offsetRows, height - offsetRows);
+      const rowCurve = topStyle === 'flat' ? null : computeTopCurve(offsetRows, width - offsetRows, height - offsetRows, topStyle, cfg.riseRatio);
+      addCurvedRect(layer, offsetRows, offsetRows, width - offsetRows, height - offsetRows, rowCurve);
     }
   });
   lines.push('0', 'ENDSEC', '0', 'EOF');
