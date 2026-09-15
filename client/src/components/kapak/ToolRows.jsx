@@ -9,6 +9,15 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
     next[idx] = { ...next[idx], [field]: field === 'name' || field === 'toolNo' || field === 'operation' ? value : parseFloat(value) || 0 };
     setRows(next);
   }
+
+  // cornerRadius / feed accept an empty string to mean "not set" (cleared),
+  // so a plain offset pass stays plain and a radius/feed can be removed again.
+  function updateOptional(idx, field, value) {
+    const next = rows.slice();
+    const stored = value === '' || value === null || value === undefined ? null : parseFloat(value) || 0;
+    next[idx] = { ...next[idx], [field]: stored };
+    setRows(next);
+  }
   function updateCarving(idx, field, value) {
     const next = rows.slice();
     // cornerSharpenDistance: empty string => null (falls back to the row's depth)
@@ -67,6 +76,8 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
             <th>İşlem</th>
             <th>Derinlik</th>
             <th>{isAbsolute ? 'Offset (dıştan)' : 'Adım Offset'}</th>
+            <th title="Köşe yarıçapı (mm) — boş = düz köşe. Doluysa G2/G3 yuvarlatmalı tek profil kesilir.">Köşe R</th>
+            <th title="Bu bıçağın kesim hızı (mm/dk). Boş = genel feed kullanılır.">Feed</th>
             <th>Kümülatif</th>
             <th>Z</th>
             <th></th>
@@ -126,6 +137,28 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
                     style={{ width: 60 }}
                   />
                 </td>
+                <td>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={r.cornerRadius ?? ''}
+                    onChange={(e) => updateOptional(i, 'cornerRadius', e.target.value)}
+                    placeholder="—"
+                    style={{ width: 60 }}
+                  />
+                </td>
+                <td>
+                  <input
+                    type="number"
+                    min="0"
+                    step="100"
+                    value={r.feed ?? ''}
+                    onChange={(e) => updateOptional(i, 'feed', e.target.value)}
+                    placeholder="genel"
+                    style={{ width: 70 }}
+                  />
+                </td>
                 <td>{r.operation === 'derz' || r.operation === 'carving' ? '-' : cum.toFixed(2)}</td>
                 <td>{z.toFixed(2)}</td>
                 <td>
@@ -136,7 +169,7 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
               </tr>
               {r.operation === 'carving' && (
                 <tr key={`${i}-carving`}>
-                  <td colSpan="8" className="derz-row-settings">
+                  <td colSpan="10" className="derz-row-settings">
                     <strong>Carving ayarları</strong>
                     <label className="derz-auto-fit"><input type="checkbox" checked={r.cornerSharpen !== false} onChange={(e) => updateCarving(i, 'cornerSharpen', e.target.checked)} /><span>Köşeleri keskinleştir (dışa çıkış + yüzeye rampa)</span></label>
                     {r.cornerSharpen !== false && (
@@ -147,7 +180,7 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
               )}
               {r.operation === 'derz' && (
                 <tr key={`${i}-derz`}>
-                  <td colSpan="8" className="derz-row-settings">
+                  <td colSpan="10" className="derz-row-settings">
                     <strong>Derz ayarları</strong>
                     <label><span>Yön</span><select value={r.derz?.yon || 'dikey'} onChange={(e) => updateDerz(i, 'yon', e.target.value)}><option value="dikey">Dikey</option><option value="yatay">Yatay</option></select></label>
                     <label><span>Kenar boşluğu (mm)</span><input type="number" min="0" step="0.1" value={r.derz?.margin ?? 0} onChange={(e) => updateDerz(i, 'margin', e.target.value)} /></label>

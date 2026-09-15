@@ -36,8 +36,8 @@ export const NUMUNE_PRESETS = [
     cfg: {
       topStyle: 'flat',
       rows: [
-        { toolNo: '6', depth: 6, stepOffset: 62, name: '6mm dış offset', operation: 'offset' },
-        { toolNo: '6', depth: 6, stepOffset: 59, name: '6mm dış kare', operation: 'offset' },
+        { toolNo: '6', depth: 6, stepOffset: 70, cornerRadius: 6, name: '6mm dış rounded offset', operation: 'offset' },
+        { toolNo: '6', depth: 6, stepOffset: 70, cornerRadius: 3, name: '6mm iç rounded offset', operation: 'offset' },
         { toolNo: '1', depth: 6, stepOffset: 56, name: 'Carving V-bıçak', operation: 'carving', cornerSharpen: true, cornerSharpenDistance: 6 },
         { toolNo: '12', depth: 3, stepOffset: 89, name: '135° derz', operation: 'derz', derz: { yon: 'dikey', margin: 89, spacing: 19, autoFit: true, overshootY: 0, respectPreviousOffset: false } },
       ],
@@ -47,13 +47,13 @@ export const NUMUNE_PRESETS = [
     name: '2 NUMARA',
     width: 292,
     height: 400,
-    description: 'Kemerli (yarım daire) üst + derz. 2_NUMARA.cnc ile xc=146 / r=86 / yc=254 doğrulandı. Derz: X çizgileri 100/130.67/161.33/192 (eşit 30.667mm aralık) — birebir. Derz üst ucu dosyada kemer eğrisini takip eder; bu motorda düz.',
+    description: 'Kemerli (yarım daire) üst + derz. 2_NUMARA.cnc ile xc=146 / r=86 / yc=254 doğrulandı. Derz: X çizgileri 60/90.67/121.33/152 (eşit 30.667mm aralık). Derz üst ucu kemer eğrisini takip eder (curve.yEnd), dosyadaki gibi Y326.66/338.62 noktalarında biter.',
     cfg: {
       topStyle: 'semicircle',
       rows: [
         { toolNo: '9', depth: 3, stepOffset: 60, name: 'Kemer dış offset', operation: 'offset' },
         { toolNo: '9', depth: 3, stepOffset: 55, name: 'Kemer iç offset', operation: 'offset' },
-        { toolNo: '2', depth: 2, stepOffset: 100, name: '10mm balmumu derz', operation: 'derz', derz: { yon: 'dikey', margin: 100, spacing: 30, autoFit: true, overshootY: 0, respectPreviousOffset: false } },
+        { toolNo: '2', depth: 2, stepOffset: 100, feed: 7000, name: '10mm balmumu derz', operation: 'derz', derz: { yon: 'dikey', margin: 100, spacing: 30, autoFit: true, overshootY: 0, respectPreviousOffset: false } },
       ],
     },
   },
@@ -61,13 +61,13 @@ export const NUMUNE_PRESETS = [
     name: '3 NUMARA',
     width: 292,
     height: 400,
-    description: 'Sivri/basık kemer üst (riseRatio 0.125) + derz. 3_NUMARA.cnc G3 yayı ve derz noktası (Y327.36) doğrulandı. Derz: X çizgileri 70.69/84.38/... eşit 13.69mm aralık — birebir. Derz üst ucu dosyada kemer eğrisini takip eder; bu motorda düz.',
+    description: 'Sivri/basık kemer üst (riseRatio 0.125) + derz. 3_NUMARA.cnc G3 yayı ve derz noktası (Y327.36) doğrulandı. Derz: X çizgileri 70.69/84.38/... eşit 13.69mm aralık. Derz üst ucu kemer eğrisini takip eder (curve.yEnd), dosyadaki gibi Y327.36/332.68/336.83 noktalarında biter.',
     cfg: {
       topStyle: 'pointed',
       riseRatio: 0.125,
       rows: [
-        { toolNo: '3', depth: 5, stepOffset: 57, name: 'Sivri kemer offset', operation: 'offset' },
-        { toolNo: '3', depth: 5, stepOffset: 70.69, name: 'Sivri kemer derz', operation: 'derz', derz: { yon: 'dikey', margin: 70.69, spacing: 13.69, autoFit: true, overshootY: 0, respectPreviousOffset: false } },
+        { toolNo: '3', depth: 5, stepOffset: 57, feed: 8000, name: 'Sivri kemer offset', operation: 'offset' },
+        { toolNo: '3', depth: 5, stepOffset: 70.69, feed: 8000, name: 'Sivri kemer derz', operation: 'derz', derz: { yon: 'dikey', margin: 70.69, spacing: 13.69, autoFit: true, overshootY: 0, respectPreviousOffset: false } },
       ],
     },
   },
@@ -75,14 +75,14 @@ export const NUMUNE_PRESETS = [
     name: '5 NUMARA',
     width: 292,
     height: 400,
-    description: 'Çoklu düz offset (T6 / T9 / T9 / T7). 5_NUMARA.cnc koordinatları ile tam eşleşti.',
+    description: 'Çoklu düz offset (T6 / T9 / T9 / T7). 5_NUMARA.cnc koordinatları ve bıçak-başı feed (T7→F10000) ile tam eşleşti.',
     cfg: {
       topStyle: 'flat',
       rows: [
         { toolNo: '6', depth: 2, stepOffset: 53, name: '6mm dış', operation: 'offset' },
         { toolNo: '9', depth: 5.8, stepOffset: 67, name: '20mm tabla', operation: 'offset' },
         { toolNo: '9', depth: 5.8, stepOffset: 62, name: '20mm tabla', operation: 'offset' },
-        { toolNo: '7', depth: 4, stepOffset: 74, name: '30mm yuvarlama', operation: 'offset' },
+        { toolNo: '7', depth: 4, stepOffset: 74, feed: 10000, name: '30mm yuvarlama', operation: 'offset' },
       ],
     },
   },
@@ -90,14 +90,14 @@ export const NUMUNE_PRESETS = [
     name: '6 NUMARA',
     width: 292,
     height: 400,
-    description: 'Çoklu düz offset (T6 / T9 / T9 / T11). 6_NUMARA.cnc koordinatları ile tam eşleşti.',
+    description: 'Çoklu düz offset (T6 / T9 / T9 / T11). 6_NUMARA.cnc koordinatları ve bıçak-başı feed (T11→F8000) ile tam eşleşti.',
     cfg: {
       topStyle: 'flat',
       rows: [
         { toolNo: '6', depth: 2, stepOffset: 53, name: '6mm dış', operation: 'offset' },
         { toolNo: '9', depth: 5.8, stepOffset: 65, name: '20mm tabla', operation: 'offset' },
         { toolNo: '9', depth: 5.8, stepOffset: 62, name: '20mm tabla', operation: 'offset' },
-        { toolNo: '11', depth: 5.8, stepOffset: 75, name: 'iç offset', operation: 'offset' },
+        { toolNo: '11', depth: 5.8, stepOffset: 75, feed: 8000, name: 'iç offset', operation: 'offset' },
       ],
     },
   },
@@ -105,14 +105,14 @@ export const NUMUNE_PRESETS = [
     name: '7 NUMARA',
     width: 292,
     height: 400,
-    description: 'Çoklu iç halka (135° T12) + dış T6. 7_NUMARA.cnc ile kısmen doğrulandı (iç halka başlangıç noktaları kısmi).',
+    description: 'Çoklu iç halka (135° T12) + dış T6. 7_NUMARA.cnc ile doğrulandı (iç halka başlangıç noktaları + bıçak-başı feed T12→F9000).',
     cfg: {
       topStyle: 'flat',
       rows: [
-        { toolNo: '12', depth: 5, stepOffset: 139.1, name: '135° iç halka 1', operation: 'offset' },
-        { toolNo: '12', depth: 5, stepOffset: 115.4, name: '135° halka 2', operation: 'offset' },
-        { toolNo: '12', depth: 5, stepOffset: 91.7, name: '135° halka 3', operation: 'offset' },
-        { toolNo: '12', depth: 5, stepOffset: 68, name: '135° halka 4', operation: 'offset' },
+        { toolNo: '12', depth: 5, stepOffset: 139.1, feed: 9000, name: '135° iç halka 1', operation: 'offset' },
+        { toolNo: '12', depth: 5, stepOffset: 115.4, feed: 9000, name: '135° halka 2', operation: 'offset' },
+        { toolNo: '12', depth: 5, stepOffset: 91.7, feed: 9000, name: '135° halka 3', operation: 'offset' },
+        { toolNo: '12', depth: 5, stepOffset: 68, feed: 9000, name: '135° halka 4', operation: 'offset' },
         { toolNo: '6', depth: 5, stepOffset: 53, name: '6mm dış', operation: 'offset' },
       ],
     },
@@ -121,13 +121,14 @@ export const NUMUNE_PRESETS = [
     name: '8 NUMARA',
     width: 292,
     height: 400,
-    description: 'Yuvarlak köşe (rounded-corner) offset içerir. Bu motor rounded-corner G2/G3 üretmediği için kısmi; düz offsetler doğru.',
+    description: 'Rounded-corner (G2 köşe yaylı) T8 offset + düz T3/T12. 8_NUMARA.cnc G2 yayları (I4J0 vb.) ile eşleşti — bu motor artık köşe yayı üretiyor. Bıçak-başı feed (T3→F8000, T8/T12→F9000).',
     cfg: {
       topStyle: 'flat',
       rows: [
-        { toolNo: '3', depth: 5, stepOffset: 57, name: 'düz dış offset', operation: 'offset' },
-        { toolNo: '8', depth: 5.5, stepOffset: 60, name: 'yuvarlak köşe offset', operation: 'offset' },
-        { toolNo: '12', depth: 5.5, stepOffset: 68.5, name: '135° iç', operation: 'offset' },
+        { toolNo: '3', depth: 5, stepOffset: 57, feed: 8000, name: 'düz dış offset', operation: 'offset' },
+        { toolNo: '8', depth: 5.5, stepOffset: 60, feed: 9000, name: 'düz kaba offset', operation: 'offset' },
+        { toolNo: '8', depth: 5.5, stepOffset: 64.5, cornerRadius: 4, feed: 9000, name: 'yuvarlak köşe offset', operation: 'offset' },
+        { toolNo: '12', depth: 5.5, stepOffset: 68.5, feed: 9000, name: '135° iç', operation: 'offset' },
       ],
     },
   },
@@ -158,27 +159,38 @@ export function toPresetDoc(def) {
   };
 }
 
-/** Seeds every sample preset that is not already present (matched by name). */
-export async function seedNumunePresets(store = fileStore) {
+/**
+ * Seeds the sample presets. By default a preset that already exists (matched by
+ * name) is left untouched; pass { force: true } to overwrite existing presets
+ * with the current definition (used after the sample geometry was refined).
+ */
+export async function seedNumunePresets(store = fileStore, { force = false } = {}) {
   const existing = await store.list('kapak');
-  const existingNames = new Set(existing.map((p) => p.name));
+  const existingByName = new Map(existing.map((p) => [p.name, p]));
   let added = 0;
   let skipped = 0;
+  let updated = 0;
   for (const def of NUMUNE_PRESETS) {
-    if (existingNames.has(def.name)) { skipped++; continue; }
-    await store.create(toPresetDoc(def));
-    existingNames.add(def.name);
-    added++;
+    const prev = existingByName.get(def.name);
+    if (prev && !force) { skipped++; continue; }
+    if (prev) {
+      await store.update(prev._id || prev.id, toPresetDoc(def));
+      updated++;
+    } else {
+      await store.create(toPresetDoc(def));
+      added++;
+    }
   }
-  return { added, skipped, total: NUMUNE_PRESETS.length };
+  return { added, updated, skipped, total: NUMUNE_PRESETS.length };
 }
 
-// Allow running directly: `node server/scripts/seed-numune-presets.js`
+// Allow running directly: `node server/scripts/seed-numune-presets.js [--force]`
 const invokedDirectly = process.argv[1] && process.argv[1].replace(/\\/g, '/').endsWith('scripts/seed-numune-presets.js');
 if (invokedDirectly) {
-  seedNumunePresets()
-    .then(({ added, skipped, total }) => {
-      console.log(`[seed] numune presets: +${added} added, ${skipped} already present (${total} total).`);
+  const force = process.argv.includes('--force');
+  seedNumunePresets(fileStore, { force })
+    .then(({ added, updated, skipped, total }) => {
+      console.log(`[seed] numune presets: +${added} added, ${updated} updated, ${skipped} skipped (${total} total).`);
       process.exit(0);
     })
     .catch((err) => {

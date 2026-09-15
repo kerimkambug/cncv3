@@ -84,6 +84,8 @@ empire-cnc-mern/
 | Nesting görsel önizleme (renkli parça + kesim yolu + legend) | ✅ `NestingPlateCanvas.jsx` |
 | Nesting PNG dışa aktarma | ✅ aynı bileşende |
 | Nesting'e dosyadan parça içe aktarma (CSV/TXT) | ✅ `parseNestImportText` |
+| Rounded-corner offset (G2/G3 köşe yaylı tek profil) | ✅ `buildRoundedRectProfile` + `row.cornerRadius` |
+| Bıçak-başı kesim hızı (satır bazlı feed) | ✅ `row.feed` — boşsa genel `cutFeed` kullanılır |
 | Preset kaydet/yükle/sil | ✅ `PresetPanel.jsx` (backend'e bağlı) |
 | preset.json içe/dışa aktarma | ✅ aynı panelde — eski `preset.json` dosyaları doğrudan yüklenebilir |
 | Ctrl+Enter kısayolu | ✅ `useCtrlEnter` hook'u, her üretim ekranında |
@@ -101,11 +103,14 @@ npm install
 node src/lib/gcode/smoke.test.js
 ```
 
-20 kontrolün hepsi geçmeli (`ALL CHECKS PASSED`). Kapsadığı noktalar: T9→T9
+Tüm kontroller geçmeli (`ALL CHECKS PASSED`). Kapsadığı noktalar: T9→T9
 aynı takım ardışıklığında M6T/M3/M5 atlama, daire merkez ofseti, derz
 oto-sığdırma + gerçek 73-çizgi eşleşmesi, cam kesim/tarama koordinatları,
 panjur çıta rampası (gerçek dosyayla 86 adım/çıta eşleşmesi), offset modu
-(kümülatif/mutlak), nesting parça paketleme ve dosya içe aktarma.
+(kümülatif/mutlak), nesting parça paketleme ve dosya içe aktarma, ayrıca
+**rounded-corner** (G2 köşe yayları + radius clamp + r0 kare fallback),
+**satır-başı feed** (kendi feed'i + genel feed'e geri düşme) ve **kemer üstü
+derz** (3 NUMARA Y327.36/332.68/336.83 eşleşmesi).
 
 ## Çalıştırma
 
@@ -154,11 +159,41 @@ cd client
 npm run build      # dist/ klasörünü üretir, herhangi bir statik sunucudan servis edilebilir
 ```
 
-## Bilinen sınırlama
+## Rounded-corner, satır-başı feed ve kemer üstü derz (numune presetleri)
 
+`/numuneler` altındaki ArtCAM nihai dosyalarından türetilen 7 örnek preset
+(`server/scripts/seed-numune-presets.js`) bu üç özelliği kullanır:
+
+- **`row.cornerRadius`** — doluysa o offset geçişi düz dikdörtgen yerine
+  **G2/G3 köşe yaylı kapalı profil** olarak kesilir (tam doğru rounded-rect:
+  köşe merkezleri kenarların içinde, lead-in 45° BL köşesinden). 1 NUMARA
+  (r6/r3) ve 8 NUMARA (r4) bunu kullanır.
+  *Not:* ArtCAM'in kendi dosyasındaki `I/J` değerleri matematiksel olarak
+  tutarsızdır (yay başlangıç noktası kendi yarıçapı üzerinde değil — post
+  processor çıktısı). Bu yüzden byte-birebir değil, **geometrik eşdeğerlik**
+  hedeflenir; yarıçap, kenar ve X/Y koordinatları birebir eşleşir.
+- **`row.feed`** — o bıçağın kesim hızı (mm/dk). Boşsa genel `cutFeed`
+  kullanılır. 5 NUMARA T7→F10000, 6 NUMARA T11→F8000, 7 NUMARA T12→F9000,
+  8 NUMARA T3→F8000 / T8,T12→F9000.
+- **Kemer üstü derz** — dikey derz çizgileri üst uçtan düz tavana değil,
+  işin kemer eğrisine (`curve.yEnd(pos)`) otur. Kemer, işin **en dış offset
+  dikdörtgeninden** türetilir (derz margin'inden değil). 2 ve 3 NUMARA bunu
+  kullanır (3 NUMARA kemer uçları Y327.36/332.68/336.83 — gerçek dosyayla eşleşir).
+
+Seed'i mevcut presetleri **güncelleyerek** çalıştırmak için:
+
+```bash
+cd server
+npm run seed:numune --force   # varsa üzerine yazar, --force yoksa atlar
+```
+
+## Bilinen sınırlama
 - Cam Modelleri'nde tarama köşeleri hâlâ keskin (kare) — ArtCAM'deki
   dekoratif rozet/fileto detayı bu sürümde de yok (orijinalde de yoktu,
   bu bir MERN-dönüşüm eksiği değil).
+- ArtCAM rounded-corner dosyalarındaki yay `I/J` değerleri kendi içinde
+  tutarsız olduğu için o geçişler byte-birebir değil, geometrik olarak
+  eşdeğerdir (bkz. yukarıdaki not).
 - Cam Modelleri'nin kendi ayarları için preset sistemi yok (Kapak'ta var).
   İstenirse `CamModule.jsx`'e `module:'cam'` filtresiyle aynı `PresetPanel`
   deseni eklenebilir — altyapı (backend, model) zaten hazır.

@@ -7,6 +7,11 @@ const ToolRowSchema = new mongoose.Schema(
     operation: { type: String, enum: ['offset', 'derz', 'carving'], default: 'offset' },
     depth: { type: Number, required: true },
     stepOffset: { type: Number, required: true },
+    // Rounded-corner offset pass: radius in mm (null = plain square corner).
+    // When set, the pass is cut as a single closed profile with G2/G3 corner arcs.
+    cornerRadius: { type: Number, default: null },
+    // Per-row cut feed override (mm/min). null = fall back to the shared cutFeed.
+    feed: { type: Number, default: null },
     // Carving-only: closed single-line profile (V-bit).
     cornerSharpen: { type: Boolean, default: true },
     // null = use the row's depth (1:1 confirmed on 1_NUMARA.cnc; override when asked)

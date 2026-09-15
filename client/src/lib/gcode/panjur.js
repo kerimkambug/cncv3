@@ -128,6 +128,11 @@ function validatePanjurConfig(c) {
   if (c.stepover <= 0) {
     throw new Error('Raster adımı 0’dan büyük olmalı.');
   }
+  if (c.edgeInset !== undefined && c.edgeInset !== 'auto' && !(c.edgeInset === null || c.edgeInset === '')) {
+    if (!Number.isFinite(Number(c.edgeInset)) || Number(c.edgeInset) < 0) {
+      throw new Error('Kenar içeri çekme negatif olamaz (sayı veya "auto").');
+    }
+  }
   if (c.endZ >= c.startZ) {
     throw new Error('Son Z, başlangıç Z’den daha düşük olmalı.');
   }
@@ -156,20 +161,70 @@ function validatePanjurConfig(c) {
  * takım Y ekseninde süpürülür ve X ekseninde adımlanır; aksi halde tersi.
  * @returns {number} güncellenmiş satır sayacı (n)
  */
+/**
+ * En derin noktada konik bıçağın (T14) gerçek yarıçapını hesaplar.
+ *
+ * Konik geometri: uç çapı (tipDia) → gövde çapı (bodyDia), konik yükseklik
+ * (height) boyunca doğrusal açılır. Eğim (tan açı):
+ *   eğim = (gövdeYarıçap - uçYarıçap) / konikYükseklik
+ * maxDerinlik kadar inince takımın efektif yarıçapı:
+ *   r_eff = uçYarıçap + maxDerinlik × eğim  (gövdeYarıçapını geçmez)
+ *
+ * @param {object} c - Panjur konfigürasyonu
+ * @returns {{ tipR:number, bodyR:number, taperTan:number, maxDepth:number, rEff:number }}
+ */
+export function t14EffectiveRadius(c) {
+  const tipR = (Number(c.t14TipDia) || 0) / 2;
+  const bodyR = (Number(c.t14BodyDia) || 0) / 2;
+  const taperH = Number(c.t14Height) || 0;
+  const taperTan = taperH > 0 ? (bodyR - tipR) / taperH : 0;
+  const maxDepth = Math.max(0, (Number(c.startZ) || 0) - (Number(c.endZ) || 0));
+  const rEff = Math.min(bodyR, tipR + maxDepth * taperTan);
+  return { tipR, bodyR, taperTan, maxDepth, rEff };
+}
+
+/**
+ * Rasterın enine sınırlarını kenardan ne kadar içeri çekeceğini çözer.
+ * - `edgeInset` sayı ise: o sabit değer (mm). 0 = tam kenar.
+ * - `edgeInset` 'auto'/tanımsız ise: T14 konik açısından otomatik hesaplanan
+ *   en derin nokta yarıçapı (`t14EffectiveRadius`).
+ * @param {object} c
+ * @returns {number} içeri çekme mesafesi (mm, >= 0)
+ */
+export function resolveEdgeInset(c) {
+  const raw = c.edgeInset;
+  if (raw === 'auto' || raw === undefined || raw === null || raw === '') {
+    return t14EffectiveRadius(c).rEff;
+  }
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 function emitRasterPass(axis, lines, n, c, crossStart, crossEnd, safeStart, step, passes) {
   const isY = axis === 'y';
   const stepAxis = isY ? 'Y' : 'X';
   const crossAxis = isY ? 'X' : 'Y';
 
-  const gx = isY ? crossStart : safeStart;
-  const gy = isY ? safeStart : crossStart;
+  // Kenarları `resolvedEdgeInset` kadar içeri çek: rasterın enine sınırları
+  // crossStart/crossEnd yerine bu kadar daraltılmış kullanılır.
+  // - 'auto' (varsayılan): konik bıçağın açısından otomatik — en derin noktada
+  //   takımın gerçek yarıçapı kadar içeri çekilir.
+  // - sayı: elle sabit içeri çekme (mm). 0 = tam kenara kadar kes.
+  const inset = resolveEdgeInset(c);
+  const innerStart = crossStart + inset;
+  const innerEnd = crossEnd - inset;
+  const useStart = innerEnd > innerStart ? innerStart : crossStart;
+  const useEnd = innerEnd > innerStart ? innerEnd : crossEnd;
+
+  const gx = isY ? useStart : safeStart;
+  const gy = isY ? safeStart : useStart;
   lines.push(`N${n++} G0 X${fmt(gx)} Y${fmt(gy)}`);
   lines.push(`N${n++} G0 Z${fmt(c.safeZ)}`);
   lines.push(`N${n++} G0 Z${fmt(c.startZ)}`);
   for (let i = 0; i < passes; i++) {
     const t = i / (passes - 1);
     const z = c.startZ + (c.endZ - c.startZ) * t;
-    const cross = i % 2 === 0 ? crossEnd : crossStart;
+    const cross = i % 2 === 0 ? useEnd : useStart;
     lines.push(`N${n++} G1 ${crossAxis}${fmt(cross)} F${c.feed}`);
     if (i < passes - 1) {
       const nextAlong = safeStart + (i + 1) * step;

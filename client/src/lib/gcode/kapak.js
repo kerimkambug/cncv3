@@ -96,6 +96,89 @@ export function emitTopCurveGcode(lines, curve, z, feed) {
 }
 
 /**
+ * Emits a CLOSED rounded-corner rectangle profile (one pass, counter-clockwise,
+ * all corner arcs as G2). Geometrically identical to the ArtCAM output for
+ * 1_NUMARA.cnc (r=6/3) and 8_NUMARA.cnc (r=4): same corner centres, same
+ * radius, same tangent points — so the machine cuts the exact same surface.
+ *
+ * The lead-in starts on the bottom-left corner arc at 45 degrees
+ * (x1 - r + r*sqrt2/2), exactly where ArtCAM starts it, then walks the profile
+ * CCW: BL -> up left edge -> TL -> across top -> TR -> down right edge -> BR ->
+ * across bottom -> back to the BL start point.
+ *
+ * @param {number} x1 inner-left X of the rectangle (tangent box)
+ * @param {number} y1 inner-bottom Y
+ * @param {number} x2 inner-right X
+ * @param {number} y2 inner-top Y
+ * @param {number} r corner radius (mm, > 0)
+ * @param {number} z cutting Z
+ * @param {number} plungeFeed
+ * @param {number} cutFeed
+ * @param {number} safeZ
+ * @param {number} [ox=0] X origin offset
+ * @param {number} [oy=0] Y origin offset
+ * @returns {Array<string>} gcode lines (G0 lead-in + G1/G2 profile)
+ */
+export function buildRoundedRectProfile(x1, y1, x2, y2, r, z, plungeFeed, cutFeed, safeZ, ox = 0, oy = 0) {
+  const rr = Number(r) || 0;
+  const px = (v) => fmt(v + ox);
+  const py = (v) => fmt(v + oy);
+  const pf = Number(plungeFeed).toFixed(1);
+  const cf = Number(cutFeed).toFixed(1);
+  // If the two sides are too short for the requested radius, clamp it so the
+  // arcs still meet (never emit inverted/negative spans).
+  const maxR = Math.min((x2 - x1) / 2, (y2 - y1) / 2);
+  const rad = Math.max(0, Math.min(rr, maxR));
+  if (rad <= 1e-6) {
+    // Degenerate: fall back to a square profile (same path as a flat offset pass).
+    const lines = [];
+    lines.push(`G0 X${px(x1)} Y${py(y1)} Z${fmt(safeZ)}`);
+    lines.push(`G1 Z${fmt(z)} F${pf}`);
+    lines.push(`G1 X${px(x2)} F${cf}`);
+    lines.push(` Y${py(y2)} `);
+    lines.push(`X${px(x1)}  `);
+    lines.push(` Y${py(y1)} `);
+    lines.push(`G0 Z${fmt(safeZ)}`);
+    return lines;
+  }
+
+  // Corner arc centres (tangent box inset by the radius).
+  const cblx = x1 + rad, cbly = y1 + rad;
+  const ctlx = x1 + rad, ctly = y2 - rad;
+  const ctrx = x2 - rad, ctry = y2 - rad;
+  const cbrx = x2 - rad, cbry = y1 + rad;
+
+  // Corner-arc start point on the bottom-left (45 deg): the ArtCAM lead-in.
+  const k = rad * Math.SQRT1_2; // rad * sqrt(2)/2
+  const startX = cblx - k;
+  const startY = cbly - k;
+
+  const lines = [];
+  lines.push(`G0 X${px(startX)} Y${py(startY)} Z${fmt(safeZ)}`);
+  lines.push(`G1 Z${fmt(z)} F${pf}`);
+  // Corner arc: from the 225-deg point to the LEFT tangent point (cblx, y1).
+  lines.push(`G2 X${px(cblx)} Y${py(y1)} I${fmt(k)} J${fmt(k)} F${cf}`);
+  // Left edge up to the top-left tangent point (x1, ctly).
+  lines.push(`G1 Y${py(ctly)} `);
+  // TL corner arc: left tangent -> top tangent (ctlx, y2).
+  lines.push(`G2 X${px(ctlx)} Y${py(y2)} I${fmt(0)} J${fmt(rad)} `);
+  // Top edge across to the top-right tangent point (ctrx, y2).
+  lines.push(`G1 X${px(ctrx)} `);
+  // TR corner arc: top tangent -> right tangent (x2, ctry).
+  lines.push(`G2 X${px(x2)} Y${py(ctry)} I${fmt(rad)} J${fmt(0)} `);
+  // Right edge down to the bottom-right tangent point (x2, cbry).
+  lines.push(`G1 Y${py(cbry)} `);
+  // BR corner arc: right tangent -> bottom tangent (cbrx, y1).
+  lines.push(`G2 X${px(cbrx)} Y${py(y1)} I${fmt(0)} J${fmt(-rad)} `);
+  // Bottom edge across to the bottom-left tangent point (cblx, y1).
+  lines.push(`G1 X${px(cblx)} `);
+  // BL corner arc: bottom tangent -> back to the 45-deg start point (closes the loop).
+  lines.push(`G2 X${px(startX)} Y${py(startY)} I${fmt(-k)} J${fmt(-k)} `);
+  lines.push(`G0 Z${fmt(safeZ)}`);
+  return lines;
+}
+
+/**
  * Calculates adaptive toolpath coordinates for a part of given width and height.
  *
  * Rules:
@@ -328,8 +411,19 @@ export function buildKapakGcode(width, height, cfg, offsetX = 0, offsetY = 0, is
   const lines = isCombined ? [] : ['makro'];
   let lastEmittedToolNo = null;
 
+  // Per-row cut feed override (row.feed). Falls back to the shared cfg.cutFeed.
+  const rowFeed = (r) => {
+    const f = Number(r.feed);
+    return Number.isFinite(f) && f > 0 ? f : cfg.cutFeed;
+  };
+
   adaptiveRows.forEach((r) => {
     if (r.skipped) return;
+
+    // adaptiveRows mirrors offsetRows 1:1 (same index), so r.rowIdx maps back to
+    // the source row — this is how per-row options (feed, cornerRadius) survive.
+    const srcRow = offsetRows[r.rowIdx] || r;
+    const feed = rowFeed(srcRow);
 
     const x1 = offsetX + r.x1;
     const x2 = offsetX + r.x2;
@@ -349,14 +443,21 @@ export function buildKapakGcode(width, height, cfg, offsetX = 0, offsetY = 0, is
       lastEmittedToolNo = r.toolNo;
     }
 
+    // Rounded-corner pass: a single closed profile with G2/G3 corner arcs.
+    const cornerRadius = Number(srcRow && srcRow.cornerRadius);
+    if (Number.isFinite(cornerRadius) && cornerRadius > 0) {
+      buildRoundedRectProfile(x1, y1, x2, y2, cornerRadius, z, cfg.plungeFeed, feed, cfg.safeZ).forEach((line) => lines.push(line));
+      return;
+    }
+
     const curve = topStyle === 'flat' ? null : computeTopCurve(x1, x2, y2, topStyle, cfg.riseRatio);
 
     lines.push(`G0 X${fmt(x1)} Y${fmt(y1)} Z${fmt(cfg.safeZ)}`);
     lines.push(`G1   Z${fmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
-    lines.push(`G1 X${fmt(x2)}   F${cfg.cutFeed.toFixed(1)}`);
+    lines.push(`G1 X${fmt(x2)}   F${Number(feed).toFixed(1)}`);
     if (curve) {
-      emitTopCurveGcode(lines, curve, z, cfg.cutFeed);
-      lines.push(`G1 X${fmt(x1)} Y${fmt(y1)} F${cfg.cutFeed.toFixed(1)}`);
+      emitTopCurveGcode(lines, curve, z, feed);
+      lines.push(`G1 X${fmt(x1)} Y${fmt(y1)} F${Number(feed).toFixed(1)}`);
     } else {
       lines.push(` Y${fmt(y2)} `);
       lines.push(`X${fmt(x1)}  `);
@@ -424,22 +525,40 @@ export function buildKapakGcode(width, height, cfg, offsetX = 0, offsetY = 0, is
     const positions = computeDerzPositions(opts).positions;
     if (!positions.length) return;
     const z = +(cfg.thickness - Number(row.depth || 0)).toFixed(3);
+    const feed = rowFeed(row);
     lines.push(`M6T${row.toolNo}`);
     lines.push(`M3 S${cfg.spindleSpeed}`);
-    const curve = topStyle === 'flat' ? null : computeTopCurve(opts.margin, width - opts.margin, height - opts.margin, topStyle, cfg.riseRatio);
+    // The top-edge curve is that of the PART's OUTERMOST offset rectangle (the
+    // first offset row), NOT the derz margin box. The arch is established by the
+    // outermost cut, so its radius/centre must come from there — using the derz
+    // margin or the innermost offset would shrink the radius and misplace the
+    // arch centre (2_NUMARA needs r=86 from xl=60/xr=232, not r=46 from
+    // xl=100/xr=192).
+    const previousOffsetRowsFull = rows.slice(0, rowIndex).filter((item) => (item.operation || 'offset') !== 'derz');
+    const shapeOffset = previousOffsetRowsFull.length
+      ? computeCumOffsets([previousOffsetRowsFull[0]], 'relative')[0]
+      : 0;
+    const shapeXl = offsetX + shapeOffset;
+    const shapeXr = offsetX + width - shapeOffset;
+    const shapeYt = offsetY + height - shapeOffset;
+    const curve = topStyle === 'flat' ? null : computeTopCurve(shapeXl, shapeXr, shapeYt, topStyle, cfg.riseRatio);
     positions.forEach((pos) => {
       const vertical = opts.yon === 'dikey';
       const x1 = vertical ? offsetX + pos : offsetX + opts.margin - opts.overshootX;
       const y1 = vertical ? offsetY + opts.margin - opts.overshootY : offsetY + pos;
       const x2 = vertical ? x1 : offsetX + width - opts.margin + opts.overshootX;
       // Vertical divider lines must END on the curve, not at the flat top edge.
-      const curvedTop = vertical && curve && pos > curve.xl && pos < curve.xr;
+      // The curve arc only spans [shapeXl, shapeXr]; outside it (or for flat
+      // tops) the line returns to the flat top edge plus overshoot.
+      const curvedTop = vertical && curve && pos > shapeXl && pos < shapeXr;
+      // shapeXl/shapeYt are already absolute (include offsetX/offsetY), so yEnd
+      // returns an absolute Y — do NOT re-add offsetY here.
       const y2 = vertical
-        ? offsetY + (curvedTop ? curve.yEnd(pos) : height - opts.margin + opts.overshootY)
+        ? (curvedTop ? curve.yEnd(pos) : offsetY + height - opts.margin + opts.overshootY)
         : y1;
       lines.push(`G0 X${fmt(x1)} Y${fmt(y1)} Z${fmt(cfg.safeZ)}`);
       lines.push(`G1 Z${fmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
-      lines.push(`G1 X${fmt(x2)} Y${fmt(y2)} F${cfg.cutFeed.toFixed(1)}`);
+      lines.push(`G1 X${fmt(x2)} Y${fmt(y2)} F${Number(feed).toFixed(1)}`);
       lines.push(`G0 Z${fmt(cfg.safeZ)}`);
     });
   });
@@ -536,8 +655,23 @@ export function buildKapakPresetDxf(width, height, cfg = {}) {
       addLine(layer, x1, y2, x1, y1);
     } else {
       offsetRows += Number(row.stepOffset) || 0;
-      const rowCurve = topStyle === 'flat' ? null : computeTopCurve(offsetRows, width - offsetRows, height - offsetRows, topStyle, cfg.riseRatio);
-      addCurvedRect(layer, offsetRows, offsetRows, width - offsetRows, height - offsetRows, rowCurve);
+      const x1 = offsetRows; const x2 = width - offsetRows; const y1 = offsetRows; const y2 = height - offsetRows;
+      const rowRadius = Number(row.cornerRadius);
+      if (Number.isFinite(rowRadius) && rowRadius > 0) {
+        // Rounded-corner pass: 4 corner arcs + 4 straight edges (mirrors the g-code).
+        const r = Math.max(0, Math.min(rowRadius, Math.min((x2 - x1) / 2, (y2 - y1) / 2)));
+        addLine(layer, x1, y1 + r, x1, y2 - r);
+        addLine(layer, x2, y1 + r, x2, y2 - r);
+        addLine(layer, x1 + r, y1, x2 - r, y1);
+        addLine(layer, x1 + r, y2, x2 - r, y2);
+        addArc(layer, x1 + r, y1 + r, r, 180, 270, false); // BL
+        addArc(layer, x1 + r, y2 - r, r, 90, 180, false);  // TL
+        addArc(layer, x2 - r, y2 - r, r, 0, 90, false);    // TR
+        addArc(layer, x2 - r, y1 + r, r, 270, 360, false); // BR
+      } else {
+        const rowCurve = topStyle === 'flat' ? null : computeTopCurve(x1, x2, y2, topStyle, cfg.riseRatio);
+        addCurvedRect(layer, x1, y1, x2, y2, rowCurve);
+      }
     }
   });
   lines.push('0', 'ENDSEC', '0', 'EOF');

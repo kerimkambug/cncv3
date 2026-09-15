@@ -17,6 +17,7 @@ export default function PanjurModule({ onBackToMenu }) {
   const [pitch, setPitch] = useState(40.5);
   const [exitGap, setExitGap] = useState(0.45);
   const [stepover, setStepover] = useState(0.468);
+  const [edgeInset, setEdgeInset] = useState('auto');
   const [startZ, setStartZ] = useState(17.937);
   const [endZ, setEndZ] = useState(3.105);
   const [feed, setFeed] = useState(20000);
@@ -58,6 +59,10 @@ export default function PanjurModule({ onBackToMenu }) {
       pitch: parseFloat(pitch) || 0,
       exitGap: parseFloat(exitGap) || 0,
       stepover: parseFloat(stepover) || 0,
+      edgeInset,
+      t14TipDia: parseFloat(t14TipDia) || 0,
+      t14BodyDia: parseFloat(t14BodyDia) || 0,
+      t14Height: parseFloat(t14Height) || 0,
       startZ: parseFloat(startZ) || 0,
       endZ: parseFloat(endZ) || 0,
       feed: parseFloat(feed) || 0,
@@ -79,7 +84,7 @@ export default function PanjurModule({ onBackToMenu }) {
     };
   }, [
     width, height, offsetMode, direction, offset, offsetLeft, offsetRight, offsetBottom, offsetTop, centerFlat,
-    pitch, exitGap, stepover, startZ, endZ, feed, plunge, toolNo, spindle, groundEntry, exitCut,
+    pitch, exitGap, stepover, edgeInset, startZ, endZ, feed, plunge, toolNo, spindle, groundEntry, exitCut,
     drillTool, drillSpindle, exitToolDia, t14TipDia, t14BodyDia, t14Height, safeZ, toolChangeZ, homeZ
   ]);
 
@@ -237,8 +242,23 @@ export default function PanjurModule({ onBackToMenu }) {
             <label>Raster stepover (mm)</label>
             <input type="number" value={stepover} min="0.05" step="0.001" onChange={(e) => setStepover(parseFloat(e.target.value) || 0)} />
           </div>
+          <div>
+            <label title="auto = konik bıçak açısından otomatik hesaplanır (en derin noktada takımın gerçek yarıçapı). Sayı girersen sabit mm içeri çeker.">Kenar içeri çekme</label>
+            <select value={edgeInset === 'auto' ? 'auto' : 'manual'} onChange={(e) => setEdgeInset(e.target.value === 'auto' ? 'auto' : 1)}>
+              <option value="auto">Otomatik (konik açıdan)</option>
+              <option value="manual">Elle (mm)</option>
+            </select>
+          </div>
         </div>
-        <div className="row3" style={{ marginTop: 10 }}>
+        {edgeInset !== 'auto' && (
+          <div className="row2" style={{ marginTop: 10 }}>
+            <div>
+              <label>Elle içeri çekme (mm)</label>
+              <input type="number" value={edgeInset} min="0" step="0.1" onChange={(e) => setEdgeInset(parseFloat(e.target.value) || 0)} />
+            </div>
+          </div>
+        )}
+        <div className="row4" style={{ marginTop: 10 }}>
           <div>
             <label>Başlangıç Z (üst yüzey)</label>
             <input type="number" value={startZ} step="0.001" onChange={(e) => setStartZ(parseFloat(e.target.value) || 0)} />

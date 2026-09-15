@@ -5,7 +5,7 @@
 //   cd client/src/lib/gcode && node smoke.test.js
 // (needs clipper-lib installed — it already is if you ran `npm install`
 // in client/).
-import { buildKapakGcode, validateKapakSize } from './kapak.js';
+import { buildKapakGcode, validateKapakSize, buildRoundedRectProfile } from './kapak.js';
 import { resolveCircleParams } from './circle.js';
 import { computeDerzPositions } from './derz.js';
 import { camComputeOpenings, buildCamKesimGcode } from './cam.js';
@@ -495,6 +495,57 @@ check('stl crisp: sharpened grid created with same length', crispGrid.length ===
 
 const stlBlob = exportDepthGridToSTL(mockGrid, 4, 4, 100, 100, 4, 2, { targetResolution: 8 });
 check('stl exporter: produces binary STL blob', stlBlob instanceof Blob && stlBlob.size > 84);
+
+// --- Rounded-corner offset pass (G2/G3 corner arcs) — validated vs 8_NUMARA.cnc T8 ---
+// Tangen box x1=60,y1=60,x2=232,y2=340, radius 4 => corner centres 64/64/336/228. All 5 arcs are G2.
+const rrProfile = buildRoundedRectProfile(60, 60, 232, 340, 4, 12.5, 3000, 9000, 46);
+check('rounded-rect: profile is a closed path of arcs + lines', rrProfile.length === 12 && rrProfile.filter((l) => l.startsWith('G2')).length === 5);
+check('rounded-rect: lead-in G0 + plunge G1 then 5 G2 arcs and 5 straight edges', rrProfile[0].startsWith('G0') && rrProfile[1].startsWith('G1 Z') && rrProfile.filter((l) => /^G2/.test(l)).length + rrProfile.filter((l) => /^G1\s|^\s+[XY]/.test(l)).length === 10);
+check('rounded-rect: lead-in starts at the 45deg BL corner point (61.17)', rrProfile[0].includes('X61.17 Y61.17'));
+check('rounded-rect: right-edge tangency at X232 (matches 8_NUMARA G2X232 Y336)', rrProfile.some((l) => l.includes('X232.00 Y336.00')));
+check('rounded-rect: top-left arc reaches X64 Y340 (tangency)', rrProfile.some((l) => l.includes('X64.00 Y340.00')));
+// Degenerate radius (too big for the box) is clamped, never inverted.
+const rrClamped = buildRoundedRectProfile(0, 0, 4, 100, 90, 12, 3000, 9000, 46);
+check('rounded-rect: oversized radius is clamped to half the short span (r=2)', rrClamped.some((l) => l.includes('X2.00 Y0.00')));
+// radius 0 falls back to a plain square, no G2 arcs.
+check('rounded-rect: radius 0 → square fallback (no arcs)', buildRoundedRectProfile(0, 0, 100, 100, 0, 12, 3000, 9000, 46).every((l) => !l.startsWith('G2')));
+
+// --- Rounded-corner via buildKapakGcode (row.cornerRadius) ---
+const roundedG = buildKapakGcode(292, 400, {
+  thickness: 18, spindleSpeed: 18000, safeZ: 46, toolChangeZ: 46, homeZ: 46, plungeFeed: 3000, cutFeed: 9000,
+  rows: [{ toolNo: '8', depth: 5.5, stepOffset: 60, cornerRadius: 4, feed: 9000, operation: 'offset' }],
+});
+check('rounded gcode: emits M6T8 and a G2 corner arc', roundedG.includes('M6T8') && roundedG.includes('G2 '));
+check('rounded gcode: no plain square top-edge line (rounded replaces it)', !/G1 X232\.00\s+\n\s+Y340/.test(roundedG));
+
+// --- Per-row cut feed (row.feed): each pass carries its OWN feed, cfg.cutFeed untouched ---
+const feedG = buildKapakGcode(292, 400, {
+  thickness: 18, spindleSpeed: 18000, safeZ: 46, toolChangeZ: 46, homeZ: 46, plungeFeed: 3000, cutFeed: 5000,
+  offsetMode: 'absolute',
+  rows: [
+    { toolNo: '6', depth: 2, stepOffset: 53, operation: 'offset' },
+    { toolNo: '9', depth: 5.8, stepOffset: 67, operation: 'offset' },
+    { toolNo: '9', depth: 5.8, stepOffset: 62, operation: 'offset' },
+    { toolNo: '7', depth: 4, stepOffset: 74, feed: 10000, operation: 'offset' },
+  ],
+});
+check('row.feed: 5 NUMARA T7 cutting move runs at F10000 (its own feed)', feedG.includes('G1 X218.00   F10000.0'));
+check('row.feed: earlier T6 rows keep the shared cfg.cutFeed (F5000)', feedG.includes('X239.00   F5000.0'));
+check('row.feed: per-row feed does NOT leak to the plunge move', feedG.includes('G1   Z14.00 F3000.0'));
+
+// --- Derz top ends must follow the arch curve (curve.yEnd), validated vs 3_NUMARA.cnc ---
+// 3 NUMARA: pointed top, derz x=70.69 => real file ends at Y327.36.
+const derzCurveG = buildKapakGcode(292, 400, {
+  thickness: 18, spindleSpeed: 18000, safeZ: 46, toolChangeZ: 46, homeZ: 46, plungeFeed: 3000, cutFeed: 8000,
+  topStyle: 'pointed', riseRatio: 0.125,
+  rows: [
+    { toolNo: '3', depth: 5, stepOffset: 57, feed: 8000, operation: 'offset' },
+    { toolNo: '3', depth: 5, stepOffset: 70.69, feed: 8000, operation: 'derz', derz: { yon: 'dikey', margin: 70.69, spacing: 13.69, autoFit: true, overshootY: 0, respectPreviousOffset: false } },
+  ],
+});
+check('derz curve: first divider ends on the arch at Y327.36 (3_NUMARA match)', derzCurveG.includes('G1 X70.69 Y327.36 F8000.0'));
+check('derz curve: divider arch tops are NOT all the flat top edge (varying Y)', derzCurveG.includes('Y332.68') && derzCurveG.includes('Y336.83'));
+check('derz curve: derz runs at its own F8000 feed', derzCurveG.includes('F8000.0'));
 
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);
