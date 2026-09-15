@@ -32,13 +32,14 @@ export const NUMUNE_PRESETS = [
     name: '1 NUMARA',
     width: 292,
     height: 400,
-    description: 'Carving + düz offset. T1 V-bıçak köşe keskinleştirmesi 1_NUMARA.cnc ile doğrulandı. Derz ve rounded-köşe detayları bu preset kapsamı dışında (kısmi).',
+    description: 'Carving + düz offset + derz. T1 V-bıçak köşe keskinleştirmesi doğrulandı. Derz: X çizgileri 89/108/127/146/165/184/203 (eşit 19mm aralık) — 1_NUMARA.cnc ile birebir. Derz Y aralığı dosyada offset sınırı (70-330); bu motorda margin değerinden türetilir.',
     cfg: {
       topStyle: 'flat',
       rows: [
         { toolNo: '6', depth: 6, stepOffset: 62, name: '6mm dış offset', operation: 'offset' },
         { toolNo: '6', depth: 6, stepOffset: 59, name: '6mm dış kare', operation: 'offset' },
         { toolNo: '1', depth: 6, stepOffset: 56, name: 'Carving V-bıçak', operation: 'carving', cornerSharpen: true, cornerSharpenDistance: 6 },
+        { toolNo: '12', depth: 3, stepOffset: 89, name: '135° derz', operation: 'derz', derz: { yon: 'dikey', margin: 89, spacing: 19, autoFit: true, overshootY: 0, respectPreviousOffset: false } },
       ],
     },
   },
@@ -46,12 +47,13 @@ export const NUMUNE_PRESETS = [
     name: '2 NUMARA',
     width: 292,
     height: 400,
-    description: 'Kemerli (yarım daire) üst. 2_NUMARA.cnc ile xc=146 / r=86 / yc=254 doğrulandı. Derz eğri-üst noktaları kısmi.',
+    description: 'Kemerli (yarım daire) üst + derz. 2_NUMARA.cnc ile xc=146 / r=86 / yc=254 doğrulandı. Derz: X çizgileri 100/130.67/161.33/192 (eşit 30.667mm aralık) — birebir. Derz üst ucu dosyada kemer eğrisini takip eder; bu motorda düz.',
     cfg: {
       topStyle: 'semicircle',
       rows: [
         { toolNo: '9', depth: 3, stepOffset: 60, name: 'Kemer dış offset', operation: 'offset' },
         { toolNo: '9', depth: 3, stepOffset: 55, name: 'Kemer iç offset', operation: 'offset' },
+        { toolNo: '2', depth: 2, stepOffset: 100, name: '10mm balmumu derz', operation: 'derz', derz: { yon: 'dikey', margin: 100, spacing: 30, autoFit: true, overshootY: 0, respectPreviousOffset: false } },
       ],
     },
   },
@@ -59,12 +61,13 @@ export const NUMUNE_PRESETS = [
     name: '3 NUMARA',
     width: 292,
     height: 400,
-    description: 'Sivri/basık kemer üst (riseRatio 0.125). 3_NUMARA.cnc G3 yayı ve derz noktası (Y327.36) ile doğrulandı.',
+    description: 'Sivri/basık kemer üst (riseRatio 0.125) + derz. 3_NUMARA.cnc G3 yayı ve derz noktası (Y327.36) doğrulandı. Derz: X çizgileri 70.69/84.38/... eşit 13.69mm aralık — birebir. Derz üst ucu dosyada kemer eğrisini takip eder; bu motorda düz.',
     cfg: {
       topStyle: 'pointed',
       riseRatio: 0.125,
       rows: [
         { toolNo: '3', depth: 5, stepOffset: 57, name: 'Sivri kemer offset', operation: 'offset' },
+        { toolNo: '3', depth: 5, stepOffset: 70.69, name: 'Sivri kemer derz', operation: 'derz', derz: { yon: 'dikey', margin: 70.69, spacing: 13.69, autoFit: true, overshootY: 0, respectPreviousOffset: false } },
       ],
     },
   },

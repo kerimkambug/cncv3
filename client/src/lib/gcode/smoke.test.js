@@ -73,6 +73,32 @@ const derz = computeDerzPositions({ width: 50, height: 50, yon: 'dikey', margin:
 check('derz: auto-fit spacing = 12.5', Math.abs(derz.exactSpacing - 12.5) < 1e-9);
 check('derz: last position exactly 50 (no overshoot past edge)', derz.positions[derz.positions.length - 1] === 50);
 
+// --- Derz: sample presets must reproduce the REAL numune lines (equal, possibly fractional spacing) ---
+// 1 NUMARA: derz x = 89/108/127/146/165/184/203 (equal 19mm)
+const derz1 = computeDerzPositions({ width: 292, height: 400, yon: 'dikey', margin: 89, spacing: 19, autoFit: true });
+check('derz 1 NUMARA: x lines 89..203 (7 lines, equal 19mm)', JSON.stringify(derz1.positions) === JSON.stringify([89, 108, 127, 146, 165, 184, 203]));
+// 2 NUMARA: derz x = 100/130.67/161.33/192 (equal but FRACTIONAL 30.667)
+const derz2n = computeDerzPositions({ width: 292, height: 400, yon: 'dikey', margin: 100, spacing: 30, autoFit: true });
+check('derz 2 NUMARA: 4 lines with equal fractional spacing 30.667', derz2n.positions.length === 4 && Math.abs(derz2n.exactSpacing - 92 / 3) < 0.01);
+check('derz 2 NUMARA: first/last exactly 100/192 (edge-to-edge fit)', derz2n.positions[0] === 100 && derz2n.positions[3] === 192);
+// 3 NUMARA: derz x = 70.69/84.38/... equal 13.69mm
+const derz3n = computeDerzPositions({ width: 292, height: 400, yon: 'dikey', margin: 70.69, spacing: 13.69, autoFit: true });
+check('derz 3 NUMARA: starts at 70.69 with equal ~13.69 spacing', derz3n.positions[0] === 70.69 && Math.abs(derz3n.exactSpacing - 13.69) < 0.02);
+// Every gap identical (the shop rule: equal gaps, fractional allowed)
+const gapsEqual = (pos) => pos.slice(1).every((p, i) => Math.abs((p - pos[i]) - (pos[1] - pos[0])) < 0.002);
+check('derz: all gaps are identical on every sample (equal spacing rule, 0.001mm rounding tol)', [derz1, derz2n, derz3n].every((r) => gapsEqual(r.positions)));
+// buildKapakGcode emits these derz lines for the seeded sample presets
+const sampleG = buildKapakGcode(292, 400, {
+  thickness: 18, spindleSpeed: 18000, safeZ: 46, toolChangeZ: 46, homeZ: 46, plungeFeed: 3000, cutFeed: 5000,
+  offsetMode: 'absolute', topStyle: 'semicircle',
+  rows: [
+    { toolNo: '9', depth: 3, stepOffset: 60, operation: 'offset' },
+    { toolNo: '9', depth: 3, stepOffset: 55, operation: 'offset' },
+    { toolNo: '2', depth: 2, stepOffset: 100, operation: 'derz', derz: { yon: 'dikey', margin: 100, spacing: 30, autoFit: true, overshootY: 0, respectPreviousOffset: false } },
+  ],
+});
+check('derz sample gcode: 2 NUMARA derz lines emitted at X100/130.67/161.33/192', ['X100.00', 'X130.67', 'X161.33', 'X192.00'].every((x) => sampleG.includes(`G0 ${x} `)));
+
 // --- Derz: real production match (margin=0, edgeExtra=1, spacing=7 on 500mm) ---
 const derz2 = computeDerzPositions({ width: 500, height: 500, yon: 'dikey', margin: 0, spacing: 7, edgeExtra: 1, autoFit: true });
 check('derz: 73 lines matching real file', derz2.positions.length === 73);
