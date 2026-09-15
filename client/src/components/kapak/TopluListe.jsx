@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import JSZip from 'jszip';
-import { buildKapakGcode, validateKapakSize, parseBatchLine } from '../../lib/gcode/kapak.js';
+import { buildKapakGcode, validateKapakSize, validateCarvingWarnings, parseBatchLine } from '../../lib/gcode/kapak.js';
 import { useCtrlEnter } from '../../hooks/useCtrlEnter.js';
 
 export default function TopluListe({ cfg }) {
@@ -45,6 +45,8 @@ export default function TopluListe({ cfg }) {
 
     let msg = `${okCount} dosya üretildi ve zip indirildi.`;
     if (errors.length > 0) msg += `\n\n${errors.length} satır atlandı:\n` + errors.join('\n');
+    const warnings = validateCarvingWarnings(cfg.rows);
+    if (warnings.length > 0) msg += `\n\nUyarı:\n` + warnings.join('\n');
     setMessage({ type: 'ok', text: msg });
   }
 

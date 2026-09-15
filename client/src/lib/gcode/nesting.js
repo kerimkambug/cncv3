@@ -7,7 +7,7 @@
 //    - Aşama 3 (Final Kesim - İşleme Sonrası): 6mm kesim bıçağıyla Z0'a kadar inilerek parça plakadan ayrılır.
 // 3. Sıralama: Sağ en üstteki parçadan sola doğru, satır satır yukarıdan aşağıya (sağdan sola).
 import { fmt, computeCumOffsets, emitRectCutPath } from './common.js';
-import { validateKapakSize, calculateAdaptiveOffsets, buildCarvingProfile, computeTopCurve, emitTopCurveGcode } from './kapak.js';
+import { validateKapakSize, calculateAdaptiveOffsets, buildCarvingProfile, clampCarvingExit, computeTopCurve, emitTopCurveGcode } from './kapak.js';
 
 function rectsIntersect(a, b) {
   return a.x < b.x + b.w - 1e-9 && a.x + a.w > b.x + 1e-9 && a.y < b.y + b.h - 1e-9 && a.y + a.h > b.y + 1e-9;
@@ -364,8 +364,12 @@ function emitAdaptiveProfilePasses(lines, plate, cfg, { thickness, plungeFeed, c
   // outward diagonal corner ramp back to the surface — per part.
   cfg.rows.filter((r) => r.operation === 'carving').forEach((r) => {
     const depth = Number(r.depth) || 0;
-    const exit = r.cornerSharpenDistance === null || r.cornerSharpenDistance === undefined ? depth : Number(r.cornerSharpenDistance);
     const offset = Number(r.stepOffset) || 0;
+    // Clamp so the corner ramp can never step past the profile edge (no off-plate negatives).
+    const exit = clampCarvingExit(
+      r.cornerSharpenDistance === null || r.cornerSharpenDistance === undefined ? depth : Number(r.cornerSharpenDistance),
+      offset,
+    );
     const toolChanged = String(r.toolNo) !== String(lastEmittedToolNo);
     if (toolChanged) {
       if (lastEmittedToolNo !== null) {

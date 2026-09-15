@@ -140,7 +140,7 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
                     <strong>Carving ayarları</strong>
                     <label className="derz-auto-fit"><input type="checkbox" checked={r.cornerSharpen !== false} onChange={(e) => updateCarving(i, 'cornerSharpen', e.target.checked)} /><span>Köşeleri keskinleştir (dışa çıkış + yüzeye rampa)</span></label>
                     {r.cornerSharpen !== false && (
-                      <label><span>Köşe çıkış mesafesi (mm) — boş = derinliğe eşit</span><input type="number" min="0" step="0.1" value={r.cornerSharpenDistance ?? ''} placeholder={String(r.depth ?? '')} onChange={(e) => updateCarving(i, 'cornerSharpenDistance', e.target.value)} /></label>
+                      <label className="carving-exit-field"><span>Köşe çıkış mesafesi (mm) — boş = derinliğe eşit</span><input type="number" min="0" step="0.1" value={r.cornerSharpenDistance ?? ''} placeholder={String(r.depth ?? '')} onChange={(e) => updateCarving(i, 'cornerSharpenDistance', e.target.value)} /><span className="hint">Offsetten büyük olamaz — büyükse otomatik sınırlanır (plaka dışına çıkmaz).</span></label>
                     )}
                   </td>
                 </tr>

@@ -8,7 +8,7 @@ import {
   estimateNestingTime,
   parseNestImportText,
 } from '../../lib/gcode/nesting.js';
-import { calculateAdaptiveOffsets } from '../../lib/gcode/kapak.js';
+import { calculateAdaptiveOffsets, validateCarvingWarnings } from '../../lib/gcode/kapak.js';
 import { computeCumOffsets } from '../../lib/gcode/common.js';
 import { useCtrlEnter } from '../../hooks/useCtrlEnter.js';
 
@@ -157,10 +157,11 @@ export default function NestingPanel({ cfg, plateCfg }) {
 
       const activeCfg = getActiveConfig();
       const minutes = estimateNestingTime(nest, activeCfg);
+      const warnings = validateCarvingWarnings(cfg.rows);
       setMessage({
         type: 'ok',
         text: `${nest.plates.length} plaka bulundu. Tahmini süre: ~${minutes.toFixed(1)} dk.${enableOuterCut ? ' (1.5mm Ön Çizme + İşleme + Z0 Final Kesim dahil — Sağ üstten sola)' : ''
-          }. Sonuçtan memnunsan "CNC Dosyalarını İndir" butonuna bas.`,
+          }. Sonuçtan memnunsan "CNC Dosyalarını İndir" butonuna bas.${warnings.length ? `\n\nUyarı:\n${warnings.join('\n')}` : ''}`,
       });
     } catch (e) {
       setMessage({ type: 'err', text: e.message });

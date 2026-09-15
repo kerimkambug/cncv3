@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { buildKapakGcode, validateKapakSize } from '../../lib/gcode/kapak.js';
+import { buildKapakGcode, validateKapakSize, validateCarvingWarnings } from '../../lib/gcode/kapak.js';
 import { useCtrlEnter } from '../../hooks/useCtrlEnter.js';
 
 export default function TekOlcu({ cfg, plateCfg }) {
@@ -14,7 +14,7 @@ export default function TekOlcu({ cfg, plateCfg }) {
   const PLATE_HEIGHT = plateCfg?.height || 2800;
 
   function updateMeasurement(id, field, value) {
-    setMeasurements(measurements.map(m => 
+    setMeasurements(measurements.map(m =>
       m.id === id ? { ...m, [field]: parseFloat(value) || 0 } : m
     ));
   }
@@ -67,14 +67,14 @@ export default function TekOlcu({ cfg, plateCfg }) {
 
     for (const m of measurements) {
       const err = validateKapakSize(m.width, m.height, cfg.rows, cfg.offsetMode);
-      if (err) { 
-        setMessage({ type: 'err', text: `Ölçü ${m.width}×${m.height}: ${err}` }); 
+      if (err) {
+        setMessage({ type: 'err', text: `Ölçü ${m.width}×${m.height}: ${err}` });
         return;
       }
 
       const gcode = buildKapakGcode(m.width, m.height, cfg, xOffset, 0, true);
       const lines = gcode.split('\n');
-      
+
       for (const line of lines) {
         if (line.trim()) {
           combinedOutput.push(line);
@@ -93,7 +93,13 @@ export default function TekOlcu({ cfg, plateCfg }) {
     combinedOutput.push('M30');
 
     setOutput(combinedOutput.join('\n'));
-    setMessage({ type: 'ok', text: `G-code üretildi (${measurements.length} ölçü).` });
+    const warnings = validateCarvingWarnings(cfg.rows);
+    setMessage({
+      type: 'ok',
+      text: warnings.length
+        ? `G-code üretildi (${measurements.length} ölçü).\n\nUyarı:\n${warnings.join('\n')}`
+        : `G-code üretildi (${measurements.length} ölçü).`,
+    });
   }
 
   useCtrlEnter(generate);

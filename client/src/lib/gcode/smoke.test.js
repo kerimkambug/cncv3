@@ -322,6 +322,30 @@ check('carving: 4 diagonal surface ramps at offset 50 (Z18.00)', carvingLines.fi
 check('carving: profile runs at depth Z12.00 between corners', carvingLines.filter((l) => l.includes('Z12.00')).length === 5);
 check('carving: explicit cornerSharpenDistance overrides 1:1 (50 -> 53)', buildCarvingProfile(292, 400, 56, 6, 18, 3).includes('X53.00 Y347.00 Z18.00'));
 
+// --- Carving corner ramp must NEVER leave the plate (offset < exit) ---
+// Regression: offset=5, depth=15 => exit=15 => oi would be -10 (off-plate).
+const clampedCarving = buildCarvingProfile(200, 200, 5, 15, 18);
+check('carving clamp: offset<exit produces NO negative X/Y coordinates', !clampedCarving.some((l) => /X-|Y-/.test(l)));
+check('carving clamp: corner ramp is clipped to the profile edge (oi = 0)', clampedCarving.some((l) => l.includes('X3.00 Y0.00 Z18.00') || l.includes('X0.00 Y3.00 Z18.00') || l.includes('X0.00 Y0.00 Z18.00')));
+const { clampCarvingExit } = await import('./kapak.js');
+check('carving clamp: clampCarvingExit(15, 5) = 5', clampCarvingExit(15, 5) === 5);
+check('carving clamp: clampCarvingExit(6, 56) = 6 (normal case untouched)', clampCarvingExit(6, 56) === 6);
+check('carving clamp: clampCarvingExit(0, 56) = 0 (no ramp)', clampCarvingExit(0, 56) === 0);
+
+// Boundary: offset === exit => oi = 0, corner sits exactly on the zero point, no crash
+const boundaryCarving = buildCarvingProfile(292, 400, 6, 6, 18);
+check('carving boundary: offset === exit does not crash and stays non-negative', Array.isArray(boundaryCarving) && boundaryCarving.length > 0 && !boundaryCarving.some((l) => /X-|Y-/.test(l)));
+check('carving boundary: oi = 0 => corners at X0.00/Y0.00', boundaryCarving.some((l) => l.includes('X0.00 Y0.00 Z18.00')));
+
+// Reference geometry (292,400,56,6,18) must be UNCHANGED by the clamp
+check('carving clamp: reference case (292,400,56,6,18) still byte-matches 1_NUMARA.cnc', buildCarvingProfile(292, 400, 56, 6, 18).map(norm).join('|') === realCarving.map(norm).join('|'));
+
+// Advisory warning surfaces to the caller (non-fatal)
+const { validateCarvingWarnings } = await import('./kapak.js');
+check('carving warning: emitted when exit >= offset', validateCarvingWarnings([{ operation: 'carving', depth: 15, stepOffset: 5 }]).length === 1);
+check('carving warning: silent for the safe reference row', validateCarvingWarnings([{ operation: 'carving', depth: 6, stepOffset: 56 }]).length === 0);
+check('carving warning: ignored when cornerSharpen is off', validateCarvingWarnings([{ operation: 'carving', depth: 15, stepOffset: 5, cornerSharpen: false }]).length === 0);
+
 // carving row inside buildKapakGcode emits the profile and skips pocket/derz handling
 const carvingG = buildKapakGcode(292, 400, {
   thickness: 18, spindleSpeed: 18000, safeZ: 61, toolChangeZ: 96, homeZ: 96, plungeFeed: 3000, cutFeed: 6000,

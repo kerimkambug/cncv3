@@ -227,6 +227,21 @@ export function calculateAdaptiveOffsets(width, height, rows, offsetMode = 'rela
 }
 
 /**
+ * Clamps a carving corner-sharpen distance so the outward diagonal ramp stays
+ * inside the plate/profile. The tool can never step further out than the
+ * profile offset itself: `oi = offset - exit` must stay >= 0.
+ * @param {number} rawExit - requested exit distance (mm)
+ * @param {number} offset - main profile offset (mm)
+ * @returns {number} safe exit distance (>= 0, <= offset)
+ */
+export function clampCarvingExit(rawExit, offset) {
+  const o = Number(offset) || 0;
+  const e = Number(rawExit);
+  if (!Number.isFinite(e) || e <= 0) return 0;
+  return Math.min(e, Math.max(0, o));
+}
+
+/**
  * Builds a "carving" profile: a single closed profile line (V-bit), NOT a pocket.
  * The main pass runs at a fixed offset (e.g. 56) at the carving depth; at every
  * corner the tool steps DIAGONALLY outwards (offset - sharpenDistance) AND ramps
@@ -251,13 +266,16 @@ export function buildCarvingProfile(width, height, offset, depth, thickness, cor
   const o = Number(offset) || 0;
   const d = Number(depth) || 0;
   const t = Number(thickness) || 0;
-  const exit = cornerSharpenDistance === null || cornerSharpenDistance === undefined
+  // Raw request, then clamp so the outward corner ramp can NEVER reach past the
+  // profile edge (offset - exit >= 0 => no negative / off-plate coordinates).
+  const rawExit = cornerSharpenDistance === null || cornerSharpenDistance === undefined
     ? d
     : Number(cornerSharpenDistance);
+  const exit = clampCarvingExit(rawExit, o);
 
   const zCut = +(t - d).toFixed(3);       // cutting depth
   const zSurf = +t.toFixed(3);            // back at the surface = 0 depth
-  const oi = o - exit;                    // outer diagonal corner offset (56 - 6 = 50)
+  const oi = o - exit;                    // outer diagonal corner offset (56 - 6 = 50; clamped >= 0)
 
   const x1 = o;                // inner profile left
   const x2 = width - o;        // inner profile right
@@ -349,10 +367,15 @@ export function buildKapakGcode(width, height, cfg, offsetX = 0, offsetY = 0, is
 
   carvingRows.forEach((row) => {
     const depth = Number(row.depth) || 0;
-    const exit = row.cornerSharpenDistance === null || row.cornerSharpenDistance === undefined
-      ? depth
-      : Number(row.cornerSharpenDistance);
     const offset = Number(row.stepOffset) || 0;
+    // Clamp here too (single source of truth is clampCarvingExit) so the ramp never
+    // leaves the plate when cornerSharpenDistance >= offset.
+    const exit = clampCarvingExit(
+      row.cornerSharpenDistance === null || row.cornerSharpenDistance === undefined
+        ? depth
+        : Number(row.cornerSharpenDistance),
+      offset,
+    );
     lines.push(`M6T${row.toolNo}`);
     lines.push(`M3 S${cfg.spindleSpeed}`);
     if (row.cornerSharpen === false) {
@@ -535,6 +558,29 @@ export function validateKapakSize(width, height, rows, offsetMode = 'relative') 
     if (!Number.isFinite(r.stepOffset)) return `${r.name || 'bir bıçak'} için adım offset eksik.`;
   }
   return null;
+}
+
+/**
+ * Non-fatal warnings for carving rows. Unlike validateKapakSize (which returns
+ * an error and blocks generation), these are advisory: the geometry is always
+ * clamped safe, but the shop should know a corner ramp got trimmed.
+ * @param {Array<{operation?:string, name?:string, depth:number, stepOffset:number, cornerSharpenDistance?:number|null, cornerSharpen?:boolean}>} rows
+ * @returns {string[]} warning messages (empty when everything is fine)
+ */
+export function validateCarvingWarnings(rows) {
+  const warnings = [];
+  (rows || []).forEach((r, index) => {
+    if (r.operation !== 'carving' || r.cornerSharpen === false) return;
+    const offset = Number(r.stepOffset) || 0;
+    const rawExit = r.cornerSharpenDistance === null || r.cornerSharpenDistance === undefined
+      ? Number(r.depth) || 0
+      : Number(r.cornerSharpenDistance);
+    if (rawExit > offset) {
+      const label = r.name || `Carving satırı ${index + 1}`;
+      warnings.push(`${label}: carving köşe mesafesi (${rawExit}mm) offsetten (${offset}mm) büyük — köşe rampası ${offset}mm'ye kırpılacak (plaka dışına çıkmaz).`);
+    }
+  });
+  return warnings;
 }
 
 /** Parses a batch line like "327-656" or "327-656-2" (trailing qty ignored). */
