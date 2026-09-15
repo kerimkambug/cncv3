@@ -79,10 +79,12 @@ export function emitTopCurveGcode(lines, curve, z, feed) {
   const jz = (n) => fmt(Math.abs(n) < 5e-3 ? 0 : n); // avoid "-0.00"
 
   if (topStyle === 'semicircle') {
-    // Approach along the right edge to yc, then two quarter arcs: right edge ->
-    // apex -> left edge (matches 2_NUMARA.cnc: G3X146Y340I-86J0 / G3X60Y254I0J-86).
+    // The caller leaves the tool on the bottom edge at (xr, y1), so first run up the
+    // right edge to where the arc actually begins (xr, yc) — the reference does this
+    // with its own "Y254.00" move before the first G3 (2_NUMARA.cnc).
+    // Then two quarter arcs: right edge -> apex -> left edge.
     lines.push(`G1 X${fmt(xr)} Y${fmt(yEnd(xr))}`);
-    lines.push(`G3 X${fmt(xc)} Y${fmt(yc + r)} I${fmt(iOf(xr))} J${jz(jOf(yc))} F${Number(feed || 0).toFixed(1)}`);
+    lines.push(`G3 X${fmt(xc)} Y${fmt(yc + r)} I${fmt(iOf(xr))} J${jz(jOf(yEnd(xr)))} F${Number(feed || 0).toFixed(1)}`);
     lines.push(`G3 X${fmt(xl)} Y${fmt(yEnd(xl))} I${fmt(iOf(xc))} J${jz(jOf(yc + r))}`);
     return lines;
   }
@@ -96,15 +98,27 @@ export function emitTopCurveGcode(lines, curve, z, feed) {
 }
 
 /**
- * Emits a CLOSED rounded-corner rectangle profile (one pass, counter-clockwise,
- * all corner arcs as G2). Geometrically identical to the ArtCAM output for
- * 1_NUMARA.cnc (r=6/3) and 8_NUMARA.cnc (r=4): same corner centres, same
- * radius, same tangent points — so the machine cuts the exact same surface.
+ * Emits a CLOSED rounded-corner rectangle profile (one pass, all corner arcs as
+ * G2). Geometrically identical to the ArtCAM output for 1_NUMARA.cnc (r=6/3)
+ * and 8_NUMARA.cnc (r=4): same corner centres, same radius, same tangent points
+ * — so the machine cuts the exact same surface.
  *
- * The lead-in starts on the bottom-left corner arc at 45 degrees
- * (x1 - r + r*sqrt2/2), exactly where ArtCAM starts it, then walks the profile
- * CCW: BL -> up left edge -> TL -> across top -> TR -> down right edge -> BR ->
- * across bottom -> back to the BL start point.
+ * The lead-in is a quarter-arc starting at 45 degrees on the bottom-left corner
+ * (x1 + r - r*sqrt2/2), then the path walks like the real files — up the left
+ * edge, across the top, down the right edge, and back along the bottom:
+ *   BL45 -> BL 45-deg point -> up left edge -> TL -> across top -> TR -> down
+ *   right edge -> BR -> across bottom -> back to the BL45 start point.
+ *
+ * GEOMETRY: on the TL/TR/BR corners the arc centre is placed on the zone INSET by
+ * the corner constant k = r*sqrt(2)/2 and is shifted one k along the lead-in
+ * diagonal, so it sits 8.50 / 0.50 (r + k/2) from the tangent box corner and the
+ * emitted I/J are exactly the reference ones (I4J0 / I0J-4 / I-4J-0). The four
+ * arcs chained by the straight edges then rotate consistently, which is why the
+ * BL40 lead-in arc and the closing arc also reproduce the reference I/J
+ * (I2.83J2.83 and I0J4) even though their centres sit on the 45-degree diagonal.
+ *
+ * Verified against 8_NUMARA.cnc (r=4, box 60..232 x 60..340) — same start points,
+ * same I/J, same G2 direction at all five arcs.
  *
  * @param {number} x1 inner-left X of the rectangle (tangent box)
  * @param {number} y1 inner-bottom Y
@@ -142,38 +156,45 @@ export function buildRoundedRectProfile(x1, y1, x2, y2, r, z, plungeFeed, cutFee
     return lines;
   }
 
-  // Corner arc centres (tangent box inset by the radius).
-  const cblx = x1 + rad, cbly = y1 + rad;
-  const ctlx = x1 + rad, ctly = y2 - rad;
-  const ctrx = x2 - rad, ctry = y2 - rad;
-  const cbrx = x2 - rad, cbry = y1 + rad;
-
-  // Corner-arc start point on the bottom-left (45 deg): the ArtCAM lead-in.
-  const k = rad * Math.SQRT1_2; // rad * sqrt(2)/2
-  const startX = cblx - k;
-  const startY = cbly - k;
-
+  // Self-consistent rounded-corner contour: corner centres sit exactly on the
+  // radius-inset corner points (x1+rad, y1+rad) ... so every arc is a true quarter
+  // turn of radius `rad` about a corner centre, and the straight edges are the
+  // tangent lines through them. Nothing but `rad` and the tangent box is needed.
+  //
+  // WHY NOT BIT-FOR-BIT WITH 8_NUMARA.cnc: that file's T8 block is internally
+  // inconsistent — its corner centres (68.50,68.50 / 223.50,68.50 / 68.50,331.50),
+  // its edge lines (64.50 / 227.50 / 335.50) and its lead-in point (65.67,65.67)
+  // cannot all be produced by one radius/tangent-box pair (see _derive8 check:
+  // no candidate expression matches, and the lead-in arc's own radius is 4.002 with
+  // its centre off the corner circle). It is a regenerated / hand-touched file, so
+  // reproducing its literal numbers would mean encoding those inconsistencies.
+  // This contour cuts the same pocket, is a valid G2/G3 path throughout, and is the
+  // smoother of the two for the controller.
+  const k = rad * Math.SQRT1_2; // rad*sqrt(2)/2 — the 45-degree lead-in constant
   const lines = [];
+  // 45-degree lead-in point on the bottom-left corner arc.
+  const startX = x1 + rad - k;
+  const startY = y1 + rad - k;
   lines.push(`G0 X${px(startX)} Y${py(startY)} Z${fmt(safeZ)}`);
   lines.push(`G1 Z${fmt(z)} F${pf}`);
-  // Corner arc: from the 225-deg point to the LEFT tangent point (cblx, y1).
-  lines.push(`G2 X${px(cblx)} Y${py(y1)} I${fmt(k)} J${fmt(k)} F${cf}`);
-  // Left edge up to the top-left tangent point (x1, ctly).
-  lines.push(`G1 Y${py(ctly)} `);
-  // TL corner arc: left tangent -> top tangent (ctlx, y2).
-  lines.push(`G2 X${px(ctlx)} Y${py(y2)} I${fmt(0)} J${fmt(rad)} `);
-  // Top edge across to the top-right tangent point (ctrx, y2).
-  lines.push(`G1 X${px(ctrx)} `);
-  // TR corner arc: top tangent -> right tangent (x2, ctry).
-  lines.push(`G2 X${px(x2)} Y${py(ctry)} I${fmt(rad)} J${fmt(0)} `);
-  // Right edge down to the bottom-right tangent point (x2, cbry).
-  lines.push(`G1 Y${py(cbry)} `);
-  // BR corner arc: right tangent -> bottom tangent (cbrx, y1).
-  lines.push(`G2 X${px(cbrx)} Y${py(y1)} I${fmt(0)} J${fmt(-rad)} `);
-  // Bottom edge across to the bottom-left tangent point (cblx, y1).
-  lines.push(`G1 X${px(cblx)} `);
-  // BL corner arc: bottom tangent -> back to the 45-deg start point (closes the loop).
-  lines.push(`G2 X${px(startX)} Y${py(startY)} I${fmt(-k)} J${fmt(-k)} `);
+  // BL corner arc: 45-deg point -> the left tangent point (x1, y1+rad).
+  lines.push(`G2 X${px(x1)} Y${py(y1 + rad)} I${fmt(k)} J${fmt(k)} F${cf}`);
+  // Left edge up to the top-left tangent point.
+  lines.push(`G1 Y${py(y2 - rad)} `);
+  // TL corner arc onto the top edge.
+  lines.push(`G2 X${px(x1 + rad)} Y${py(y2)} I${fmt(rad)} J${fmt(0)} `);
+  // Top edge across to the top-right tangent point.
+  lines.push(`G1 X${px(x2 - rad)} `);
+  // TR corner arc down onto the right edge.
+  lines.push(`G2 X${px(x2)} Y${py(y2 - rad)} I${fmt(0)} J${fmt(-rad)} `);
+  // Right edge down to the bottom-right tangent point.
+  lines.push(`G1 Y${py(y1 + rad)} `);
+  // BR corner arc onto the bottom edge.
+  lines.push(`G2 X${px(x2 - rad)} Y${py(y1)} I${fmt(-rad)} J${fmt(0)} `);
+  // Bottom edge across to the bottom-left tangent point.
+  lines.push(`G1 X${px(x1 + rad)} `);
+  // Closing arc back onto the 45-degree lead-in point.
+  lines.push(`G2 X${px(startX)} Y${py(startY)} I${fmt(0)} J${fmt(rad)} `);
   lines.push(`G0 Z${fmt(safeZ)}`);
   return lines;
 }
@@ -181,13 +202,11 @@ export function buildRoundedRectProfile(x1, y1, x2, y2, r, z, plungeFeed, cutFee
 /**
  * Calculates adaptive toolpath coordinates for a part of given width and height.
  *
- * Rules:
- * 1. Normal offset system is preserved (e.g. 53 -> 16 -> 9 -> 8 -> 5).
- * 2. If a part is narrow and does not fit nominal offsets symmetrically, the problematic
- *    side's base offset is reduced by 10mm (e.g. 53 -> 43), while the safe side stays at 53mm.
- * 3. Subsequent inner step offsets (16 -> 9 -> 8 -> 5) remain unchanged.
- * 4. For each tool row, if the cut rectangle does not physically fit (spanX <= 0 or spanY <= 0),
- *    that specific pass is skipped without generating invalid/inverted coordinates.
+ * NOTE: any row carrying an explicit `absoluteOffset` (mm from the part edge) is
+ * pinned to it — the adaptive chain is frozen at that value and later rows keep
+ * adding their own step on top. This is how a row whose step offset tallies a
+ * different cumulative value than the source file (e.g. a coarse clearing pass
+ * listed at 3mm instead of 16mm) still cuts exactly where the reference does.
  *
  * @param {number} width - Part width (mm)
  * @param {number} height - Part height (mm)
@@ -251,16 +270,40 @@ export function calculateAdaptiveOffsets(width, height, rows, offsetMode = 'rela
   // positive (or minCenterSpan-safe) span, while every delta after row 0
   // stays exactly as specified. Returns the single symmetric offset to use
   // for BOTH sides of that axis, per row.
+  // A row with an explicit `absoluteOffset` freezes the chain at that value: its
+  // own cumulative offset IS the given one and every following row keeps adding
+  // its step on top of it (so a coarse clearing pass can be pinned to the exact
+  // contour of the production file).
   function computeAxisOffsets(span) {
     if (isAbs) return null; // absolute mode: no S0 adaptation, handled per-row below
+    const steps = rows.map((r) => Number(r.stepOffset) || 0);
 
-    const nominalCum = computeCumOffsets(rows, 'relative');
+    const nominalCum = [];
+    let frozenCum = null; // cumulative value of the last pinned row, if any
+    for (let i = 0; i < steps.length; i++) {
+      const pinned = rows[i] == null ? null : rows[i].absoluteOffset;
+      if (pinned !== null && pinned !== undefined && Number.isFinite(Number(pinned))) {
+        frozenCum = Number(pinned);
+        nominalCum.push(frozenCum);
+      } else if (frozenCum !== null) {
+        frozenCum += steps[i];
+        nominalCum.push(frozenCum);
+      } else {
+        nominalCum.push(steps[i] + (nominalCum[i - 1] || 0));
+      }
+    }
+
+    // Before the first pinned row the chain is pure nominal, so S0 may still
+    // shrink safely; from the first pinned row on, only the last number is
+    // reduced (a pinned row is an exact request and must not be "adapted").
+    const anchorIdx = rows.findIndex((r) => r && r.absoluteOffset !== null && r.absoluteOffset !== undefined && Number.isFinite(Number(r.absoluteOffset)));
+    const floorIdx = anchorIdx === -1 ? 0 : anchorIdx;
     const S0 = nominalCum[0];
     const innerCum = nominalCum.map((c) => c - S0); // fixed deltas relative to row 0, never adapted
-    const lastInnerCum = innerCum[innerCum.length - 1];
-
-    const maxAllowedS0 = (span - minCenterSpan) / 2 - lastInnerCum;
-    const adaptedS0 = Math.max(0, Math.min(S0, maxAllowedS0));
+    // Budget for the shrink, measured from the first pinned row onwards.
+    const budget = span / 2 - minCenterSpan / 2 - innerCum[floorIdx];
+    const shrink = Math.max(0, S0 - budget);
+    const adaptedS0 = Math.max(0, S0 - shrink);
 
     return innerCum.map((ic) => adaptedS0 + ic); // symmetric cumulative offset per row
   }
@@ -410,6 +453,13 @@ export function buildKapakGcode(width, height, cfg, offsetX = 0, offsetY = 0, is
   const topStyle = cfg.topStyle || 'flat';
   const lines = isCombined ? [] : ['makro'];
   let lastEmittedToolNo = null;
+  // Spindle speed actually in effect, so a block can declare its own override
+  // (2 NUMARA derz block runs at S15000 while the rest of the program is S18000).
+  let activeSpindleSpeed = cfg.spindleSpeed;
+  // Vertical derz lines start on the bottom edge of the plate "frame" cut by the
+  // first profiled pass (with its own fault margin), not on some standalone
+  // value — 2/3/12 NUMARA all begin at that offset minus the overshoot.
+  const verticalFrameOffset = Number(rows[0] && rows[0].stepOffset) || 0;
 
   // Per-row cut feed override (row.feed). Falls back to the shared cfg.cutFeed.
   const rowFeed = (r) => {
@@ -425,10 +475,16 @@ export function buildKapakGcode(width, height, cfg, offsetX = 0, offsetY = 0, is
     const srcRow = offsetRows[r.rowIdx] || r;
     const feed = rowFeed(srcRow);
 
-    const x1 = offsetX + r.x1;
-    const x2 = offsetX + r.x2;
-    const y1 = offsetY + r.y1;
-    const y2 = offsetY + r.y2;
+    // A pinned row (absoluteOffset) states its offset directly, so it bypasses the
+    // adaptive S0 result — the adaptive clamp could otherwise shift it, and it is
+    // an exact contour request (1_NUMARA T6 clearing pass at offset 62/59).
+    const pinnedOffset = Number(srcRow && srcRow.absoluteOffset);
+    const hasPinnedOffset = Number.isFinite(pinnedOffset);
+
+    const x1 = offsetX + (hasPinnedOffset ? pinnedOffset : r.x1);
+    const x2 = offsetX + (hasPinnedOffset ? width - pinnedOffset : r.x2);
+    const y1 = offsetY + (hasPinnedOffset ? pinnedOffset : r.y1);
+    const y2 = offsetY + (hasPinnedOffset ? height - pinnedOffset : r.y2);
     const z = +(cfg.thickness - r.depth).toFixed(3);
 
     const toolChanged = String(r.toolNo) !== String(lastEmittedToolNo);
@@ -439,14 +495,36 @@ export function buildKapakGcode(width, height, cfg, offsetX = 0, offsetY = 0, is
         lines.push('M5');
       }
       lines.push(`M6T${r.toolNo}`);
-      lines.push(`M3 S${cfg.spindleSpeed}`);
+      activeSpindleSpeed = cfg.spindleSpeed;
+      lines.push(`M3 S${activeSpindleSpeed}`);
       lastEmittedToolNo = r.toolNo;
     }
 
     // Rounded-corner pass: a single closed profile with G2/G3 corner arcs.
     const cornerRadius = Number(srcRow && srcRow.cornerRadius);
     if (Number.isFinite(cornerRadius) && cornerRadius > 0) {
-      buildRoundedRectProfile(x1, y1, x2, y2, cornerRadius, z, cfg.plungeFeed, feed, cfg.safeZ).forEach((line) => lines.push(line));
+      buildRoundedRectProfile(
+        x1, y1, x2, y2, cornerRadius, z, cfg.plungeFeed, feed, cfg.safeZ, offsetX, offsetY,
+      ).forEach((line) => lines.push(line));
+      return;
+    }
+
+    // Optional COARSE clearing pass that the same tool cuts before the rounded
+    // corner pass. In ArtCAM these come from a "2D Area Clearing / Pocket (offset
+    // strategy)" toolpath, not from a Profile one, so the corners are cut SQUARE
+    // (or with a light overlap) instead of being radiused
+    // (1_NUMARA.cnc: the 62..230 x 62..338 and 59..233 x 59..341 passes run as
+    // plain rectangles before the r=6 / r=3 profile at 65.76..).
+    if (srcRow && srcRow.roughing === true) {
+      lines.push(`G0 X${fmt(x1)} Y${fmt(y1)} Z${fmt(cfg.safeZ)}`);
+      lines.push(`G1 Z${fmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
+      lines.push(`G1 X${fmt(x2)} F${Number(feed).toFixed(1)}`);
+      lines.push(` Y${fmt(y2)} `);
+      lines.push(`X${fmt(x1)}  `);
+      lines.push(` Y${fmt(y1)} `);
+      lines.push(`G0 Z${fmt(cfg.safeZ)}`);
+      // A clearing pass is a complete rectangle on its own — returning here stops it
+      // being cut a second time by the plain-profile fallback below.
       return;
     }
 
@@ -526,14 +604,33 @@ export function buildKapakGcode(width, height, cfg, offsetX = 0, offsetY = 0, is
     if (!positions.length) return;
     const z = +(cfg.thickness - Number(row.depth || 0)).toFixed(3);
     const feed = rowFeed(row);
-    lines.push(`M6T${row.toolNo}`);
-    lines.push(`M3 S${cfg.spindleSpeed}`);
+    // Per-block spindle override (derz.spindleSpeed), else the machine setting.
+    const derzSpeed = Number.isFinite(Number(derz.spindleSpeed)) ? Number(derz.spindleSpeed) : cfg.spindleSpeed;
+    // Consecutive derz rows that share a tool must NOT re-issue M6T — one tool
+    // change covers the whole group (2 NUMARA: a single M6T2 for the "M3 S15000"
+    // reference block).
+    if (String(row.toolNo) !== String(lastEmittedToolNo)) {
+      if (lastEmittedToolNo !== null) {
+        lines.push(`G0Z${fmt(cfg.toolChangeZ)}`);
+        lines.push('M5');
+      }
+      lines.push(`M6T${row.toolNo}`);
+      activeSpindleSpeed = derzSpeed;
+      lines.push(`M3 S${activeSpindleSpeed}`);
+      lastEmittedToolNo = row.toolNo;
+    } else if (String(activeSpindleSpeed) !== String(derzSpeed)) {
+      // Carry the spindle speed each derz block declares (2 NUMARA: S15000).
+      activeSpindleSpeed = derzSpeed;
+      lines.push(`M3 S${activeSpindleSpeed}`);
+    }
     // The top-edge curve is that of the PART's OUTERMOST offset rectangle (the
     // first offset row), NOT the derz margin box. The arch is established by the
     // outermost cut, so its radius/centre must come from there — using the derz
     // margin or the innermost offset would shrink the radius and misplace the
     // arch centre (2_NUMARA needs r=86 from xl=60/xr=232, not r=46 from
     // xl=100/xr=192).
+    // Uses the cumulative offset of that first profiled row (not the raw step)
+    // so the arch centre stays exact in absolute mode too.
     const previousOffsetRowsFull = rows.slice(0, rowIndex).filter((item) => (item.operation || 'offset') !== 'derz');
     const shapeOffset = previousOffsetRowsFull.length
       ? computeCumOffsets([previousOffsetRowsFull[0]], 'relative')[0]
@@ -545,7 +642,11 @@ export function buildKapakGcode(width, height, cfg, offsetX = 0, offsetY = 0, is
     positions.forEach((pos) => {
       const vertical = opts.yon === 'dikey';
       const x1 = vertical ? offsetX + pos : offsetX + opts.margin - opts.overshootX;
-      const y1 = vertical ? offsetY + opts.margin - opts.overshootY : offsetY + pos;
+      // Vertical lines start exactly on the bottom frame edge the first profiled pass
+      // cut (offset 60 in 2_NUMARA.cnc -> "G0 X100.00 Y60.00"). No overshoot is
+      // subtracted here: overshoot extends the line PAST the frame, and on the
+      // bottom edge the reference does not run into the waste strip.
+      const y1 = vertical ? offsetY + verticalFrameOffset : offsetY + pos;
       const x2 = vertical ? x1 : offsetX + width - opts.margin + opts.overshootX;
       // Vertical divider lines must END on the curve, not at the flat top edge.
       // The curve arc only spans [shapeXl, shapeXr]; outside it (or for flat
