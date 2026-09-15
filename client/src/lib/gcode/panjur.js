@@ -200,31 +200,83 @@ export function resolveEdgeInset(c) {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+/**
+ * Belirli bir derinlikteki (mm) konik bıçağın gerçek yarıçapını verir.
+ *
+ * Not: `t14EffectiveRadius` yalnızca en derin noktaya (maxDepth) göre tek bir
+ * yarıçap döndür. Konik bıçak sığ Z'de ince (neredeyse sadece uç), derinde
+ * kalın (gövdeye yakın) olduğundan, her raster satırının kendi derinliğine göre
+ * ayrı bir yarıçapa (dolayısıyla kenar içeri çekmesine) ihtiyacı vardır. Aksi
+ * halde sığ satırlar en derin satıra göre fazla içeri çekilir ve kenar düz
+ * ikizkenar yamuk yerine rampa/basamaklı görünür.
+ *
+ * @param {object} c - Panjur konfigürasyonu
+ * @param {number} depth - O satırdaki kesim derinliği (mm, >= 0)
+ * @returns {number} o derinlikteki efektif yarıçap (mm)
+ */
+export function t14RadiusAtDepth(c, depth) {
+  const { tipR, bodyR, taperTan } = t14EffectiveRadius(c);
+  const d = Math.max(0, Number(depth) || 0);
+  return Math.min(bodyR, tipR + d * taperTan);
+}
+
+/**
+ * Belirli bir derinlikteki kenar içeri çekmesini çözer.
+ * - `edgeInset` sayı ise: o sabit değer (mm), derinlikten bağımsız.
+ * - 'auto' ise: o derinlikteki konik bıçak yarıçapı (`t14RadiusAtDepth`).
+ * @param {object} c
+ * @param {number} depth - O satırdaki kesim derinliği (mm, >= 0)
+ * @returns {number} içeri çekme mesafesi (mm, >= 0)
+ */
+export function resolveEdgeInsetAtDepth(c, depth) {
+  const raw = c.edgeInset;
+  if (raw === 'auto' || raw === undefined || raw === null || raw === '') {
+    return t14RadiusAtDepth(c, depth);
+  }
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 function emitRasterPass(axis, lines, n, c, crossStart, crossEnd, safeStart, step, passes) {
   const isY = axis === 'y';
   const stepAxis = isY ? 'Y' : 'X';
   const crossAxis = isY ? 'X' : 'Y';
 
-  // Kenarları `resolvedEdgeInset` kadar içeri çek: rasterın enine sınırları
-  // crossStart/crossEnd yerine bu kadar daraltılmış kullanılır.
-  // - 'auto' (varsayılan): konik bıçağın açısından otomatik — en derin noktada
-  //   takımın gerçek yarıçapı kadar içeri çekilir.
-  // - sayı: elle sabit içeri çekme (mm). 0 = tam kenara kadar kes.
-  const inset = resolveEdgeInset(c);
-  const innerStart = crossStart + inset;
-  const innerEnd = crossEnd - inset;
-  const useStart = innerEnd > innerStart ? innerStart : crossStart;
-  const useEnd = innerEnd > innerStart ? innerEnd : crossEnd;
+  // Kenarları her satırın KENDİ derinliğine göre içeri çek: rasterın enine
+  // sınırları crossStart/crossEnd yerine bu kadar daraltılmış kullanılır.
+  // - 'auto' (varsayılan): o satırdaki kesim derinliğine göre konik bıçağın
+  //   gerçek yarıçapı kadar içeri çekilir. Sığ satır az, derin satır çok
+  //   içeri çekilir; böylece kenar dikeyde simetrik "ikizkenar yamuk" olur
+  //   (soldaki rampa/basamak yerine).
+  // - sayı: elle sabit içeri çekme (mm), derinlikten bağımsız. 0 = tam kenar.
+  const fixedInset =
+    c.edgeInset === 'auto' || c.edgeInset === undefined || c.edgeInset === null || c.edgeInset === ''
+      ? null
+      : resolveEdgeInset(c);
+  const insetAt = (depth) => (fixedInset === null ? resolveEdgeInsetAtDepth(c, depth) : fixedInset);
 
-  const gx = isY ? useStart : safeStart;
-  const gy = isY ? safeStart : useStart;
+  // Bütün satırların sınırlarını önceden hesapla (giriş noktası için de gerekli).
+  const bounds = [];
+  for (let i = 0; i < passes; i++) {
+    const t = i / (passes - 1);
+    const z = c.startZ + (c.endZ - c.startZ) * t;
+    const depth = Math.max(0, c.startZ - z);
+    const inset = insetAt(depth);
+    const innerStart = crossStart + inset;
+    const innerEnd = crossEnd - inset;
+    bounds.push({
+      cross: innerEnd > innerStart ? (i % 2 === 0 ? innerEnd : innerStart) : (i % 2 === 0 ? crossEnd : crossStart),
+      entryCross: innerEnd > innerStart ? innerStart : crossStart,
+    });
+  }
+
+  const gx = isY ? bounds[0].entryCross : safeStart;
+  const gy = isY ? safeStart : bounds[0].entryCross;
   lines.push(`N${n++} G0 X${fmt(gx)} Y${fmt(gy)}`);
   lines.push(`N${n++} G0 Z${fmt(c.safeZ)}`);
   lines.push(`N${n++} G0 Z${fmt(c.startZ)}`);
   for (let i = 0; i < passes; i++) {
-    const t = i / (passes - 1);
-    const z = c.startZ + (c.endZ - c.startZ) * t;
-    const cross = i % 2 === 0 ? useEnd : useStart;
+    const cross = bounds[i].cross;
     lines.push(`N${n++} G1 ${crossAxis}${fmt(cross)} F${c.feed}`);
     if (i < passes - 1) {
       const nextAlong = safeStart + (i + 1) * step;
