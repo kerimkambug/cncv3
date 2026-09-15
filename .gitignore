@@ -2,7 +2,10 @@ node_modules/
 dist/
 .env
 *.log
-server/data/
+# server/data: presets.json uygulamanın çalışması için gerekli -> git'e dahil.
+# Sadece runtime'da üretilen geçici/yerel dosyalar ignore edilir.
+server/data/*.tmp
+server/data/*.local.json
 venv/
 server/ai_service/venv/
 server/ai_service/learned_relief_*
