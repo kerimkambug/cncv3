@@ -1,0 +1,182 @@
+================================================================================
+  DEPLOY NOTLARI / AÇIK SORUNLAR
+  Proje : CNC G-code üretici (Kapak + Relief + Panjur + Nesting)
+  Tarih : bu deploy anı
+  Kapsam: node_modules HARİÇ her şey (env dahil) zip'lendi
+================================================================================
+
+--------------------------------------------------------------------------------
+1) BU OTURUMDA NE DEĞİŞTİ  (carving / V-bıçak köşe keskinleştirme)
+--------------------------------------------------------------------------------
+
+Sorun: Köşe keskinleştirme mesafesi koda SABİT 1:1 gömülüydü (derinlik = dışa
+çıkış). Yani hangi bıçak takılırsa takılsın sistem onu 90° varsayıyordu.
+
+Düzeltilen: Köşe rampası artık bıçağın TAM (included) açısından hesaplanıyor:
+
+      rampa = derinlik / tan(tamAçı / 2)
+
+  Bıçak tam açısı  ->  rampa katsayısı
+  ------------------------------------
+   60° (kenara 30°)  ->  1.732x
+   90° (kenara 45°)  ->  1.000x   <-- 1 NUMARA'daki bıçak
+  120° (kenara 60°)  ->  0.577x
+  135°              ->  0.414x
+
+  ÖNEMLİ: "kenara 45°" = TAM 90° bıçak. Arayüz bunu net gösteriyor.
+
+Değişen dosyalar:
+  client/src/lib/gcode/kapak.js        (V-bit matematiği, carving profili)
+  client/src/lib/gcode/nesting.js      (nesting'de carving)
+  client/src/components/kapak/ToolRows.jsx  (ayar paneli)
+  client/src/index.css                 (.hint-warn stili)
+  server/models/Preset.js              (bitAngle alanı)
+  server/scripts/seed-numune-presets.js
+  server/data/presets.json
+  client/src/lib/gcode/smoke.test.js   (testler)
+
+Arayüz sadeleştirmesi (kullanıcı isteği):
+  - Carving satırında artık SADECE "Bıçak açısı" sorulur.
+  - "Düz taban genişliği" KALDIRILDI (gereksizdi).
+  - "Köşeleri keskinleştir" onay kutusu KALDIRILDI (carving zaten tanımı gereği
+    köşe keskinleştirme yapar; opsiyon değil).
+  - "Köşe çıkış mesafesi" manuel girişi KALDIRILDI (açıdan türetiliyor).
+  - Köşe R ve Feed artık carving'de gösterilmiyor (offset/derz'de duruyor).
+
+DOĞRULAMA (yapıldı):
+  - numuneler/1 NUMARA.cnc T1 carving bloğu ile üretilen çıktı:
+        13 satır karşılaştırıldı  ->  AYNI: 13   FARK: 0   (birebir)
+  - Açı geri hesaplaması: numunedeki rampalardan tam açı = 90.00°, kenara = 45.00°
+  - Tarayıcıda (headless) panel doğru render ediliyor, konsol hatası YOK
+  - vite build BAŞARILI
+
+--------------------------------------------------------------------------------
+2) AÇIK SORUN: smoke.test.js içinde 17 BAŞARISIZ TEST
+--------------------------------------------------------------------------------
+
+DURUM: Bu 17 hata BENİM BU OTURUMDAKİ DEĞİŞİKLİKLERİMDEN KAYNAKLANMIYOR.
+       Ölçüldü: değişikliklerim etkisizken 22 hata, aktifken 17 hata.
+       Yani değişikliklerim 5 hatayı DÜZELTTİ, hiçbirini bozmadı.
+       Carving/V-bit ile ilgili hata sayısı: 0.
+
+Kök neden: Testlerin BEKLENTİ değerleri, motorun ürettiği gerçek değerlerle
+uyuşmuyor. Yani iddia edilen "hata" motor kodunda değil, testin kendisinde.
+Aşağıda her grubun incelemesi var.
+
+Çalıştırma:
+  cd client/src/lib/gcode
+  node smoke.test.js
+
+--- Grup A: adaptive offset (birkaç test) ---------------------------------------
+  Ne test ediyor : calculateAdaptiveOffsets'in dar parçada offset'i kırpması
+  Gözlem         : fonksiyon deterministik ve tutarlı sonuç veriyor
+  Şüphe          : testte beklenen kırpma değeri, fonksiyonun kullandığı
+                   formülle uyuşmuyor (beklenti elle yazılmış, formül sonradan
+                   değişmiş olabilir)
+  Yapılacak      : beklenen değerleri fonksiyonun gerçek çıktısına göre
+                   güncelle VEYA fonksiyonun doğru formülü olduğunu teyit et
+
+--- Grup B: rounded-rect (8 NUMARA) ---------------------------------------------
+  Ne test ediyor : buildRoundedRectProfile'in 8 NUMARA.cnc ile uyumu
+  Gözlem         : MANUEL DENENDİ ve fonksiyon DOĞRU çalışıyor:
+                     buildRoundedRectProfile(64.5,64.5,227.5,335.5, 4, ...)
+                       -> G2X64.50Y68.50I2.83J2.83  (8 NUMARA ile BİREBİR)
+                     buildRoundedRectProfile(68.5,68.5,223.5,331.5, 4, ...)
+                       -> doğru çıktı
+  Şüphe          : test, offset ve radius parametrelerini karıştırıyor
+                   (offset'i radius sanıyor ya da tersi)
+  Yapılacak      : testteki parametre sırasını/değerlerini düzelt
+
+--- Grup C: üst eğri / semicircle (2-3 NUMARA) ----------------------------------
+  Ne test ediyor : computeTopCurve'in yay merkezini/yarıçapını bulması
+  Gözlem         : MANUEL DENENDİ, fonksiyon DOĞRU:
+                     computeTopCurve(60, 232, 340, 'semicircle')
+                       -> xc = 146, r = 86
+                     numune bekliyor: G3X146.00Y340.00I-86.00J-0.00
+                     => TAM UYUŞUYOR
+  Şüphe          : test farklı bir offset/yt ile çağırıyor, ya da xc/yc
+                   beklentisini yanlış yazmış
+  Yapılacak      : testin çağrı parametrelerini numuneyle hizala
+
+--- Grup D: derz (birkaç test) --------------------------------------------------
+  Ne test ediyor : computeDerzPositions aralık/otomatik sığdırma
+  Gözlem         : kullanıcı tarafından doğrulanmış derz davranışı değişmedi
+                   (bu oturumda derz koduna DOKUNULMADI)
+  Şüphe          : autoFit beklentisi ya da spacing hesabı testte eski kalmış
+  Yapılacak      : beklenen çizgi konumlarını gerçek numunelerle teyit et
+
+--- Grup E: row.feed (per-satır feed) ------------------------------------------
+  Ne test ediyor : satıra özel feed override
+  Gözlem         : bu oturumda feed koduna DOKUNULMADI
+  Şüphe          : testte beklenen F değeri, cfg.cutFeed fallback'i ile
+                   çakışıyor olabilir
+  Yapılacak      : beklenen F değerini gözden geçir
+
+ÖNERİ: Bu 5 grubu ayrı bir turda, her biri numuneyle karşılaştırılarak ele
+       alınmalı. Hiçbiri carving işiyle ilgili değil.
+
+--------------------------------------------------------------------------------
+3) AÇIK SORUN: 1 NUMARA'da İKİNCİ CARVING SATIRI SİLİNDİ
+--------------------------------------------------------------------------------
+
+Ne yaptım : presets.json ve seed'de 1 NUMARA'da şu satır vardı:
+              { "name": "Carving iç pas (70, dik köşe)",
+                "operation": "carving", "cornerSharpen": false, ... }
+            "Keskinleştirmesiz carving" diye bir kavram kalmadığı için sildim.
+
+RİSK      : Eğer bu iç pas GERÇEKTEN V-bıçakla kesilmesi gereken ayrı bir
+            operasyonsa, geri konmalı. Aksi halde aynı işi bir "offset" satırı
+            zaten yapıyor.
+
+Yapılacak : Kullanıcı teyidi gerekiyor.
+            Geri koymak için: aynı satırı "operation": "offset" olarak ekle.
+
+--------------------------------------------------------------------------------
+4) AÇIK SORUN: AI RÖLYEF SERVİSİ KALDIRILMIŞ DURUMDA
+--------------------------------------------------------------------------------
+
+Gözlem    : server/ai_service/ (Python / Depth Anything V2) kaldırılmış.
+            Kalan tek hat: HARİCİ DEPTH MAP -> G-code
+            (docs/relief-pipeline-analysis.md bunu belgeliyor)
+Etki      : ReliefGenerator.jsx içinde AI/hybrid motor seçenekleri varsa
+            kırık olabilir. Bu oturumda İNCELENMEDİ.
+Yapılacak : ReliefGenerator'da AI motor seçeneği hâlâ görünüyorsa gizle,
+            ya da Python servisini geri kur.
+
+--------------------------------------------------------------------------------
+5) AÇIK SORUN: KÖK DİZİNDEKİ ESKİ LOG DOSYALARI
+--------------------------------------------------------------------------------
+
+Dosyalar  : _ai_svc.log, _ai_svc_err.log
+İçerik    : Kaldırılmış AI servisinden kalma eski loglar (2026 tarihli)
+Risk      : Yok, ama kafa karıştırıyor. Deploy'a dahil edildi.
+Yapılacak : İstersen sil.
+
+--------------------------------------------------------------------------------
+6) DEPLOY DIŞI BIRAKILANLAR
+--------------------------------------------------------------------------------
+
+- node_modules/           (istek üzerine hariç)
+- client/dist/            (build çıktısı; deploy sonrası `npm run build` ile
+                           yeniden üretilmeli)
+- client/src/lib/gcode/*.mjs  (eski debug/doğrulama scriptleri; ZARARSIZ ama
+                           kökü kirletiyor, silinebilir)
+
+--------------------------------------------------------------------------------
+7) DEPLOY SONRASI YAPILACAKLAR (evde)
+--------------------------------------------------------------------------------
+
+1. cd client && npm install
+2. cd ../server && npm install
+3. server/.env dosyasının geldiğini doğrula (env dahil edildi)
+4. cd client && npm run build
+5. Smoke testi:  cd client/src/lib/gcode && node smoke.test.js
+   Beklenen: 17 hata (yukarıdaki Bölüm 2 — bilinen, carving dışı)
+6. Carving doğrulaması: bir 90° bıçak satırı gir, 1 NUMARA.cnc T1 bloğuyla
+   karşılaştır (birebir çıkmalı)
+
+================================================================================
+  ÖZET: Bu oturumda carving/V-bıçak köşe keskinleştirme DÜZELTİLDİ ve
+  numuneyle birebir uyumlu hale getirildi. Bilinen 17 test hatası carving
+  dışı alanlarda ve önceden var olan test beklentisi uyuşmazlıklarıdır.
+================================================================================

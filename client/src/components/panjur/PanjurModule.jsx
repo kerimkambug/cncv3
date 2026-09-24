@@ -23,7 +23,8 @@ export default function PanjurModule({ onBackToMenu }) {
   const [feed, setFeed] = useState(20000);
   const [groundEntry, setGroundEntry] = useState(false);
   const [exitCut, setExitCut] = useState(4);
-  const t4Z = 0;
+  const [t4Z, setT4Z] = useState(9); // İlk dalış derinliği (2 pasolu kesim için)
+  const [t4Feed, setT4Feed] = useState(5000); // T4 kesim hızı (rölyef feed'i T14 için)
 
   const [toolNo, setToolNo] = useState('14');
   const [spindle, setSpindle] = useState(12000);
@@ -41,6 +42,23 @@ export default function PanjurModule({ onBackToMenu }) {
 
   const [output, setOutput] = useState('');
   const [message, setMessage] = useState(null);
+
+  // Yan yana seri üretim: kapak listesi (sınır yok, X başlangıcı oransal ilerler)
+  const [covers, setCovers] = useState([{ id: 1, width: 700, height: 400 }]);
+  const [coverGap, setCoverGap] = useState(0);
+  const [nextCoverId, setNextCoverId] = useState(2);
+  const PLATE_WIDTH = 2100;
+
+  function addCover() {
+    setCovers((cs) => [...cs, { id: nextCoverId, width: 700, height: 400 }]);
+    setNextCoverId((i) => i + 1);
+  }
+  function updateCover(id, field, value) {
+    setCovers((cs) => cs.map((cv) => (cv.id === id ? { ...cv, [field]: parseFloat(value) || 0 } : cv)));
+  }
+  function removeCover(id) {
+    setCovers((cs) => (cs.length > 1 ? cs.filter((cv) => cv.id !== id) : cs));
+  }
 
   const currentConfig = useMemo(() => {
     const detailed = offsetMode === 'detailed';
@@ -71,13 +89,11 @@ export default function PanjurModule({ onBackToMenu }) {
       spindle: parseFloat(spindle) || 0,
       groundEntry,
       exitCut: parseFloat(exitCut) || 0,
-      t4Z: 0,
+      t4Z: parseFloat(t4Z) || 0,
+      t4Feed: parseFloat(t4Feed) || 5000,
       drillTool,
       drillSpindle: parseFloat(drillSpindle) || 0,
       exitToolDia: parseFloat(exitToolDia) || 0,
-      t14TipDia: parseFloat(t14TipDia) || 0,
-      t14BodyDia: parseFloat(t14BodyDia) || 0,
-      t14Height: parseFloat(t14Height) || 0,
       safeZ: parseFloat(safeZ) || 30,
       toolChangeZ: parseFloat(toolChangeZ) || 30,
       homeZ: parseFloat(homeZ) || 30,
@@ -85,7 +101,7 @@ export default function PanjurModule({ onBackToMenu }) {
   }, [
     width, height, offsetMode, direction, offset, offsetLeft, offsetRight, offsetBottom, offsetTop, centerFlat,
     pitch, exitGap, stepover, edgeInset, startZ, endZ, feed, plunge, toolNo, spindle, groundEntry, exitCut,
-    drillTool, drillSpindle, exitToolDia, t14TipDia, t14BodyDia, t14Height, safeZ, toolChangeZ, homeZ
+    drillTool, drillSpindle, exitToolDia, t14TipDia, t14BodyDia, t14Height, safeZ, toolChangeZ, homeZ, t4Z, t4Feed
   ]);
 
   const summaryText = useMemo(() => {
@@ -105,9 +121,70 @@ export default function PanjurModule({ onBackToMenu }) {
   function generate() {
     setMessage(null);
     try {
-      const res = generatePanjurGcode(currentConfig);
-      setOutput(res.gcode);
-      setMessage({ type: 'ok', text: res.message });
+      // Yan yana seri üretim: her kapak kendi ölçüsüyle, X başlangıcı oransal artarak
+      const multi = covers.length > 1;
+      const coverList = multi ? covers : [{ id: 1, width: currentConfig.width, height: currentConfig.height }];
+
+      const totalWidth = coverList.reduce((s, cv) => s + (cv.width || 0) + (multi ? coverGap : 0), 0) - (multi ? coverGap : 0);
+      if (totalWidth > PLATE_WIDTH) {
+        throw new Error(`Toplam genişlik (${totalWidth.toFixed(0)} mm) plakayı aşıyor (${PLATE_WIDTH} mm).`);
+      }
+
+      let combined = [];
+      let xOffset = 0;
+      let n = 1;
+
+      // FAZ 1: T14 takımını bir kez al, tüm kapakların rasterını sırayla işle
+      for (let i = 0; i < coverList.length; i++) {
+        const cv = coverList[i];
+        const cfg = { ...currentConfig, width: cv.width, height: cv.height };
+        const res = generatePanjurGcode(cfg, xOffset, 0, true, n, {
+          phase: currentConfig.groundEntry ? 'raster' : 'all',
+          t14Header: i === 0,
+        });
+        for (const line of res.gcode.split('\n')) {
+          if (line.trim()) combined.push(line);
+        }
+        n = res.nextN;
+        xOffset += cv.width + (multi ? coverGap : 0);
+      }
+
+      // FAZ 2: T4 kesim bıçağını bir kez al, tüm kapakların çıkış kanallarını sırayla aç
+      if (currentConfig.groundEntry) {
+        let exX = 0;
+        let t4Header = true;
+        for (const cv of coverList) {
+          const cfg = { ...currentConfig, width: cv.width, height: cv.height };
+          const res = generatePanjurGcode(cfg, exX, 0, true, n, { phase: 'exit', t14Header: false, t4Header });
+          for (const line of res.gcode.split('\n')) {
+            if (line.trim()) combined.push(line);
+          }
+          n = res.nextN;
+          t4Header = false;
+          exX += cv.width + (multi ? coverGap : 0);
+        }
+        combined.push(`N${n++} M5`);
+      }
+
+      combined.push('N9998 G0 Z30.00');
+      combined.push('N9999 M5');
+      combined.push('M9');
+      combined.push('M16');
+      combined.push('M30');
+      combined.push('%');
+
+      const isT4Used = currentConfig.groundEntry ? '_Kesimli' : '';
+      const name = multi
+        ? `Panjur_Seri_${coverList.length}adet_${totalWidth.toFixed(0)}x${Math.max(...coverList.map((cv) => cv.height))}${isT4Used}.nc`
+        : `Panjur_${currentConfig.width}x${currentConfig.height}${isT4Used}.nc`;
+
+      setOutput(combined.join('\n'));
+      setMessage({
+        type: 'ok',
+        text: multi
+          ? `${coverList.length} kapak tek programda birleştirildi (toplam X: ${totalWidth.toFixed(0)} mm). İsim: ${name}`
+          : `G-code üretildi.`,
+      });
     } catch (err) {
       setMessage({ type: 'err', text: err.message });
       setOutput('');
@@ -120,13 +197,20 @@ export default function PanjurModule({ onBackToMenu }) {
     if (!output) return;
     navigator.clipboard.writeText(output);
   }
-
-  function downloadFile() {
+function downloadFile() {
     if (!output.trim()) return;
     const blob = new Blob([output], { type: 'text/plain' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'panjur.nc';
+
+    const isT4Used = currentConfig.groundEntry ? "_Kesimli" : "";
+    if (covers.length > 1) {
+      const totalWidth = covers.reduce((s, cv) => s + cv.width + coverGap, 0) - coverGap;
+      a.download = `Panjur_Seri_${covers.length}adet_${totalWidth}x${Math.max(...covers.map((cv) => cv.height))}${isT4Used}.nc`;
+    } else {
+      a.download = `Panjur_${currentConfig.width}x${currentConfig.height}${isT4Used}.nc`;
+    }
+
     a.click();
     URL.revokeObjectURL(a.href);
   }
@@ -228,6 +312,61 @@ export default function PanjurModule({ onBackToMenu }) {
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
+        <h2>1b. Yan Yana Kapaklar (Seri Üretim)</h2>
+        <div className="hint" style={{ marginBottom: 10 }}>
+          Soldan sağa yan yana farklı ölçülerde kapaklar ekleyin; her kapak en/boy ister ve hepsine aynı ayarlar uygulanır. X başlangıcı her kapakta oransal olarak ilerler. Toplam genişlik plaka sınırına (2100 mm) kadar serbesttir.
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left' }}>X Başlangıç</th>
+              <th style={{ textAlign: 'left' }}>Genişlik X (mm)</th>
+              <th style={{ textAlign: 'left' }}>Yükseklik Y (mm)</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {(() => {
+              let cx = 0;
+              return covers.map((cv) => {
+                const startX = cx;
+                cx += cv.width + coverGap;
+                return (
+                  <tr key={cv.id}>
+                    <td style={{ color: 'var(--muted)' }}>{startX.toFixed(0)} mm</td>
+                    <td>
+                      <input type="number" min="1" step="1" value={cv.width}
+                        onChange={(e) => updateCover(cv.id, 'width', e.target.value)} style={{ width: 90 }} />
+                    </td>
+                    <td>
+                      <input type="number" min="1" step="1" value={cv.height}
+                        onChange={(e) => updateCover(cv.id, 'height', e.target.value)} style={{ width: 90 }} />
+                    </td>
+                    <td>
+                      <button type="button" className="icon-btn" onClick={() => removeCover(cv.id)}
+                        disabled={covers.length === 1} style={{ opacity: covers.length === 1 ? 0.4 : 1 }}>✕</button>
+                    </td>
+                  </tr>
+                );
+              });
+            })()}
+          </tbody>
+        </table>
+        <div className="row2" style={{ marginTop: 10 }}>
+          <div>
+            <label>Kapak arası boşluk (mm)</label>
+            <input type="number" min="0" step="1" value={coverGap} onChange={(e) => setCoverGap(parseFloat(e.target.value) || 0)} />
+          </div>
+          <div style={{ alignSelf: 'end' }}>
+            <button type="button" className="btn-secondary" onClick={addCover}>+ Kapak Ekle</button>
+          </div>
+        </div>
+        <div className="hint" style={{ marginTop: 8 }}>
+          Tek kapakla çalışmak isterseniz diğerlerini silin — o zaman yukarıdaki ana ölçü kullanılır.
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
         <h2>2. Panjur Geometrisi</h2>
         <div className="row3">
           <div>
@@ -290,8 +429,12 @@ export default function PanjurModule({ onBackToMenu }) {
               <input type="number" value={exitCut} min="0.1" step="0.1" onChange={(e) => setExitCut(parseFloat(e.target.value) || 0)} />
             </div>
             <div>
-              <label>T4 Z</label>
-              <input type="number" value={t4Z} readOnly />
+              <label>T4 İlk Dalış Z</label>
+              <input type="number" value={t4Z} step="0.1" onChange={(e) => setT4Z(parseFloat(e.target.value) || 0)} />
+            </div>
+            <div>
+              <label>T4 Kesim Hızı</label>
+              <input type="number" value={t4Feed} min="100" step="100" onChange={(e) => setT4Feed(parseFloat(e.target.value) || 5000)} />
             </div>
           </div>
         )}

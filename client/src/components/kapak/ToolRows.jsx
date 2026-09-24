@@ -25,11 +25,9 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
   }
   function updateCarving(idx, field, value) {
     const next = rows.slice();
-    // cornerSharpenDistance: empty string => null (falls back to the row's depth)
-    const stored = field === 'cornerSharpen'
-      ? value
-      : (value === '' || value === null || value === undefined ? null : parseFloat(value) || 0);
-    next[idx] = { ...next[idx], [field]: stored, cornerSharpen: next[idx].cornerSharpen !== false };
+    // bitAngle: empty => null (no angle known, ramp falls back to the 1:1 rule)
+    const stored = value === '' || value === null || value === undefined ? null : parseFloat(value) || 0;
+    next[idx] = { ...next[idx], [field]: stored };
     setRows(next);
   }
   function updateDerz(idx, field, value) {
@@ -163,6 +161,14 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
 
       {selected != null && rows[selected] && (() => {
         const r = rows[selected];
+        // Carving is corner-sharpening BY DEFINITION, so the only thing the shop
+        // supplies is the bit angle. Offset + depth already say where and how deep
+        // the flat floor runs; the angle turns that into the corner ramp.
+        const hasAngle = Number(r.bitAngle) > 0;
+        const ramp = hasAngle ? +(Number(r.depth) / Math.tan((Number(r.bitAngle) / 2) * (Math.PI / 180))).toFixed(2) : null;
+        const offset = Number(r.stepOffset) || 0;
+        // The plate clamp silently shortens any ramp wider than the offset.
+        const clipped = ramp != null && ramp > offset;
         return (
           <div className="tool-settings-panel">
             <div className="tool-settings-header">
@@ -170,26 +176,37 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
               <button type="button" className="icon-btn" onClick={() => setSelected(null)}>✕</button>
             </div>
             <div className="tool-settings-grid">
-              <label>
-                <span>Köşe R (mm) — boş = düz köşe</span>
-                <input type="number" min="0" step="0.5" value={r.cornerRadius ?? ''} placeholder="—" onChange={(e) => updateOptional(selected, 'cornerRadius', e.target.value)} />
-              </label>
-              <label>
-                <span>Feed (mm/dk) — boş = genel</span>
-                <input type="number" min="0" step="100" value={r.feed ?? ''} placeholder="genel" onChange={(e) => updateOptional(selected, 'feed', e.target.value)} />
-              </label>
+              {/* Carving only ever asks for the bit angle. Its offset and depth are
+                  already in the table, and corner sharpening IS what carving means —
+                  so Köşe R / Feed are irrelevant here and are not shown. */}
               {r.operation === 'carving' && (
                 <>
-                  <label className="check-field">
-                    <input type="checkbox" checked={r.cornerSharpen !== false} onChange={(e) => updateCarving(selected, 'cornerSharpen', e.target.checked)} />
-                    <span>Köşeleri keskinleştir (dışa çıkış + rampa)</span>
+                  <label>
+                    <span>Bıçak açısı (°){hasAngle ? ` — kenara ${Number(r.bitAngle) / 2}°` : ''}</span>
+                    <input type="number" min="1" max="179" step="1" value={r.bitAngle ?? ''} placeholder="90" onChange={(e) => updateCarving(selected, 'bitAngle', e.target.value)} />
                   </label>
-                  {r.cornerSharpen !== false && (
-                    <label>
-                      <span>Köşe çıkış mesafesi (mm) — boş = derinlik</span>
-                      <input type="number" min="0" step="0.1" value={r.cornerSharpenDistance ?? ''} placeholder={String(r.depth ?? '')} onChange={(e) => updateCarving(selected, 'cornerSharpenDistance', e.target.value)} />
-                    </label>
-                  )}
+                  <div className={`hint${clipped ? ' hint-warn' : ''}`} style={{ gridColumn: '1 / -1' }}>
+                    {hasAngle ? (
+                      <>
+                        {r.bitAngle}° bıçak (kenara {Number(r.bitAngle) / 2}°) · köşede {ramp}mm dışa çıkıp yüzeye tırmanır.
+                        {clipped && ` ⚠ Offset (${offset}mm) bu rampayı taşımıyor — ${offset}mm'ye kırpılacak.`}
+                      </>
+                    ) : (
+                      <>Bıçak açısını gir — köşe rampası ona göre hesaplanır (şimdilik 90° varsayılıyor).</>
+                    )}
+                  </div>
+                </>
+              )}
+              {r.operation !== 'carving' && (
+                <>
+                  <label>
+                    <span>Köşe R (mm) — boş = düz köşe</span>
+                    <input type="number" min="0" step="0.5" value={r.cornerRadius ?? ''} placeholder="—" onChange={(e) => updateOptional(selected, 'cornerRadius', e.target.value)} />
+                  </label>
+                  <label>
+                    <span>Feed (mm/dk) — boş = genel</span>
+                    <input type="number" min="0" step="100" value={r.feed ?? ''} placeholder="genel" onChange={(e) => updateOptional(selected, 'feed', e.target.value)} />
+                  </label>
                 </>
               )}
               {r.operation === 'derz' && (

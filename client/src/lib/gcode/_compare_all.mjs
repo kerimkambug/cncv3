@@ -2,6 +2,14 @@
 // Üretilen (site motoru) g-code'u numuneler/ altındaki ArtCAM NİHAİ dosyalarla
 // tüm 7 model için (292x400) karşılaştır. Model tanımları
 // server/scripts/seed-numune-presets.js içindeki NUMUNE_PRESETS'ten gelir.
+//
+// DİKKAT: bu script METİN TOKEN karşılaştırması yapar, geometri değil. ArtCAM
+// modal yazımda değişmeyen ekseni atlar ("G1 Y330.00" tek başına, "X89.00"
+// tek başına) ve -0.00 gibi yuvarlama artıklarını korur; bu yüzden geometrik
+// olarak birebir olan geçişler bile burada düşük yüzde gösterir.
+// GERÇEK doğruluk ölçütü: server/scripts/compare-numuneler-geom.mjs (modal
+// durum simülasyonu ile hamle/feed karşılaştırması). 7/7 numune orada eşleşiyor.
+// Bu script yalnızca "hangi satırlar hiç görülmemiş" taraması için kullanılır.
 import fs from 'fs';
 import { buildKapakGcode } from './kapak.js';
 import { NUMUNE_PRESETS, toPresetDoc } from '../../../../server/scripts/seed-numune-presets.js';

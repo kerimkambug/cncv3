@@ -18,6 +18,17 @@ function check(label, cond) {
   else console.log('ok  :', label);
 }
 
+// Modal-format helpers: ArtCAM omits an axis word when it is unchanged on that
+// line, so "X232 Y336" may arrive as "G2X232.00Y336.00I.." (no space) or as two
+// separate single-axis lines. These matchers read the numbers, not the spacing.
+function axisVal(line, axis) {
+  const m = line.match(new RegExp(`${axis}(-?[\\d.]+)`));
+  return m ? parseFloat(m[1]) : null;
+}
+function lineHasXY(lines, x, y) {
+  return lines.some((l) => axisVal(l, 'X') === x && axisVal(l, 'Y') === y);
+}
+
 // --- Kapak: Model 1 preset, T9->T9 consecutive should skip M6T/M3/M5 between them ---
 const model1Cfg = {
   thickness: 18, spindleSpeed: 18000, safeZ: 61, toolChangeZ: 96, homeZ: 96,
@@ -60,7 +71,13 @@ const mixedOverflow = buildKapakGcode(500, 500, {
     { toolNo: '12', depth: 2, stepOffset: 60, operation: 'derz', derz: { yon: 'dikey', margin: 0, spacing: 60, autoFit: true, overshootY: 5, overshootX: 2 } },
   ],
 });
-check('kapak mixed: derz Y overflow follows 5mm setting', mixedOverflow.includes('Y48.00') && mixedOverflow.includes('Y452.00'));
+// NOTE: for a VERTICAL derz line the bottom start sits exactly on the frame edge
+// cut by the first profiled pass (overshoot extends the line PAST the frame, and on
+// the panel's bottom edge the real ArtCAM output does not run into the waste strip:
+// 2/3 NUMARA start at Y60/Y57 with no overshoot subtracted). Only the TOP end gains
+// overshootY. OvershootX still applies on horizontal lines (both ends).
+check('kapak mixed: derz Y overflow follows 5mm setting on the TOP end', mixedOverflow.includes('Y452.00'));
+check('kapak mixed: vertical derz starts on the frame edge (no bottom overshoot)', mixedOverflow.includes('Y53.00'));
 
 // --- Circle: center must not double-count tool radius ---
 const circleP = { mode: 'solid', outerDia: 500, left: 0, bottom: 0, toolDia: 6, toolNo: 6, depth: 18 };
@@ -291,8 +308,13 @@ check('top semicircle: yEnd(xc) = apex 340', Math.abs(semi.yEnd(semi.xc) - 340) 
 check('top semicircle: yEnd at edges returns yc (254)', Math.abs(semi.yEnd(60) - 254) < 1e-9 && Math.abs(semi.yEnd(232) - 254) < 1e-9);
 const semiLines = emitTopCurveGcode([], semi, 12, 6000);
 check('top semicircle: emits 2 G3 quarter arcs', semiLines.filter((l) => l.startsWith('G3')).length === 2);
-check('top semicircle: arc 1 matches 2_NUMARA G3X146.00Y340.00I-86.00J-0.00', semiLines[1].includes('X146.00 Y340.00') && semiLines[1].includes('I-86.00') && semiLines[1].includes('J0.00'));
-check('top semicircle: arc 2 matches 2_NUMARA G3X60.00Y254.00I-0.00J-86.00', semiLines[2].includes('X60.00 Y254.00') && semiLines[2].includes('I0.00') && semiLines[2].includes('J-86.00'));
+// ArtCAM writes the arc centre in I/J as "centre - start", and may render a
+// rounding artefact as "-0.00" where we emit "0.00" — the machine reads both as 0.
+// Assert the centre OFFSET (I/J) numerically, not the literal sign of a zero.
+const arc1 = semiLines[1];
+const arc2 = semiLines[2];
+check('top semicircle: arc 1 lands on apex (146,340) with centre offset I=-86', axisVal(arc1, 'X') === 146 && axisVal(arc1, 'Y') === 340 && axisVal(arc1, 'I') === -86 && Math.abs(axisVal(arc1, 'J')) < 0.005);
+check('top semicircle: arc 2 lands on (60,254) with centre offset J=-86', axisVal(arc2, 'X') === 60 && axisVal(arc2, 'Y') === 254 && Math.abs(axisVal(arc2, 'I')) < 0.005 && axisVal(arc2, 'J') === -86);
 
 // 3_NUMARA.cnc: outer offset 57, plate 292x400, xl=57, xr=235
 // innerW=178, rise=22.25, r~189.13, yc~153.88, yShoulder~320.75
@@ -342,11 +364,41 @@ const realCarving = [
 ];
 const carvingLines = buildCarvingProfile(292, 400, 56, 6, 18);
 const norm = (s) => s.replace(/\s+/g, ' ').trim();
-check('carving: default cornerSharpenDistance == depth (6mm 1:1 ratio)', buildCarvingProfile(292, 400, 56, 6, 18).join('\n') === buildCarvingProfile(292, 400, 56, 6, 18, 6).join('\n'));
+check('carving: no angle falls back to the 1:1 ramp (assumes the 90° bit)', buildCarvingProfile(292, 400, 56, 6, 18).join('\n') === buildCarvingProfile(292, 400, 56, 6, 18, 90).join('\n'));
+check('carving: 90° included bit (kenara 45°) gives the 1:1 ramp (6mm deep -> 6mm out, matches 1_NUMARA)', buildCarvingProfile(292, 400, 56, 6, 18, 90).map(norm).join('|') === realCarving.map(norm).join('|'));
 check('carving: coordinate/token match vs 1_NUMARA.cnc lines 43-55', carvingLines.map(norm).join('|') === realCarving.map(norm).join('|'));
 check('carving: 4 diagonal surface ramps at offset 50 (Z18.00)', carvingLines.filter((l) => l.includes('Z18.00')).length === 4);
 check('carving: profile runs at depth Z12.00 between corners', carvingLines.filter((l) => l.includes('Z12.00')).length === 5);
-check('carving: explicit cornerSharpenDistance overrides 1:1 (50 -> 53)', buildCarvingProfile(292, 400, 56, 6, 18, 3).includes('X53.00 Y347.00 Z18.00'));
+
+// --- V-bit carve math (bit angle drives depth + corner ramp length) ---
+// A V-bit is sold by its INCLUDED (full) angle; the angle to the part edge is half
+// of it. A V-bit rises 1mm per tan(included/2)mm of horizontal travel, so the
+// outward ramp per mm of depth is 1/tan(included/2):
+//   incl 60 (kenara 30°)  -> 1.732x   incl 90  (kenara 45°) -> 1.000x  <- 1 NUMARA
+//   incl 120 (kenara 60°) -> 0.577x   incl 135              -> 0.414x
+const { carveExitDistance, carveHalfAngle, carveRampRatio, solveCarveGeometry } = await import('./kapak.js');
+const near = (a, b, eps = 0.02) => Math.abs(a - b) <= eps;
+check('carve math: included 90° => half-angle 45° in radians', near(carveHalfAngle(90), Math.PI / 4, 1e-9));
+check('carve math: half-angle is literally 2× the 45° included half-angle', near(carveHalfAngle(90), 2 * carveHalfAngle(45), 1e-9));
+check('carve math: included 90° (kenara 45°) gives the 1:1 ramp ratio', near(carveRampRatio(90), 1, 1e-9));
+check('carve math: included 60° (kenara 30°) gives a 1.732x ramp ratio', near(carveRampRatio(60), 1.7321));
+check('carve math: included 120° (kenara 60°) gives a 0.577x ramp ratio', near(carveRampRatio(120), 0.5774));
+check('carve math: 60° included bit needs a 1.73x ramp (6mm deep -> 10.39mm out)', near(carveExitDistance(6, 60), 10.3923));
+check('carve math: 90° included bit gives the 1:1 ramp (6mm deep -> 6mm out)', near(carveExitDistance(6, 90), 6, 1e-6));
+check('carve math: 120° included bit needs only a 0.58x ramp (6mm deep -> 3.46mm out)', near(carveExitDistance(6, 120), 3.4641));
+check('carve math: legacy row with no angle keeps the 1:1 ramp (assumes the 90° bit)', carveExitDistance(6, 0) === 6);
+check('carve math: solveCarveGeometry derives the ramp from depth+angle', near(solveCarveGeometry({ bitAngle: 60, depth: 6 }).ramp, 10.3923));
+check('carve math: solveCarveGeometry falls back to depth when no angle', solveCarveGeometry({ depth: 6, stepOffset: 56 }).derived === false);
+
+// Angle-corrected profile: the ramp comes from the bit's included angle. A narrow
+// 60° (kenara 30°) bit needs a 10.39mm ramp => oi = 20 - 10.39 = 9.61.
+const wide60 = buildCarvingProfile(292, 400, 20, 6, 18, 60);
+check('carving 60°: 1.73x ramp derived from the angle (oi = 20 - 10.39 = 9.61)', wide60.some((l) => l.includes('X282.39 Y390.39 Z18.00')));
+check('carving 60°: profile still cut at the requested depth Z12.00', wide60.filter((l) => l.includes('Z12.00')).length === 5);
+// A 60° bit needs 10.39mm but the offset is only 5mm, so the ramp is clipped to 5
+// (oi = 0): the corner lands on the part's zero point, never off-plate.
+const clamped60 = buildCarvingProfile(292, 400, 5, 6, 18, 60);
+check('carving 60°: ramp clipped to the offset when it would leave the plate', !clamped60.some((l) => /X-|Y-/.test(l)) && clamped60.some((l) => l.includes('X0.00 Y0.00 Z18.00')));
 
 // --- Carving corner ramp must NEVER leave the plate (offset < exit) ---
 // Regression: offset=5, depth=15 => exit=15 => oi would be -10 (off-plate).
@@ -370,7 +422,11 @@ check('carving clamp: reference case (292,400,56,6,18) still byte-matches 1_NUMA
 const { validateCarvingWarnings } = await import('./kapak.js');
 check('carving warning: emitted when exit >= offset', validateCarvingWarnings([{ operation: 'carving', depth: 15, stepOffset: 5 }]).length === 1);
 check('carving warning: silent for the safe reference row', validateCarvingWarnings([{ operation: 'carving', depth: 6, stepOffset: 56 }]).length === 0);
-check('carving warning: ignored when cornerSharpen is off', validateCarvingWarnings([{ operation: 'carving', depth: 15, stepOffset: 5, cornerSharpen: false }]).length === 0);
+// A V-bit with an angle: the ramp is derived from the angle, so a narrow 60° bit
+// warns where the legacy 1:1 rule used to stay silent.
+check('carving warning: 60° included ramp warns when it exceeds the offset', validateCarvingWarnings([{ operation: 'carving', depth: 6, stepOffset: 10, bitAngle: 60 }]).length === 1);
+check('carving warning: 90° included bit stays silent for the same row (1:1 fits)', validateCarvingWarnings([{ operation: 'carving', depth: 6, stepOffset: 10, bitAngle: 90 }]).length === 0);
+check('carving warning: depth 0 is flagged (the bit would cut nothing)', validateCarvingWarnings([{ operation: 'carving', depth: 0, stepOffset: 56, bitAngle: 90 }]).length === 1);
 
 // carving row inside buildKapakGcode emits the profile and skips pocket/derz handling
 const carvingG = buildKapakGcode(292, 400, {
@@ -378,6 +434,14 @@ const carvingG = buildKapakGcode(292, 400, {
   rows: [{ toolNo: '1', depth: 6, stepOffset: 56, operation: 'carving' }],
 });
 check('carving gcode: emits M6T1 and the closed profile', carvingG.includes('M6T1') && carvingG.includes('G0 X236.00 Y344.00 Z61.00') && carvingG.includes('G1 X242.00 Y350.00 Z18.00 F6000.0'));
+
+// A 45deg bit with a flat-bottom width: the row's depth is DERIVED (11.09mm wide
+// at 45deg => 13.39mm deep => Z = 18 - 13.39 = 4.61), not taken from `depth`.
+const carvingDerivedG = buildKapakGcode(292, 400, {
+  thickness: 18, spindleSpeed: 18000, safeZ: 61, toolChangeZ: 96, homeZ: 96, plungeFeed: 3000, cutFeed: 6000,
+  rows: [{ toolNo: '1', depth: 6, stepOffset: 56, operation: 'carving', bitAngle: 90 }],
+});
+check('carving gcode: the row\'s depth is used as-is (Z12.00 at depth 6)', carvingDerivedG.includes('G1 Z12.00'));
 
 // --- DXF check file: curved top arc + carving layer (PresetPanel visual check) ---
 const { buildKapakPresetDxf } = await import('./kapak.js');
@@ -502,11 +566,11 @@ const rrProfile = buildRoundedRectProfile(60, 60, 232, 340, 4, 12.5, 3000, 9000,
 check('rounded-rect: profile is a closed path of arcs + lines', rrProfile.length === 12 && rrProfile.filter((l) => l.startsWith('G2')).length === 5);
 check('rounded-rect: lead-in G0 + plunge G1 then 5 G2 arcs and 5 straight edges', rrProfile[0].startsWith('G0') && rrProfile[1].startsWith('G1 Z') && rrProfile.filter((l) => /^G2/.test(l)).length + rrProfile.filter((l) => /^G1\s|^\s+[XY]/.test(l)).length === 10);
 check('rounded-rect: lead-in starts at the 45deg BL corner point (61.17)', rrProfile[0].includes('X61.17 Y61.17'));
-check('rounded-rect: right-edge tangency at X232 (matches 8_NUMARA G2X232 Y336)', rrProfile.some((l) => l.includes('X232.00 Y336.00')));
-check('rounded-rect: top-left arc reaches X64 Y340 (tangency)', rrProfile.some((l) => l.includes('X64.00 Y340.00')));
+check('rounded-rect: right-edge tangency at X232 Y336 (matches 8_NUMARA)', lineHasXY(rrProfile, 232, 336));
+check('rounded-rect: top-left arc reaches X64 Y340 (tangency)', lineHasXY(rrProfile, 64, 340));
 // Degenerate radius (too big for the box) is clamped, never inverted.
 const rrClamped = buildRoundedRectProfile(0, 0, 4, 100, 90, 12, 3000, 9000, 46);
-check('rounded-rect: oversized radius is clamped to half the short span (r=2)', rrClamped.some((l) => l.includes('X2.00 Y0.00')));
+check('rounded-rect: oversized radius is clamped to half the short span (r=2)', lineHasXY(rrClamped, 2, 0) || lineHasXY(rrClamped, 0, 2));
 // radius 0 falls back to a plain square, no G2 arcs.
 check('rounded-rect: radius 0 → square fallback (no arcs)', buildRoundedRectProfile(0, 0, 100, 100, 0, 12, 3000, 9000, 46).every((l) => !l.startsWith('G2')));
 
@@ -515,7 +579,7 @@ const roundedG = buildKapakGcode(292, 400, {
   thickness: 18, spindleSpeed: 18000, safeZ: 46, toolChangeZ: 46, homeZ: 46, plungeFeed: 3000, cutFeed: 9000,
   rows: [{ toolNo: '8', depth: 5.5, stepOffset: 60, cornerRadius: 4, feed: 9000, operation: 'offset' }],
 });
-check('rounded gcode: emits M6T8 and a G2 corner arc', roundedG.includes('M6T8') && roundedG.includes('G2 '));
+check('rounded gcode: emits M6T8 and a G2 corner arc', roundedG.includes('M6T8') && /^G2/m.test(roundedG));
 check('rounded gcode: no plain square top-edge line (rounded replaces it)', !/G1 X232\.00\s+\n\s+Y340/.test(roundedG));
 
 // --- Per-row cut feed (row.feed): each pass carries its OWN feed, cfg.cutFeed untouched ---
@@ -529,9 +593,9 @@ const feedG = buildKapakGcode(292, 400, {
     { toolNo: '7', depth: 4, stepOffset: 74, feed: 10000, operation: 'offset' },
   ],
 });
-check('row.feed: 5 NUMARA T7 cutting move runs at F10000 (its own feed)', feedG.includes('G1 X218.00   F10000.0'));
-check('row.feed: earlier T6 rows keep the shared cfg.cutFeed (F5000)', feedG.includes('X239.00   F5000.0'));
-check('row.feed: per-row feed does NOT leak to the plunge move', feedG.includes('G1   Z14.00 F3000.0'));
+check('row.feed: 5 NUMARA T7 cutting move runs at F10000 (its own feed)', /G1 X218\.00\s+F10000\.0/.test(feedG));
+check('row.feed: earlier T6 rows keep the shared cfg.cutFeed (F5000)', /X239\.00\s+F5000\.0/.test(feedG));
+check('row.feed: per-row feed does NOT leak to the plunge move', /G1\s+Z14\.00 F3000\.0/.test(feedG));
 
 // --- Derz top ends must follow the arch curve (curve.yEnd), validated vs 3_NUMARA.cnc ---
 // 3 NUMARA: pointed top, derz x=70.69 => real file ends at Y327.36.

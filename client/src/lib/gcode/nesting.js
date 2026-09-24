@@ -7,7 +7,8 @@
 //    - Aşama 3 (Final Kesim - İşleme Sonrası): 6mm kesim bıçağıyla Z0'a kadar inilerek parça plakadan ayrılır.
 // 3. Sıralama: Sağ en üstteki parçadan sola doğru, satır satır yukarıdan aşağıya (sağdan sola).
 import { fmt, computeCumOffsets, emitRectCutPath } from './common.js';
-import { validateKapakSize, calculateAdaptiveOffsets, buildCarvingProfile, clampCarvingExit, computeTopCurve, emitTopCurveGcode } from './kapak.js';
+import { computeDerzPositions } from './derz.js';
+import { validateKapakSize, calculateAdaptiveOffsets, buildCarvingProfile, clampCarvingExit, solveCarveGeometry, computeTopCurve, emitTopCurveGcode } from './kapak.js';
 
 function rectsIntersect(a, b) {
   return a.x < b.x + b.w - 1e-9 && a.x + a.w > b.x + 1e-9 && a.y < b.y + b.h - 1e-9 && a.y + a.h > b.y + 1e-9;
@@ -203,7 +204,13 @@ export function calculateNesting(opts) {
     throw new Error('En az bir geçerli parça ekle.');
   }
 
-  const parts = inputParts.slice().sort((a, b) => (b.width * b.height) - (a.width * a.height));
+  // Her giriş satırını qty adet gerçek parçaya aç (qty yoksa/geçersizse 1 kabul edilir).
+  const parts = inputParts
+    .flatMap((p) => {
+      const qty = Number.isFinite(Number(p.qty)) && Number(p.qty) > 0 ? Math.floor(Number(p.qty)) : 1;
+      return Array.from({ length: qty }, (_, i) => ({ ...p, qty, copyIndex: i }));
+    })
+    .sort((a, b) => (b.width * b.height) - (a.width * a.height));
   const usableW = plateW - edge * 2;
   const usableH = plateH - edge * 2;
   const plates = [];
@@ -242,15 +249,78 @@ export function calculateNesting(opts) {
 }
 
 /** Returns an error string if any tool row is missing required fields, else null. */
-export function validateNestingResult(nestingResult, rows, offsetMode) {
+function validateRows(rows, label) {
   if (!rows || rows.length === 0) return null;
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
-    if (r.toolNo === '' || r.toolNo === undefined || r.toolNo === null) return 'Bir satırda Tool No eksik.';
-    if (!Number.isFinite(r.depth)) return `${r.name || 'bir bıçak'} için derinlik eksik.`;
-    if (!Number.isFinite(r.stepOffset)) return `${r.name || 'bir bıçak'} için adım offset eksik.`;
+    if (r.toolNo === '' || r.toolNo === undefined || r.toolNo === null) return `${label}: bir satırda Tool No eksik.`;
+    if (!Number.isFinite(r.depth)) return `${label}: ${r.name || 'bir bıçak'} için derinlik eksik.`;
+    if (!Number.isFinite(r.stepOffset)) return `${label}: ${r.name || 'bir bıçak'} için adım offset eksik.`;
   }
   return null;
+}
+
+/**
+ * Validates the default ("Ayarlar") tool rows AND every per-part preset actually
+ * referenced in presetMap (parça bazlı model ataması — bkz. resolvePartCfg).
+ * @param {object} defaultCfg - the cfg currently active in "Ayarlar/Bıçaklar" (fallback for parts with no override)
+ * @param {object} presetMap - { [presetId]: cfg } — only presets actually assigned to a part need to be here
+ */
+export function validateNestingResult(nestingResult, defaultCfg, presetMap = {}) {
+  const defaultErr = validateRows(defaultCfg?.rows, 'Ayarlardaki bıçaklar');
+  if (defaultErr) return defaultErr;
+  for (const key of Object.keys(presetMap || {})) {
+    const preset = presetMap[key];
+    const err = validateRows(preset?.rows, preset?.name ? `"${preset.name}" modeli` : 'Seçili model');
+    if (err) return err;
+  }
+  return null;
+}
+
+/**
+ * Resolves the full cfg (thickness/rows/offsetMode/topStyle/feeds/...) that should
+ * drive a placed part's toolpaths: its own assigned preset (part.presetId) if one
+ * was chosen and exists in presetMap, otherwise the plate-wide default cfg
+ * ("Ayarlar" panelindeki aktif ayar — dropdown'da boş bırakılırsa bu kullanılır).
+ */
+export function resolvePartCfg(part, defaultCfg, presetMap) {
+  if (part && part.presetId && presetMap && presetMap[part.presetId]) {
+    return presetMap[part.presetId];
+  }
+  return defaultCfg;
+}
+
+/**
+ * Groups a plate's placed parts by which cfg (preset) drives their toolpaths,
+ * preserving each group's first-appearance order on the plate. Used so a single
+ * plate can mix parts that each carve/offset with a completely different model.
+ * @returns {Array<{key:string, cfg:object, parts:Array}>}
+ */
+export function groupNestingPartsByPreset(parts, defaultCfg, presetMap = {}) {
+  const groups = [];
+  const indexByKey = new Map();
+  (parts || []).forEach((part) => {
+    const hasOverride = !!(part && part.presetId && presetMap && presetMap[part.presetId]);
+    const key = hasOverride ? part.presetId : '__default__';
+    if (!indexByKey.has(key)) {
+      indexByKey.set(key, groups.length);
+      groups.push({ key, cfg: resolvePartCfg(part, defaultCfg, presetMap), parts: [] });
+    }
+    groups[indexByKey.get(key)].parts.push(part);
+  });
+  return groups;
+}
+
+function getMachineParams(cfg) {
+  return {
+    thickness: Number(cfg.thickness) || 18,
+    plungeFeed: Number(cfg.plungeFeed) || 3000,
+    cutFeed: Number(cfg.cutFeed) || 6000,
+    safeZ: Number(cfg.safeZ) || 61,
+    toolChangeZ: Number(cfg.toolChangeZ) || 96,
+    homeZ: Number(cfg.homeZ) || 96,
+    spindleSpeed: cfg.spindleSpeed || 18000,
+  };
 }
 
 /**
@@ -319,6 +389,9 @@ function emitAdaptiveProfilePasses(lines, plate, cfg, { thickness, plungeFeed, c
   // Only plain offset rows participate in the (cumulative) offset chain; derz and
   // carving rows are handled separately and must not shift the offset sequence.
   const offsetRows = cfg.rows.filter((r) => (r.operation || 'offset') !== 'derz' && r.operation !== 'carving');
+  // Cumulative offset per offset row — the derz "respectPreviousOffset" margin
+  // sits on top of the deepest offset row's cumulative value.
+  const offsetCums = offsetRows.length ? computeCumOffsets(offsetRows, cfg.offsetMode || 'relative') : [];
 
   offsetRows.forEach((r, rowIdx) => {
     const z = +(thickness - r.depth).toFixed(3);
@@ -363,13 +436,13 @@ function emitAdaptiveProfilePasses(lines, plate, cfg, { thickness, plungeFeed, c
   // Carving rows: single closed profile line (V-bit) at a fixed offset, with an
   // outward diagonal corner ramp back to the surface — per part.
   cfg.rows.filter((r) => r.operation === 'carving').forEach((r) => {
+    // Carving = closed V-bit profile with mandatory corner sharpening. The row gives
+    // where (stepOffset) and how deep (depth); the bit angle derives the corner ramp.
+    const geo = solveCarveGeometry(r);
     const depth = Number(r.depth) || 0;
     const offset = Number(r.stepOffset) || 0;
     // Clamp so the corner ramp can never step past the profile edge (no off-plate negatives).
-    const exit = clampCarvingExit(
-      r.cornerSharpenDistance === null || r.cornerSharpenDistance === undefined ? depth : Number(r.cornerSharpenDistance),
-      offset,
-    );
+    const exit = clampCarvingExit(geo.ramp, offset);
     const toolChanged = String(r.toolNo) !== String(lastEmittedToolNo);
     if (toolChanged) {
       if (lastEmittedToolNo !== null) {
@@ -382,11 +455,61 @@ function emitAdaptiveProfilePasses(lines, plate, cfg, { thickness, plungeFeed, c
     }
     plate.parts.forEach((part) => {
       lines.push(`G0 X${fmt(part.x + part.placedWidth - offset)} Y${fmt(part.y + part.placedHeight - offset)} Z${fmt(safeZ)}`);
-      buildCarvingProfile(part.placedWidth, part.placedHeight, offset, depth, thickness, exit).forEach((line) => {
+      buildCarvingProfile(part.placedWidth, part.placedHeight, offset, depth, thickness, geo.angle).forEach((line) => {
         const fed = /^G1 Z/.test(line) ? `${line} F${plungeFeed.toFixed(1)}` : `${line} F${cutFeed.toFixed(1)}`;
         lines.push(fed.replace(/X(-?[\d.]+)/g, (m, n) => `X${fmt(Number(n) + part.x)}`).replace(/Y(-?[\d.]+)/g, (m, n) => `Y${fmt(Number(n) + part.y)}`));
       });
       lines.push(`G0 Z${fmt(safeZ)}`);
+    });
+  });
+
+  // Derz rows: evenly spaced divider lines INSIDE each part, driven by the row's
+  // own derz options (yon/margin/spacing/autoFit/overshoot/edgeExtra) — the
+  // nesting counterpart of kapak.js's derz block. Each part's lines are computed
+  // on the part's own placed size and offset by the part's plate position.
+  cfg.rows.filter((r) => r.operation === 'derz').forEach((r) => {
+    const derz = r.derz || {};
+    const toolChanged = String(r.toolNo) !== String(lastEmittedToolNo);
+    if (toolChanged) {
+      if (lastEmittedToolNo !== null) {
+        lines.push(`G0Z${fmt(toolChangeZ)}`);
+        lines.push('M5');
+      }
+      lines.push(`M6T${r.toolNo}`);
+      lines.push(`M3 S${spindleSpeed}`);
+      lastEmittedToolNo = r.toolNo;
+    }
+    const z = +(thickness - (Number(r.depth) || 0)).toFixed(3);
+    const rowFeedVal = Number(r.feed);
+    const feed = Number.isFinite(rowFeedVal) && rowFeedVal > 0 ? rowFeedVal : cutFeed;
+    // "Önceki offset sınırlarına uy": derz margin sits on top of the deepest
+    // offset row's cumulative offset (same rule as kapak.js).
+    const prevOffset = derz.respectPreviousOffset === false ? 0 : (offsetCums[offsetCums.length - 1] || 0);
+    const overshootX = Number(derz.overshootX ?? derz.overshoot) || 1;
+    const overshootY = Number(derz.overshootY ?? derz.overshoot) || 1;
+    const vertical = (derz.yon || 'dikey') === 'dikey';
+
+    plate.parts.forEach((part) => {
+      const opts = {
+        width: part.placedWidth,
+        height: part.placedHeight,
+        yon: derz.yon || 'dikey',
+        margin: prevOffset + (Number(derz.margin) || 0),
+        spacing: Number(derz.spacing) || Number(r.stepOffset) || 60,
+        autoFit: derz.autoFit !== false,
+        edgeExtra: Number(derz.edgeExtra) || 0,
+      };
+      const positions = computeDerzPositions(opts).positions;
+      positions.forEach((pos) => {
+        const x1 = vertical ? part.x + pos : part.x - overshootX;
+        const y1 = vertical ? part.y - overshootY : part.y + pos;
+        const x2 = vertical ? x1 : part.x + part.placedWidth + overshootX;
+        const y2 = vertical ? part.y + part.placedHeight + overshootY : y1;
+        lines.push(`G0 X${fmt(x1)} Y${fmt(y1)} Z${fmt(safeZ)}`);
+        lines.push(`G1   Z${fmt(z)} F${plungeFeed.toFixed(1)}`);
+        lines.push(`G1 X${fmt(x2)} Y${fmt(y2)}   F${feed.toFixed(1)}`);
+        lines.push(`G0   Z${fmt(safeZ)}`);
+      });
     });
   });
 
@@ -402,16 +525,10 @@ function emitAdaptiveProfilePasses(lines, plate, cfg, { thickness, plungeFeed, c
  * - AŞAMA 2 (İşleme): Eski sistemdeki tanımlı tüm bıçaklar sırayla motifleri işler.
  * - AŞAMA 3 (Final Kesim): Eğer dış kesim açıksa, işleme bittikten sonra 6mm kesim bıçağıyla Z0'a kadar tam kesim yapar.
  */
-export function buildNestingPlateGcode(plate, cfg) {
+export function buildNestingPlateGcode(plate, cfg, presetMap = {}) {
   const lines = ['makro'];
 
-  const thickness = Number(cfg.thickness) || 18;
-  const plungeFeed = Number(cfg.plungeFeed) || 3000;
-  const cutFeed = Number(cfg.cutFeed) || 6000;
-  const safeZ = Number(cfg.safeZ) || 61;
-  const homeZ = Number(cfg.homeZ) || 96;
-  const toolChangeZ = Number(cfg.toolChangeZ) || 96;
-  const spindleSpeed = cfg.spindleSpeed || 18000;
+  const { thickness, plungeFeed, cutFeed, safeZ, homeZ, toolChangeZ, spindleSpeed } = getMachineParams(cfg);
 
   // Dış Kesim / Ebatlama Parametreleri
   const doOuterCut = cfg.enableOuterCut !== false; // Varsayılan: Açık
@@ -439,13 +556,13 @@ export function buildNestingPlateGcode(plate, cfg) {
   }
 
   // 2. AŞAMA: İŞLEME / PROFİL BIÇAKLARI (ADAPTİF OFFSET DESTEKLİ)
-  emitAdaptiveProfilePasses(lines, plate, cfg, {
-    thickness,
-    plungeFeed,
-    cutFeed,
-    safeZ,
-    toolChangeZ,
-    spindleSpeed,
+  // Her parça KENDİ atanmış modelinin (preset) bıçak sırasıyla işlenir — dropdown'da
+  // özel bir model seçilmemişse "Ayarlar"daki aktif cfg (yukarıdaki thickness/feeds/...)
+  // kullanılır. Aynı plakada farklı modeller (farklı offset/derz/carving zincirleri)
+  // birbirini etkilemeden art arda işlenir.
+  const profileGroups = groupNestingPartsByPreset(plate.parts, cfg, presetMap);
+  profileGroups.forEach((group) => {
+    emitAdaptiveProfilePasses(lines, { parts: group.parts }, group.cfg, getMachineParams(group.cfg));
   });
 
   // 3. AŞAMA: İŞLEME SONRASI FİNAL KESİM / EBATLAMA (Z0'A KADAR)
@@ -528,44 +645,46 @@ export function parseNestImportText(text) {
 const ASSUMED_RAPID_MM_MIN = 15000;
 const TOOLCHANGE_SECONDS = 6;
 
-export function estimateNestingTime(result, cfg) {
+export function estimateNestingTime(result, cfg, presetMap = {}) {
   if (!result || !cfg) return 0;
   let rapidMm = 0;
   let toolChanges = 0;
-  let totalCutLenMm = 0;
-  let totalPlungeDistanceMm = 0;
+  let cutMinTotal = 0;
+  let plungeMinTotal = 0;
 
-  (cfg.rows || []).forEach((r, rowIdx) => {
-    let usedInPlate = false;
-    let cx = 0;
-    let cy = 0;
-    const rowDepth = Number(r.depth) || 2;
+  // Süre, her parçanın KENDİ modelinin bıçak sırası + kendi feed'leriyle hesaplanır
+  // (buildNestingPlateGcode'un ürettiği gerçek sıralamayla tutarlı olması için).
+  result.plates.forEach((plate) => {
+    const groups = groupNestingPartsByPreset(plate.parts, cfg, presetMap);
+    groups.forEach((group) => {
+      const groupCutFeed = Math.max(1, group.cfg.cutFeed || 6000);
+      const groupPlungeFeed = Math.max(1, group.cfg.plungeFeed || 3000);
+      let cx = 0;
+      let cy = 0;
 
-    result.plates.forEach((plate) => {
-      const validCoords = getAdaptiveRowPartCoords(
-        plate.parts,
-        cfg.rows,
-        rowIdx,
-        cfg.offsetMode || 'relative'
-      );
+      (group.cfg.rows || []).forEach((r, rowIdx) => {
+        let usedInGroup = false;
+        const rowDepth = Number(r.depth) || 2;
+        const validCoords = getAdaptiveRowPartCoords(
+          group.parts,
+          group.cfg.rows,
+          rowIdx,
+          group.cfg.offsetMode || 'relative'
+        );
 
-      validCoords.forEach(({ x1, y1, w, h }) => {
-        usedInPlate = true;
-        totalPlungeDistanceMm += rowDepth;
-        totalCutLenMm += 2 * (w + h);
-        rapidMm += Math.hypot(x1 - cx, y1 - cy);
-        cx = x1;
-        cy = y1;
+        validCoords.forEach(({ x1, y1, w, h }) => {
+          usedInGroup = true;
+          plungeMinTotal += rowDepth / groupPlungeFeed;
+          cutMinTotal += (2 * (w + h)) / groupCutFeed;
+          rapidMm += Math.hypot(x1 - cx, y1 - cy);
+          cx = x1;
+          cy = y1;
+        });
+
+        if (usedInGroup) toolChanges++;
       });
     });
-
-    if (usedInPlate) {
-      toolChanges++;
-    }
   });
-
-  const cutMinTotal = totalCutLenMm / Math.max(1, cfg.cutFeed || 6000);
-  const plungeMinTotal = totalPlungeDistanceMm / Math.max(1, cfg.plungeFeed || 3000);
 
   let outerCutMin = 0;
   if (cfg.enableOuterCut !== false) {
@@ -600,12 +719,23 @@ export function estimateNestingTime(result, cfg) {
  * - 3_DIS_KESIM: Dış kesim / ebatlama takım yolları (Outer cut offset paths)
  * - 4_ISLEME_T{toolNo}: Bıçak bazında motif/profil takım yolları (Milling/profile toolpaths)
  */
-export function buildNestingPlateDxf(plate, cfg = {}) {
+export function buildNestingPlateDxf(plate, cfg = {}, presetMap = {}) {
   const plateW = Number(plate.width) || Number(cfg.plateWidth) || 2440;
   const plateH = Number(plate.height) || Number(cfg.plateHeight) || 1220;
   const cutToolDia = Number(cfg.cutToolDia) || 6;
   const cutToolRadius = cutToolDia / 2;
   const doOuterCut = cfg.enableOuterCut !== false;
+  const profileGroups = groupNestingPartsByPreset(plate.parts, cfg, presetMap);
+  // Plakada tek model varsa katman adları eskisi gibi kalır (4_ISLEME_T7); birden
+  // fazla model karışıksa hangi katmanın hangi modele ait olduğunu ayırt etmek için
+  // katman adının başına kısa bir model etiketi eklenir (4_ISLEME_1_NUMARA_T1 gibi).
+  const multiModel = profileGroups.length > 1;
+  const safeLayerTag = (label) => String(label || 'Model').replace(/[^A-Za-z0-9ığüşöçİĞÜŞÖÇ_-]+/g, '_').slice(0, 24);
+  const groupLabel = (group) => {
+    if (!multiModel) return '';
+    const tag = group.key === '__default__' ? 'AYARLAR' : safeLayerTag(group.cfg?.name || group.key);
+    return `${tag}_`;
+  };
 
   const lines = [
     '0', 'SECTION',
@@ -643,12 +773,13 @@ export function buildNestingPlateDxf(plate, cfg = {}) {
   if (doOuterCut) {
     addLayerDef(`3_DIS_KESIM_T${cfg.cutToolNo || '6'}`, 1); // Red
   }
-  if (cfg.rows && cfg.rows.length) {
-    cfg.rows.forEach((r, idx) => {
+  profileGroups.forEach((group) => {
+    const label = groupLabel(group);
+    (group.cfg.rows || []).forEach((r, idx) => {
       const color = (idx % 6) + 4; // Cyan, Blue, Magenta...
-      addLayerDef(`4_ISLEME_T${r.toolNo || idx + 1}`, color);
+      addLayerDef(`4_ISLEME_${label}T${r.toolNo || idx + 1}`, color);
     });
-  }
+  });
 
   lines.push(
     '0', 'ENDTAB',
@@ -656,6 +787,19 @@ export function buildNestingPlateDxf(plate, cfg = {}) {
     '0', 'SECTION',
     '2', 'ENTITIES'
   );
+
+  function addLine(layer, x1, y1, x2, y2) {
+    lines.push(
+      '0', 'LINE',
+      '8', layer,
+      '10', x1.toFixed(3),
+      '20', y1.toFixed(3),
+      '30', '0.000',
+      '11', x2.toFixed(3),
+      '21', y2.toFixed(3),
+      '31', '0.000'
+    );
+  }
 
   function addRectLines(layer, x1, y1, x2, y2) {
     const pts = [
@@ -726,21 +870,58 @@ export function buildNestingPlateDxf(plate, cfg = {}) {
     }
   });
 
-  // 3. Motif / Profil Takım Yolları (Adaptif Offsetli)
-  if (cfg.rows && cfg.rows.length) {
-    cfg.rows.forEach((r, rowIdx) => {
-      const layerName = `4_ISLEME_T${r.toolNo || rowIdx + 1}`;
+  // 3. Motif / Profil Takım Yolları (Adaptif Offsetli) — her grup kendi modeliyle
+  profileGroups.forEach((group) => {
+    const label = groupLabel(group);
+    // Derz satırları burada DIŞARIDA: onlar dikdörtgen profil değil, aşağıda
+    // kendi bloklarında doğru biçimde tek tek çizgi (LINE) olarak çizilir.
+    const rectRows = (group.cfg.rows || []).filter((r) => (r.operation || 'offset') !== 'derz');
+    rectRows.forEach((r, rowIdx) => {
+      const layerName = `4_ISLEME_${label}T${r.toolNo || rowIdx + 1}`;
       const validCoords = getAdaptiveRowPartCoords(
-        plate.parts,
-        cfg.rows,
+        group.parts,
+        group.cfg.rows,
         rowIdx,
-        cfg.offsetMode || 'relative'
+        group.cfg.offsetMode || 'relative'
       );
       validCoords.forEach(({ x1, y1, x2, y2 }) => {
         addRectLines(layerName, x1, y1, x2, y2);
       });
     });
-  }
+  });
+
+  // Derz satırları: her parçanın kendi ölçüsüne göre hesaplanan eşit aralıklı
+  // bölme çizgileri — G-code üretimindekiyle aynı parametreler (DXF kontrolü de
+  // gerçek kesimi görsün diye).
+  profileGroups.forEach((group) => {
+    const label = groupLabel(group);
+    const groupOffsetRows = (group.cfg.rows || []).filter((rr) => (rr.operation || 'offset') !== 'derz' && rr.operation !== 'carving');
+    const groupOffsetCums = groupOffsetRows.length ? computeCumOffsets(groupOffsetRows, group.cfg.offsetMode || 'relative') : [];
+    (group.cfg.rows || []).filter((rr) => rr.operation === 'derz').forEach((r, derzIdx) => {
+      const layerName = `4_ISLEME_${label}T${r.toolNo || derzIdx + 1}`;
+      const derz = r.derz || {};
+      const prevOffset = derz.respectPreviousOffset === false ? 0 : (groupOffsetCums[groupOffsetCums.length - 1] || 0);
+      const vertical = (derz.yon || 'dikey') === 'dikey';
+      group.parts.forEach((part) => {
+        const opts = {
+          width: part.placedWidth,
+          height: part.placedHeight,
+          yon: derz.yon || 'dikey',
+          margin: prevOffset + (Number(derz.margin) || 0),
+          spacing: Number(derz.spacing) || Number(r.stepOffset) || 60,
+          autoFit: derz.autoFit !== false,
+          edgeExtra: Number(derz.edgeExtra) || 0,
+        };
+        computeDerzPositions(opts).positions.forEach((pos) => {
+          if (vertical) {
+            addLine(layerName, part.x + pos, part.y, part.x + pos, part.y + part.placedHeight);
+          } else {
+            addLine(layerName, part.x, part.y + pos, part.x + part.placedWidth, part.y + pos);
+          }
+        });
+      });
+    });
+  });
 
   lines.push(
     '0', 'ENDSEC',

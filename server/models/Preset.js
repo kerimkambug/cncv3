@@ -12,10 +12,13 @@ const ToolRowSchema = new mongoose.Schema(
     cornerRadius: { type: Number, default: null },
     // Per-row cut feed override (mm/min). null = fall back to the shared cutFeed.
     feed: { type: Number, default: null },
-    // Carving-only: closed single-line profile (V-bit).
-    cornerSharpen: { type: Boolean, default: true },
-    // null = use the row's depth (1:1 confirmed on 1_NUMARA.cnc; override when asked)
-    cornerSharpenDistance: { type: Number, default: null },
+    // Carving-only: the V-bit's INCLUDED angle in degrees — the angle between its two
+    // flanks, which is how bits are sold: 60 / 90 / 120. The shop's "kenara 45°"
+    // (45° to the edge) is a 90° included bit, so that is stored as 90.
+    // It is the ONLY extra carving input: stepOffset says where the flat floor runs,
+    // depth says how deep, and the angle derives the corner ramp (depth/tan(angle/2)).
+    // null = legacy row: no angle, corner ramp falls back to the 1:1 rule (a 90° bit).
+    bitAngle: { type: Number, default: null },
     derz: {
       yon: { type: String, enum: ['dikey', 'yatay'], default: 'dikey' },
       margin: { type: Number, default: 0 },

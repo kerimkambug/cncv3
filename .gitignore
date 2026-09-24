@@ -1,18 +1,22 @@
 node_modules/
 dist/
-.env
+# server/.env: kullanıcı isteğiyle repoda KALIR (evde sıfır kurulumla çalışabilsin diye,
+# bkz. DEPLOY-NOTLARI.txt). İçine gerçek sır yazmayın — sadece PORT / yerel servis
+# adresleri. Sır girmesi gerekirse önce takipten çıkarın:  git rm --cached server/.env
+# (aşağıdaki satır, yanlışlıkla eklenirse diye güvenlik ağıdır; şu an takip edilen
+#  dosyayı etkilemez.)
+server/.env
 *.log
+_ai_svc.log
+_ai_svc_err.log
+pip.log
 # server/data: presets.json uygulamanın çalışması için gerekli -> git'e dahil.
 # Sadece runtime'da üretilen geçici/yerel dosyalar ignore edilir.
 server/data/*.tmp
 server/data/*.local.json
+# Deploy paketleri ve ham karşılaştırma çıktıları (yeniden üretilebilir).
+*.zip
+karsilastirma-ham-veri.txt
 venv/
-server/ai_service/venv/
-server/ai_service/learned_relief_*
-server/ai_service/benchmark-fixture.png
-server/ai_service/benchmark-*.json
-server/ai_service/benchmark-results-*.log
-server/ai_service/benchmark-smoke.json
-server/ai_service/benchmark-smoke-*.log
 __pycache__/
 *.pyc

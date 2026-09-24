@@ -40,10 +40,15 @@ export default function PanjurBolme() {
     const blob = new Blob([output], { type: 'text/plain' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'panjur.nc';
+    
+    // Genişlik ve toplam yüksekliği hesaplayarak dinamik dosya adı oluştur.
+    // Örnek: Panjur_247x362_9Cita.nc
+    const genislik = (xEnd - xStart).toFixed(0);
+    const yukseklik = totalHeight.toFixed(0);
+    a.download = `Panjur_${genislik}x${yukseklik}_${bladeCount}Cita.nc`;
+    
     a.click();
   }
-
   const totalHeight = bladeHeight * bladeCount;
 
   return (

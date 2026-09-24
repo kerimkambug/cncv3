@@ -79,6 +79,33 @@ export const DEFAULT_RELIEF_CONFIG = {
   outerCutToolNo: '6',    // Dış kesim bıçak no
   outerCutDia: 6,         // Dış kesim bıçak çapı (mm)
   threshold: 245,         // Arka plan algılama eşiği (0-255)
+
+  // --- Heykelsi (sculpted) motor parametreleri -------------------------------
+  // Çoğu motor-içi ve gizlidir; kullanıcıya yalnızca birkaçı açıktır.
+  sculptMacroStrength: 0.85,      // L1 makro hacim
+  sculptMediumStrength: 1.25,     // L2 orta form
+  sculptFineStrength: 0.65,       // L3 ince detay
+  sculptMicroStrength: 0.30,      // L4 mikro detay
+  sculptDepthInfluence: 0.55,     // AI depth'in forma katkısı (tek form kaynağı)
+  sculptContinuity: 0.38,         // yüzey sürekliliği (harmonic regularization)
+  sculptSmoothness: 0.5,          // form-aware smoothing gücü
+  sculptEdgeInfluence: 0.05,      // yüzey detayı (luminance sızıntısını kesmek için düşük)
+  sculptSemanticInfluence: 0.0,   // form üretmez (uyumluluk)
+  sculptCurvature: 0.04,          // yalnızca gerçek form bölgelerinde hafif kavis
+  sculptReliefContrast: 1.0,      // kullanıcı: rölyef kontrastı (shaping)
+  sculptBackgroundDepth: 0.06,    // kullanıcı: arka plan taban Z (0 = düz)
+  sculptBackgroundMode: 'soft-falloff', // 'flat' | 'dome' | 'soft-falloff'
+
+  // --- Sanatsal Kabartma (Pillow Emboss / SculptOK kalitesi) parametreleri -----
+  // Obje solid maskelenir; maskeye düz taban + iç kavisli bombe basılır.
+  // Parlamalar bastırılır → ışık sivri diken yapmaz. AI depth'e bağımlı değildir.
+  artBaseZ: 0.45,                 // kullanıcı: Gövde Yüksekliği (solid objenin taban Z'si)
+  artEmboss: 0.5,                 // kullanıcı: Gövde Bombesi (kavisli hacim gücü)
+  artDetailAmount: 0.12,          // ince detay (%10-15), highlight-bastırılmış
+  artMacroDepthInfluence: 0.10,   // AI depth'in çok hafif makro katkısı
+  artReliefContrast: 1.0,         // kullanıcı: Rölyef Kontrastı
+  artSmoothness: 0.4,             // yüzey yumuşaklığı
+  artBackgroundDepth: 0.0,        // kullanıcı: Zemin Derinliği (0 = düz siyah)
 };
 
 /**

@@ -136,8 +136,8 @@ function validatePanjurConfig(c) {
   if (c.endZ >= c.startZ) {
     throw new Error('Son Z, başlangıç Z’den daha düşük olmalı.');
   }
-  if (c.groundEntry && (c.exitCut <= 0 || c.t4Z !== 0)) {
-    throw new Error('Çıkış kesimi 0’dan büyük olmalı ve T4 Z değeri 0 olmalı.');
+  if (c.groundEntry && c.exitCut <= 0) {
+    throw new Error('Çıkış kesimi 0’dan büyük olmalı.');
   }
   if (c.t14TipDia <= 0 || c.t14BodyDia < c.t14TipDia || c.t14Height <= 0) {
     throw new Error('T14 uç/gövde çapı ve konik yükseklik geçerli olmalı.');
@@ -292,16 +292,21 @@ function emitRasterPass(axis, lines, n, c, crossStart, crossEnd, safeStart, step
  * 1708.html tam motoru: Otomatik panjur bölme + T14 konik ballnose eğimli raster + T4 zemin çıkışı
  * @param {object} c - Panjur konfigürasyonu
  */
-export function generatePanjurGcode(c) {
+export function generatePanjurGcode(c, offsetX = 0, offsetY = 0, isCombined = false, startN = 1, options = {}) {
+  // Seri üretimde faz kontrolü:
+  //  - phase 'raster': yalnız T14 raster; 'exit': yalnız T4 çıkış; 'all': ikisi birden (tek kapak)
+  //  - t14Header / t4Header: takım değişim + M3/M7 başlıklarını yaz (seri modda sadece ilk kapakta)
+  const { phase = 'all', t14Header = true, t4Header = true } = options;
   validatePanjurConfig(c);
 
   const g = panjurGroups(c);
-  const lines = ['%', 'O2000', 'N1 G0 G17 G40 G49 G80 G90 G54'];
-  let n = 2;
-  const x0 = g.crossStart;
-  const x1 = g.crossEnd;
-  const y0 = g.alongStart;
-  const y1 = g.alongEnd;
+  // Birleştirilmiş seri üretimde program kabuğu (%, O2000, G54) yalnızca ilk parçada yazılır
+  const lines = isCombined ? [] : ['%', 'O2000', 'N1 G0 G17 G40 G49 G80 G90 G54'];
+  let n = isCombined ? startN : 2;
+  const x0 = g.crossStart + offsetX;
+  const x1 = g.crossEnd + offsetX;
+  const y0 = g.alongStart + offsetY;
+  const y1 = g.alongEnd + offsetY;
 
   const toolRT4 = c.exitToolDia / 2;
   // T4=4 mm için takım izi tam olarak 3 mm eski panjur + 1 mm yeni
@@ -313,11 +318,14 @@ export function generatePanjurGcode(c) {
   // =========================================================
   // 1. AŞAMA: TÜM T14 RÖLYEF TARAMALARI (HEPSİ BİRDEN)
   // =========================================================
-  lines.push(`N${n++} M6T${c.toolNo}`);
-  lines.push(`N${n++} S${c.spindle} M3`);
-  lines.push(`N${n++} M7`);
+  if (t14Header) {
+    lines.push(`N${n++} M6T${c.toolNo}`);
+    lines.push(`N${n++} S${c.spindle} M3`);
+    lines.push(`N${n++} M7`);
+  }
 
-  g.groups.forEach((grp) => {
+  if (phase === 'all' || phase === 'raster') {
+    g.groups.forEach((grp) => {
     const span = grp.end - grp.start;
     if (span <= 0) {
       throw new Error(`Panjur boyu (${(grp.end - grp.start).toFixed(1)} mm), T14 takımının konik yarıçapı için yetersiz.`);
@@ -325,77 +333,97 @@ export function generatePanjurGcode(c) {
 
     const passes = Math.max(2, Math.ceil(span / c.stepover) + 1);
     const step = span / (passes - 1);
-    const crossStart = c.direction === 'y' ? x0 : y0;
-    const crossEnd = c.direction === 'y' ? x1 : y1;
+    const crossStart = (c.direction === 'y' ? x0 : y0);
+    const crossEnd = (c.direction === 'y' ? x1 : y1);
 
-    n = emitRasterPass(c.direction, lines, n, c, crossStart, crossEnd, grp.start, step, passes);
+    const alongOffset = c.direction === 'y' ? offsetY : offsetX;
+    n = emitRasterPass(c.direction, lines, n, c, crossStart, crossEnd, grp.start + alongOffset, step, passes);
     lines.push(`N${n++} G0 Z${fmt(c.safeZ)}`);
   });
+  }
 
   // =========================================================
-  // 2. AŞAMA: TÜM T4 ÇIKIŞ KESİMLERİ (HEPSİ BİRDEN)
+  // 2. AŞAMA: TÜM T4 ÇIKIŞ KESİMLERİ (2 PASO: Z9 VE Z0 — GIT-GEL)
   // =========================================================
-  if (c.groundEntry) {
-    lines.push(`N${n++} M5`);
-    lines.push(`N${n++} G0 Z${fmt(c.toolChangeZ)}`);
-    lines.push(`N${n++} M6T${c.drillTool}`);
-    lines.push(`N${n++} S${c.drillSpindle} M3`);
-    lines.push(`N${n++} M7`);
+  if (c.groundEntry && (phase === 'all' || phase === 'exit')) {
+    if (t4Header) {
+      lines.push(`N${n++} M5`);
+      lines.push(`N${n++} G0 Z${fmt(c.toolChangeZ)}`);
+      lines.push(`N${n++} M6T${c.drillTool}`);
+      lines.push(`N${n++} S${c.drillSpindle} M3`);
+      lines.push(`N${n++} M7`);
+    }
 
     g.groups.forEach((grp) => {
-      const start = grp.start;
       const end = grp.end;
-      // T4 merkezi, eski panjurun end-3 noktasından yeni panjurun
-      // end+1 noktasına tek bir düz rampayla ilerler. Böylece takım yolu
-      // tam 4 mm'dir: 3 mm iniş bölgesinden + 1 mm çıkış bölgesinden.
-      // Önceki dik Z dalışı burada özellikle yoktur; Z, bu düz çizgi
-      // boyunca 0'a iner ve ardından aynı Z0 seviyesinde enine keser.
-      const transitionStart = Math.max(start, end - oldSideOverlap);
-      const transitionEnd = end + newSideOverlap;
-      const span = end - start;
-      const zAtTransitionStart = c.startZ + (c.endZ - c.startZ) * ((transitionStart - start) / span);
+      // T4 kanal temizliği: kalın malzemeye tek seferde dalıyor, düşük ilerleme kullan
+      const t4Feed = c.t4Feed || 5000;
+
+      const cutCenterY = end + newSideOverlap - toolRT4;
+      const cutCenterX = end + newSideOverlap - toolRT4;
 
       if (c.direction === 'y') {
-        lines.push(`N${n++} G0 X${fmt(x0 - toolRT4)} Y${fmt(transitionStart)} Z${fmt(c.safeZ)}`);
-        lines.push(`N${n++} G1 Z${fmt(zAtTransitionStart)} F${c.plunge}`);
-        lines.push(`N${n++} G1 Y${fmt(transitionEnd)} Z0.000 F${c.feed}`);
-        lines.push(`N${n++} G1 X${fmt(x1 + toolRT4)} F${c.feed}`);
+        // Çerçeve içine konumlan
+        lines.push(`N${n++} G0 X${fmt(x0 + toolRT4)} Y${fmt(cutCenterY)} Z${fmt(c.safeZ)}`);
+
+        // 1. PASO: T4 İlk Dalış Z değerine in (Örn: Z9) ve SAĞA doğru kes
+        lines.push(`N${n++} G1 Z${fmt(c.t4Z)} F${c.plunge}`);
+        lines.push(`N${n++} G1 X${fmt(x1 - toolRT4)} F${t4Feed}`);
+
+        // 2. PASO: En dibe (Z0) dal ve SOLA (başlangıca) geri kes
+        lines.push(`N${n++} G1 Z0.000 F${c.plunge}`);
+        lines.push(`N${n++} G1 X${fmt(x0 + toolRT4)} F${t4Feed}`);
       } else {
-        lines.push(`N${n++} G0 X${fmt(transitionStart)} Y${fmt(y0 - toolRT4)} Z${fmt(c.safeZ)}`);
-        lines.push(`N${n++} G1 Z${fmt(zAtTransitionStart)} F${c.plunge}`);
-        lines.push(`N${n++} G1 X${fmt(transitionEnd)} Z0.000 F${c.feed}`);
-        lines.push(`N${n++} G1 Y${fmt(y1 + toolRT4)} F${c.feed}`);
+        lines.push(`N${n++} G0 X${fmt(cutCenterX)} Y${fmt(y0 + toolRT4)} Z${fmt(c.safeZ)}`);
+
+        // 1. PASO
+        lines.push(`N${n++} G1 Z${fmt(c.t4Z)} F${c.plunge}`);
+        lines.push(`N${n++} G1 Y${fmt(y1 - toolRT4)} F${t4Feed}`);
+
+        // 2. PASO
+        lines.push(`N${n++} G1 Z0.000 F${c.plunge}`);
+        lines.push(`N${n++} G1 Y${fmt(y0 + toolRT4)} F${t4Feed}`);
       }
       lines.push(`N${n++} G0 Z${fmt(c.safeZ)}`);
     });
     lines.push(`N${n++} M5`);
   }
 
-  // =========================================================
+ // =========================================================
   // 3. AŞAMA: GÜVENLİ BİTİŞ
   // =========================================================
-  lines.push(`N${n++} G0 Z${fmt(c.homeZ)}`);
-  lines.push(`N${n++} G0 X0.00 Y0.00`);
-  lines.push(`N${n++} M9`);
-  lines.push(`N${n++} M16`);
-  lines.push(`N${n++} M30`);
-  lines.push('%');
+  if (!isCombined) {
+    lines.push(`N${n++} G0 Z${fmt(c.homeZ)}`);
+    lines.push(`N${n++} G0 X0.00 Y0.00`);
+    lines.push(`N${n++} M9`);
+    lines.push(`N${n++} M16`);
+    lines.push(`N${n++} M30`);
+    lines.push('%');
+  }
 
   const approxStep = g.groups.length
     ? Math.abs(g.groups[0].end - g.groups[0].start) / Math.max(1, Math.ceil(Math.abs(g.groups[0].end - g.groups[0].start) / c.stepover))
     : 0;
 
+  // --- YENİ EKLENEN KISIM BAŞLANGICI ---
+  // T4 kullanılıyorsa isme "_Kesimli" ekle, kullanılmıyorsa ekleme.
+  const isT4Used = c.groundEntry ? "_Kesimli" : "";
+  // Örnek Çıktı: Panjur_700x400_Kesimli.nc veya Panjur_500x300.nc
+  const generatedFileName = `Panjur_${c.width}x${c.height}${isT4Used}.nc`;
+  // --- YENİ EKLENEN KISIM BİTİŞİ ---
+
   return {
     gcode: lines.join('\n'),
+    nextN: n,
     groups: g.groups,
     panjurData: g,
     approxStep,
+    fileName: generatedFileName, // <-- Dosya adını arayüze gönderiyoruz
     message: `${g.groups.length} panjur grubu üretildi. Raster adımı ~${approxStep.toFixed(3)} mm.${
-      c.groundEntry ? ` T${c.drillTool} ile her uçta ${oldSideOverlap.toFixed(1)} mm eski + ${newSideOverlap.toFixed(1)} mm yeni panjur payı Z0'a açıldı.` : ''
+      c.groundEntry ? ` T${c.drillTool} ile her uçta ${oldSideOverlap.toFixed(1)} mm eski +${newSideOverlap.toFixed(1)} mm yeni panjur payı Z0'a açıldı.` : ''
     }`,
   };
 }
-
 /**
  * Backward compatibility function for existing smoke tests and direct blade specs
  */

@@ -23,9 +23,13 @@ const M = {
 };
 
 /**
- * Verified against numuneler/*.cnc. `match` records how much of the real file
- * this preset reproduces (coordinate-line comparison), so the shop knows which
- * presets are byte-accurate and which are partial.
+ * Verified against numuneler/*.cnc with server/scripts/compare-numuneler-geom.mjs
+ * (modal-state simulation: cutting moves + feeds compared). Current status:
+ *   ALL 7 presets -> geometric match (52/16/32/20/20/25/20 cutting moves).
+ *
+ * 1 NUMARA note: its plain 70 mm finishing rectangle is declared AFTER the T1
+ * carving row on purpose — ArtCAM cuts it after the V-bit run (1_NUMARA.cnc lines
+ * 57-63), and buildKapakGcode emits post-carving offset rows in a trailing phase.
  */
 export const NUMUNE_PRESETS = [
   {
@@ -40,8 +44,8 @@ export const NUMUNE_PRESETS = [
         { toolNo: '6', depth: 6, stepOffset: 59, absoluteOffset: 59, chain: true, name: '6mm kaba boşaltma (iç, dik köşe)', operation: 'offset', roughing: true },
         { toolNo: '6', depth: 6, stepOffset: 70, absoluteOffset: 64, cornerRadius: 6, name: '6mm dış rounded offset', operation: 'offset' },
         { toolNo: '6', depth: 6, stepOffset: 70, absoluteOffset: 67, cornerRadius: 3, chain: true, name: '6mm iç rounded offset', operation: 'offset' },
-        { toolNo: '1', depth: 6, stepOffset: 56, feed: 6000, name: 'Carving V-bıçak', operation: 'carving', cornerSharpen: true, cornerSharpenDistance: 6 },
-        { toolNo: '1', depth: 6, stepOffset: 70, feed: 6000, name: 'Carving iç pas (70, dik köşe)', operation: 'carving', cornerSharpen: false },
+        { toolNo: '1', depth: 6, stepOffset: 56, feed: 6000, name: 'Carving V-bıçak (90° = kenara 45°)', operation: 'carving', bitAngle: 90 },
+        { toolNo: '6', depth: 6, stepOffset: 70, absoluteOffset: 70, feed: 6000, name: 'düz bitirme pası (carving sonrası)', operation: 'offset' },
         { toolNo: '1', depth: 3, stepOffset: 89, feed: 6000, name: '135° derz', operation: 'derz', derz: { yon: 'dikey', margin: 89, spacing: 19, autoFit: true, overshootY: 0, startY: 70, respectPreviousOffset: false } },
       ],
     },

@@ -1,6 +1,6 @@
 // reliefGcode.js
 // Empire CNC — Server-side Relief G-Code Processing Service
-import { emitRectCutPath } from '../../client/src/lib/gcode/common.js';
+import { emitRectCutPath } from '../../shared/gcode/common.js';
 
 function fmt(n) {
   return Number(n).toFixed(2);
@@ -37,23 +37,53 @@ export function generateReliefGcodeFromGrid(depthGrid, cfg) {
 }
 
 function normalizeConfig(cfg = {}) {
+  // Present-but-invalid values are an error, not a silent default: a typo'd
+  // feed or depth otherwise produces a program that cuts wrong with no signal.
+  // Missing fields still fall back to their defaults.
+  const invalidFields = [];
+  const numField = (name, def) => {
+    if (cfg[name] === undefined || cfg[name] === null || cfg[name] === '') return def;
+    const v = Number(cfg[name]);
+    if (!Number.isFinite(v)) { invalidFields.push(name); return def; }
+    return v;
+  };
+
+  const width = Math.max(1, numField('width', 200));
+  const height = Math.max(1, numField('height', 200));
+  const thickness = numField('thickness', 18);
+  const maxDepth = numField('maxDepth', 5);
+  const stepover = Math.max(0.1, numField('stepover', 0.8));
+  const plungeFeed = numField('plungeFeed', 1500);
+  const cutFeed = numField('cutFeed', 4500);
+  const safeZ = numField('safeZ', 25);
+  const homeZ = numField('homeZ', 60);
+  const spindleSpeed = numField('spindleSpeed', 18000);
+  const outerCutDia = numField('outerCutDia', 6);
+
+  if (cfg.direction !== undefined && cfg.direction !== 'x' && cfg.direction !== 'y') invalidFields.push('direction');
+  if (invalidFields.length > 0) {
+    throw new TypeError(
+      `Invalid relief config: non-numeric or out-of-range fields: ${invalidFields.join(', ')}`,
+    );
+  }
+
   return {
-    width: Math.max(1, Number(cfg.width) || 200),
-    height: Math.max(1, Number(cfg.height) || 200),
-    thickness: Number(cfg.thickness) || 18,
-    maxDepth: Number(cfg.maxDepth) || 5,
-    stepover: Math.max(0.1, Number(cfg.stepover) || 0.8),
-    plungeFeed: Number(cfg.plungeFeed) || 1500,
-    cutFeed: Number(cfg.cutFeed) || 4500,
-    safeZ: Number(cfg.safeZ) || 25,
-    homeZ: Number(cfg.homeZ) || 60,
+    width,
+    height,
+    thickness,
+    maxDepth,
+    stepover,
+    plungeFeed,
+    cutFeed,
+    safeZ,
+    homeZ,
     toolNo: cfg.toolNo || '1',
-    spindleSpeed: Number(cfg.spindleSpeed) || 18000,
+    spindleSpeed,
     direction: cfg.direction === 'y' ? 'y' : 'x',
     bgMode: cfg.backgroundMode || 'flat',
     enableOuterCut: cfg.enableOuterCut,
     outerCutToolNo: cfg.outerCutToolNo || '6',
-    outerCutDia: Number(cfg.outerCutDia) || 6,
+    outerCutDia,
   };
 }
 

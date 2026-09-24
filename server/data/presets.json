@@ -1,9 +1,13 @@
 [
   {
-    "_id": "local_1789461641593_wh4wjg",
+    "_id": "local_1790152683967_yjl1yc",
     "category": "kapak",
+    "imageDataUrl": "",
+    "previewWidth": 292,
+    "previewHeight": 400,
     "name": "1 NUMARA",
     "module": "kapak",
+    "description": "Carving + düz offset + derz. T1 V-bıçak köşe keskinleştirmesi doğrulandı. Derz: X çizgileri 89/108/127/146/165/184/203 (eşit 19mm aralık) — 1_NUMARA.cnc ile birebir. kaba boşaltma pasoları (abs 62/59, r4/r2) ve derz başlangıç Y değeri (70 = çerçeve offseti) doğrulandı.",
     "thickness": 18,
     "spindleSpeed": 18000,
     "safeZ": 46,
@@ -58,19 +62,18 @@
         "depth": 6,
         "stepOffset": 56,
         "feed": 6000,
-        "name": "Carving V-bıçak",
+        "name": "Carving V-bıçak (90° = kenara 45°)",
         "operation": "carving",
-        "cornerSharpen": true,
-        "cornerSharpenDistance": 6
+        "bitAngle": 90
       },
       {
-        "toolNo": "1",
+        "toolNo": "6",
         "depth": 6,
         "stepOffset": 70,
+        "absoluteOffset": 70,
         "feed": 6000,
-        "name": "Carving iç pas (70, dik köşe)",
-        "operation": "carving",
-        "cornerSharpen": false
+        "name": "düz bitirme pası (carving sonrası)",
+        "operation": "offset"
       },
       {
         "toolNo": "1",
@@ -90,15 +93,11 @@
         }
       }
     ],
-    "createdAt": "2026-08-21T11:59:34.338Z",
-    "updatedAt": "2026-09-15T18:35:26.719Z",
-    "imageDataUrl": "",
-    "description": "Carving + düz offset + derz. T1 V-bıçak köşe keskinleştirmesi doğrulandı. Derz: X çizgileri 89/108/127/146/165/184/203 (eşit 19mm aralık) — 1_NUMARA.cnc ile birebir. kaba boşaltma pasoları (abs 62/59, r4/r2) ve derz başlangıç Y değeri (70 = çerçeve offseti) doğrulandı.",
-    "previewWidth": 292,
-    "previewHeight": 400
+    "createdAt": "2026-09-23T08:38:03.966Z",
+    "updatedAt": "2026-09-23T08:38:03.966Z"
   },
   {
-    "_id": "local_1789461641596_5agbfx",
+    "_id": "local_1790152683970_oocz4r",
     "category": "kapak",
     "imageDataUrl": "",
     "previewWidth": 292,
@@ -122,14 +121,16 @@
         "depth": 3,
         "stepOffset": 60,
         "name": "Kemer dış offset",
-        "operation": "offset"
+        "operation": "offset",
+        "absoluteOffset": 60
       },
       {
         "toolNo": "9",
         "depth": 3,
         "stepOffset": 55,
         "name": "Kemer iç offset",
-        "operation": "offset"
+        "operation": "offset",
+        "absoluteOffset": 55
       },
       {
         "toolNo": "2",
@@ -149,11 +150,11 @@
         }
       }
     ],
-    "createdAt": "2026-09-15T08:40:41.596Z",
-    "updatedAt": "2026-09-15T18:35:26.724Z"
+    "createdAt": "2026-09-23T08:38:03.970Z",
+    "updatedAt": "2026-09-23T08:38:03.970Z"
   },
   {
-    "_id": "local_1789461641598_bsf93s",
+    "_id": "local_1790152683972_7hblrh",
     "category": "kapak",
     "imageDataUrl": "",
     "previewWidth": 292,
@@ -198,11 +199,11 @@
         }
       }
     ],
-    "createdAt": "2026-09-15T08:40:41.598Z",
-    "updatedAt": "2026-09-15T18:35:26.725Z"
+    "createdAt": "2026-09-23T08:38:03.972Z",
+    "updatedAt": "2026-09-23T08:38:03.972Z"
   },
   {
-    "_id": "local_1789461641600_j7oluo",
+    "_id": "local_1790152683974_4za077",
     "category": "kapak",
     "imageDataUrl": "",
     "previewWidth": 292,
@@ -226,21 +227,24 @@
         "depth": 2,
         "stepOffset": 53,
         "name": "6mm dış",
-        "operation": "offset"
+        "operation": "offset",
+        "absoluteOffset": 53
       },
       {
         "toolNo": "9",
         "depth": 5.8,
         "stepOffset": 67,
         "name": "20mm tabla",
-        "operation": "offset"
+        "operation": "offset",
+        "absoluteOffset": 67
       },
       {
         "toolNo": "9",
         "depth": 5.8,
         "stepOffset": 62,
         "name": "20mm tabla",
-        "operation": "offset"
+        "operation": "offset",
+        "absoluteOffset": 62
       },
       {
         "toolNo": "7",
@@ -248,14 +252,15 @@
         "stepOffset": 74,
         "feed": 10000,
         "name": "30mm yuvarlama",
-        "operation": "offset"
+        "operation": "offset",
+        "absoluteOffset": 74
       }
     ],
-    "createdAt": "2026-09-15T08:40:41.600Z",
-    "updatedAt": "2026-09-15T18:35:26.728Z"
+    "createdAt": "2026-09-23T08:38:03.974Z",
+    "updatedAt": "2026-09-23T08:38:03.974Z"
   },
   {
-    "_id": "local_1789461641602_51627o",
+    "_id": "local_1790152683976_bn4dam",
     "category": "kapak",
     "imageDataUrl": "",
     "previewWidth": 292,
@@ -279,21 +284,24 @@
         "depth": 2,
         "stepOffset": 53,
         "name": "6mm dış",
-        "operation": "offset"
+        "operation": "offset",
+        "absoluteOffset": 53
       },
       {
         "toolNo": "9",
         "depth": 5.8,
         "stepOffset": 65,
         "name": "20mm tabla",
-        "operation": "offset"
+        "operation": "offset",
+        "absoluteOffset": 65
       },
       {
         "toolNo": "9",
         "depth": 5.8,
         "stepOffset": 62,
         "name": "20mm tabla",
-        "operation": "offset"
+        "operation": "offset",
+        "absoluteOffset": 62
       },
       {
         "toolNo": "11",
@@ -301,14 +309,15 @@
         "stepOffset": 75,
         "feed": 8000,
         "name": "iç offset",
-        "operation": "offset"
+        "operation": "offset",
+        "absoluteOffset": 75
       }
     ],
-    "createdAt": "2026-09-15T08:40:41.602Z",
-    "updatedAt": "2026-09-15T18:35:26.733Z"
+    "createdAt": "2026-09-23T08:38:03.976Z",
+    "updatedAt": "2026-09-23T08:38:03.976Z"
   },
   {
-    "_id": "local_1789461641605_bte47g",
+    "_id": "local_1790152683978_y8f7da",
     "category": "kapak",
     "imageDataUrl": "",
     "previewWidth": 292,
@@ -333,7 +342,8 @@
         "stepOffset": 139.1,
         "feed": 9000,
         "name": "135° iç halka 1",
-        "operation": "offset"
+        "operation": "offset",
+        "absoluteOffset": 139.1
       },
       {
         "toolNo": "12",
@@ -342,7 +352,8 @@
         "feed": 9000,
         "chain": true,
         "name": "135° halka 2",
-        "operation": "offset"
+        "operation": "offset",
+        "absoluteOffset": 115.4
       },
       {
         "toolNo": "12",
@@ -351,7 +362,8 @@
         "feed": 9000,
         "chain": true,
         "name": "135° halka 3",
-        "operation": "offset"
+        "operation": "offset",
+        "absoluteOffset": 91.7
       },
       {
         "toolNo": "12",
@@ -360,21 +372,23 @@
         "feed": 9000,
         "chain": true,
         "name": "135° halka 4",
-        "operation": "offset"
+        "operation": "offset",
+        "absoluteOffset": 68
       },
       {
         "toolNo": "6",
         "depth": 5,
         "stepOffset": 53,
         "name": "6mm dış",
-        "operation": "offset"
+        "operation": "offset",
+        "absoluteOffset": 53
       }
     ],
-    "createdAt": "2026-09-15T08:40:41.605Z",
-    "updatedAt": "2026-09-15T18:35:26.734Z"
+    "createdAt": "2026-09-23T08:38:03.978Z",
+    "updatedAt": "2026-09-23T08:38:03.978Z"
   },
   {
-    "_id": "local_1789461641608_q7k0ds",
+    "_id": "local_1790152683980_ipl4fg",
     "category": "kapak",
     "imageDataUrl": "",
     "previewWidth": 292,
@@ -399,7 +413,8 @@
         "stepOffset": 57,
         "feed": 8000,
         "name": "düz dış offset",
-        "operation": "offset"
+        "operation": "offset",
+        "absoluteOffset": 57
       },
       {
         "toolNo": "8",
@@ -407,7 +422,8 @@
         "stepOffset": 60,
         "feed": 9000,
         "name": "düz kaba offset",
-        "operation": "offset"
+        "operation": "offset",
+        "absoluteOffset": 60
       },
       {
         "toolNo": "8",
@@ -416,7 +432,8 @@
         "cornerRadius": 4,
         "feed": 9000,
         "name": "yuvarlak köşe offset",
-        "operation": "offset"
+        "operation": "offset",
+        "absoluteOffset": 64.5
       },
       {
         "toolNo": "12",
@@ -424,10 +441,11 @@
         "stepOffset": 68.5,
         "feed": 9000,
         "name": "135° iç",
-        "operation": "offset"
+        "operation": "offset",
+        "absoluteOffset": 68.5
       }
     ],
-    "createdAt": "2026-09-15T08:40:41.608Z",
-    "updatedAt": "2026-09-15T18:35:26.737Z"
+    "createdAt": "2026-09-23T08:38:03.980Z",
+    "updatedAt": "2026-09-23T08:38:03.980Z"
   }
 ]

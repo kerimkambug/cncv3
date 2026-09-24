@@ -5,36 +5,19 @@ import {
   buildReliefGcodeFromDepthGrid,
   estimateReliefTime,
 } from '../lib/gcode/relief.js';
-import {
-  processBasReliefPipeline,
-  upsampleDepthGuided,
-  buildDepthGridFromExternalMap,
-  despeckleSpikesFloat,
-  bilateralFilterFloat,
-  smoothMeshTaubin,
-  crispenDepthFeatures,
-  applyPercentileNormalization,
-} from '../lib/relief/basReliefEngine.js';
+import { buildDepthGridFromExternalMap } from '../lib/relief/basReliefEngine.js';
 import { exportDepthGridToSTL } from '../lib/relief/stlExporter.js';
 import Relief3DViewer from './Relief3DViewer.jsx';
 import ReliefSliceViewer from './ReliefSliceViewer.jsx';
 
 export default function ReliefGenerator({ onBackToMenu }) {
-  const [imageSrc, setImageSrc] = useState(null);
-  const [rawImageFile, setRawImageFile] = useState(null);
   const [imageMeta, setImageMeta] = useState(null);
   const [lockAspect, setLockAspect] = useState(true);
   const [aspectRatio, setAspectRatio] = useState(1);
-  const [isDragging, setIsDragging] = useState(false);
   const [activeTab, setActiveTab] = useState('3d'); // '3d' | '2d' | 'gcode'
 
-  // Processing Engine: 'ai' | 'hybrid' | 'luma' | 'custom'
-  const [engineMode, setEngineMode] = useState('ai');
+  // Harici (dışarıda hazırlanmış) gri tonlamalı derinlik haritası doğrudan kullanılır.
   const [customDepthSrc, setCustomDepthSrc] = useState(null);
-  const [aiDepthSrc, setAiDepthSrc] = useState(null); // Önizleme için PNG
-  const [aiDepthData, setAiDepthData] = useState(null); // STL için kayıpsız Float32 depth
-  const [isAiLoading, setIsAiLoading] = useState(false);
-  const [aiStatus, setAiStatus] = useState(null); // { available: bool, device: str, model: str }
 
   // Configuration state
   const [cfg, setCfg] = useState({ ...DEFAULT_RELIEF_CONFIG });
@@ -44,7 +27,6 @@ export default function ReliefGenerator({ onBackToMenu }) {
   const [statusMsg, setStatusMsg] = useState(null);
   const [isGeneratingGcode, setIsGeneratingGcode] = useState(false);
 
-  const fileInputRef = useRef(null);
   const customDepthInputRef = useRef(null);
   const sourceCanvasRef = useRef(null);
   const depthCanvasRef = useRef(null);
@@ -102,56 +84,6 @@ export default function ReliefGenerator({ onBackToMenu }) {
     }));
   }
 
-  // Check AI service status on mount
-  const checkAiStatus = useCallback(async () => {
-    try {
-      const res = await fetch('/api/relief/ai-status');
-      const data = await res.json();
-      setAiStatus(data);
-    } catch {
-      setAiStatus({
-        ok: false,
-        available: false,
-        mode: 'static-client',
-        error: 'AI servisi yok; istemci-only modda çalışıyor.',
-      });
-    }
-  }, []);
-
-  useEffect(() => {
-    checkAiStatus();
-  }, [checkAiStatus]);
-
-  // Process image file
-  const handleImageFile = useCallback((file) => {
-    if (!file || !file.type.startsWith('image/')) {
-      setStatusMsg({ type: 'err', text: 'Lütfen geçerli bir görsel (PNG, JPG, WEBP) dosyası yükleyin.' });
-      return;
-    }
-
-    setRawImageFile(file);
-    setAiDepthSrc(null); // Yeni görsel yüklendiğinde eski AI derinlik haritasını sıfırla
-    setAiDepthData(null);
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        setImageSrc(e.target.result);
-        const ratio = img.width / img.height;
-        setAspectRatio(ratio);
-        setImageMeta({ width: img.width, height: img.height, name: file.name });
-
-        const baseW = 200;
-        const baseH = +(baseW / ratio).toFixed(1);
-        setCfg((prev) => ({ ...prev, width: baseW, height: baseH }));
-        setStatusMsg({ type: 'ok', text: `Görsel yüklendi: ${file.name} (${img.width}×${img.height}px). AI Derinlik oluşturmaya hazır.` });
-      };
-      img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
-  }, []);
-
   // Process custom (externally prepared) depth map file
   const handleCustomDepthFile = useCallback((file) => {
     if (!file || !file.type.startsWith('image/')) {
@@ -164,33 +96,20 @@ export default function ReliefGenerator({ onBackToMenu }) {
       const src = e.target.result;
       setCustomDepthSrc(src);
 
-      // Ayrı bir fotoğraf yüklenmediyse (sadece harici depth map ile
-      // çalışılıyorsa) boyut/oran bilgisini de bu görselden al.
+      // Boyut/oran bilgisini yüklenen derinlik haritasından al.
       const img = new Image();
       img.onload = () => {
-        setImageMeta((prev) => prev || { width: img.width, height: img.height, name: file.name });
-        setAspectRatio((prev) => (imageSrc ? prev : img.width / img.height));
-        if (!imageSrc) {
-          const baseW = 200;
-          const baseH = +(baseW / (img.width / img.height)).toFixed(1);
-          setCfg((prev) => ({ ...prev, width: baseW, height: baseH }));
-        }
-        setStatusMsg({ type: 'ok', text: `Özel derinlik haritası yüklendi: ${file.name} (${img.width}×${img.height}px)` });
+        setImageMeta({ width: img.width, height: img.height, name: file.name });
+        setAspectRatio(img.width / img.height);
+        const baseW = 200;
+        const baseH = +(baseW / (img.width / img.height)).toFixed(1);
+        setCfg((prev) => ({ ...prev, width: baseW, height: baseH }));
+        setStatusMsg({ type: 'ok', text: `Harici derinlik haritası yüklendi: ${file.name} (${img.width}×${img.height}px)` });
       };
       img.src = src;
     };
     reader.readAsDataURL(file);
-  }, [imageSrc]);
-
-  const onDragOver = (e) => { e.preventDefault(); setIsDragging(true); };
-  const onDragLeave = () => { setIsDragging(false); };
-  const onDrop = (e) => {
-    e.preventDefault();
-    setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleImageFile(e.dataTransfer.files[0]);
-    }
-  };
+  }, []);
 
   // Generate CNC G-Code (stable reference for useCallback consumers)
   const generateGcode = useCallback(() => {
@@ -233,180 +152,17 @@ export default function ReliefGenerator({ onBackToMenu }) {
     }
   }, [processedResult, cfg]);
 
-  // AI Derinlik Haritası Üretici (Depth Anything V2)
-  const generateAiDepth = useCallback(async (autoTriggerGcode = false) => {
-    if (!imageSrc && !rawImageFile) {
-      setStatusMsg({ type: 'err', text: 'Lütfen önce rölyef yapılacak bir görsel yükleyin.' });
-      return;
-    }
-
-    setIsAiLoading(true);
-    setStatusMsg({
-      type: 'ok',
-      text: '🤖 Depth Anything V2 monoküler derinlik hesaplıyor... Lütfen bekleyin.',
-    });
-
-    try {
-      const formData = new FormData();
-      if (rawImageFile) {
-        formData.append('image', rawImageFile);
-      } else {
-        const res = await fetch(imageSrc);
-        const blob = await res.blob();
-        formData.append('image', blob, imageMeta?.name || 'input.png');
-      }
-
-      const queryParams = new URLSearchParams({
-        smooth: String(cfg.smoothRadius ?? 1),
-        contrast: String(cfg.contrast ?? 1.0),
-        sharpen: String(cfg.edgeCrispness ?? 0.25),
-        bit_depth: '16',
-        use_background_mask: String(cfg.useBackgroundMask !== false),
-      });
-
-      const resp = await fetch(`/api/relief/ai-depth?${queryParams}`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!resp.ok) {
-        const fallback = await resp.json().catch(() => ({ error: 'AI servisi erişilemedi.' }));
-        throw new Error(fallback.error || 'AI derinlik haritası üretilemedi.');
-      }
-
-      const data = await resp.json();
-      if (!data.ok) {
-        throw new Error(data.error || 'AI derinlik haritası üretilemedi.');
-      }
-
-      if (!data.depthDataBase64 || !data.width || !data.height) {
-        throw new Error('AI servisi kayıpsız depth verisi döndürmedi.');
-      }
-      const binary = atob(data.depthDataBase64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      const values = new Uint16Array(bytes.buffer);
-      const depthData = new Float32Array(values.length);
-      for (let i = 0; i < values.length; i++) depthData[i] = values[i] / 65535;
-      setAiDepthData({ data: depthData, width: data.width, height: data.height });
-      setEngineMode('ai');
-
-      // Sunucu tarafı QC raporu (varsa) kullanıcıya gösterilir.
-      let serverQcNote = '';
-      if (Array.isArray(data.qcReport) && data.qcReport.length > 0) {
-        const cleanAll = data.qcReport.every((r) => r.clean);
-        serverQcNote = cleanAll
-          ? `Sunucu QC: ${data.qcReport.length} turda temiz.`
-          : `Sunucu QC: düzeltici geçiş uygulandı (${data.qcReport.length} tur).`;
-      }
-      setStatusMsg({
-        type: 'ok',
-        text: `✨ Depth Anything V2 derinlik haritası başarıyla oluşturuldu! ${serverQcNote}`.trim(),
-      });
-
-      if (autoTriggerGcode) {
-        // Derinlik haritası canvas'a işlendikten sonra G-code üretimini tetikle
-        setTimeout(() => {
-          generateGcode();
-        }, 400);
-      }
-    } catch (err) {
-      console.error('[AI Generate Error]:', err);
-      setStatusMsg({
-        type: 'err',
-        text: `AI Derinlik Hatası: ${err.message}. Python AI mikroservisinin (server/ai_service) çalıştığından emin olun.`,
-      });
-    } finally {
-      setIsAiLoading(false);
-    }
-  }, [imageSrc, rawImageFile, imageMeta, cfg, generateGcode]);
-
-  // Process and compute depth map whenever inputs or filters change (using offscreen canvas)
+  // Harici derinlik haritasını (girdiler/ayarlar değiştikçe) doğrudan depth grid'e
+  // dönüştür. Sentez/AI yoktur: gri tonlama doğrudan yükseklik olarak okunur.
   useEffect(() => {
-    const isCustom = engineMode === 'custom';
-    const isAi = engineMode === 'ai';
-
-    // Transparent/illustrated sources are already height-map artwork. Do not
-    // fuse monocular scene depth into them; AI tends to fill painted gaps and
-    // flatten the fabric. The relief pipeline detects the alpha silhouette
-    // and builds the continuous grayscale height map from the source itself.
-    if (isAi && aiDepthData && imageSrc) {
-      let isCancelled = false;
-      const sImg = new Image();
-      let srcLoaded = false;
-
-      const tryProcessFused = () => {
-        if (!srcLoaded || isCancelled) return;
-
-        const sampleW = Math.min(4096, sImg.width || 512);
-        const sampleH = Math.max(1, Math.round(sampleW / ((sImg.width || 1) / (sImg.height || 1))));
-
-        // Sample source image via offscreen canvas
-        const offSourceCanvas = document.createElement('canvas');
-        offSourceCanvas.width = sampleW;
-        offSourceCanvas.height = sampleH;
-        const offSourceCtx = offSourceCanvas.getContext('2d');
-        if (!offSourceCtx) return;
-        offSourceCtx.drawImage(sImg, 0, 0, sampleW, sampleH);
-        const imgData = offSourceCtx.getImageData(0, 0, sampleW, sampleH);
-
-        // AI depth'i canvas'tan okumaz; 16-bit değerleri doğrudan örnekler.
-        // Böylece PNG/canvas dönüşümünde oluşan 8-bit hassasiyet kaybı yoktur.
-        const total = sampleW * sampleH;
-        const guideLuma = new Float32Array(total);
-        for (let i = 0; i < total; i++) {
-          const pixel = i * 4;
-          guideLuma[i] = (0.299 * imgData.data[pixel] + 0.587 * imgData.data[pixel + 1] + 0.114 * imgData.data[pixel + 2]) / 255;
-        }
-        const rawAiDepth = upsampleDepthGuided(
-          aiDepthData.data,
-          aiDepthData.width,
-          aiDepthData.height,
-          guideLuma,
-          sampleW,
-          sampleH,
-        );
-
-        // Execute SculptOK-Level AI + Texture Multi-Scale Fusion
-        const res = processBasReliefPipeline(imgData, rawAiDepth, {
-          detailBoost: Number(cfg.detailBoost ?? 0.8),
-          smoothRadius: Number(cfg.smoothRadius ?? 2),
-          highlightDamp: Number(cfg.highlightDamp ?? 0.7),
-          curve: cfg.curve,
-          contrast: Number(cfg.contrast ?? 1.0),
-          invert: Boolean(cfg.invert),
-          backgroundMode: cfg.backgroundMode,
-          bgThreshold: Number(cfg.threshold ?? 240),
-          // AI depth makro formu verir; RGB yalnızca kontrollü yüzey detayıdır.
-          edgeCrispness: 0,
-          taubinSmooth: Number(cfg.taubinSmooth ?? 1),
-          detailRetention: 0.08,
-          foregroundGain: 0,
-          edgeBoost: 0.08,
-          domeBevel: 0.10,
-        });
-
-        if (!isCancelled) {
-          setProcessedResult(res);
-        }
-      };
-
-      sImg.onload = () => { srcLoaded = true; tryProcessFused(); };
-      sImg.src = imageSrc;
-
-      return () => { isCancelled = true; };
-    }
-
-    const sourceSrc = isCustom ? customDepthSrc : imageSrc;
+    const sourceSrc = customDepthSrc;
     if (!sourceSrc) return;
-
     let isCancelled = false;
     const img = new Image();
     img.onload = () => {
       if (isCancelled) return;
       const sampleW = Math.min(4096, img.width || 512);
       const sampleH = Math.max(1, Math.round(sampleW / ((img.width || 1) / (img.height || 1))));
-
       const offCanvas = document.createElement('canvas');
       offCanvas.width = sampleW;
       offCanvas.height = sampleH;
@@ -414,64 +170,28 @@ export default function ReliefGenerator({ onBackToMenu }) {
       if (!sCtx) return;
       sCtx.drawImage(img, 0, 0, sampleW, sampleH);
       const imgData = sCtx.getImageData(0, 0, sampleW, sampleH);
-
-      let res;
-      if (isCustom) {
-        // Harici depth map: sentez/AI harmanlama yok, sadece isteğe bağlı
-        // hafif pürüzsüzleştirme + arka plan/invert. Custom modda
-        // SculptOK tipi siyah fonlar için güvenli varsayılanlar kullanılır.
-        res = buildDepthGridFromExternalMap(imgData, {
-          invert: Boolean(cfg.invert),
-          smoothRadius: Number(cfg.smoothRadius),
-          backgroundMode: cfg.backgroundMode,
-          bgThreshold: Number(cfg.externalBgThreshold ?? 18),
-        });
-      } else {
-        // Execute Bas-Relief Pipeline (luminance-based, no AI)
-        res = processBasReliefPipeline(imgData, null, {
-          detailBoost: engineMode === 'luma' ? 0 : Number(cfg.detailBoost),
-          smoothRadius: Number(cfg.smoothRadius),
-          highlightDamp: Number(cfg.highlightDamp),
-          curve: cfg.curve,
-          contrast: Number(cfg.contrast),
-          invert: Boolean(cfg.invert),
-          backgroundMode: cfg.backgroundMode,
-          bgThreshold: Number(cfg.threshold),
-          edgeCrispness: Number(cfg.edgeCrispness),
-          taubinSmooth: Number(cfg.taubinSmooth),
-          detailRetention: 0.34,
-          foregroundGain: 0,
-          domeBevel: 0.16,
-        });
-      }
-
+      const res = buildDepthGridFromExternalMap(imgData, {
+        invert: Boolean(cfg.invert),
+        smoothRadius: Number(cfg.smoothRadius),
+        backgroundMode: cfg.backgroundMode,
+        bgThreshold: Number(cfg.externalBgThreshold ?? 18),
+      });
       if (!isCancelled) {
         setProcessedResult(res);
+        setStatusMsg({ type: 'ok', text: '✅ Derinlik haritası hazır. 3D önizlemeyi inceleyebilir ve G-Code üretebilirsiniz.' });
       }
     };
     img.src = sourceSrc;
-
     return () => { isCancelled = true; };
   }, [
-    imageSrc,
     customDepthSrc,
-    aiDepthSrc,
-    aiDepthData,
-    engineMode,
-    cfg.detailBoost,
     cfg.smoothRadius,
-    cfg.edgeCrispness,
-    cfg.taubinSmooth,
-    cfg.highlightDamp,
-    cfg.curve,
-    cfg.contrast,
     cfg.invert,
     cfg.backgroundMode,
-    cfg.threshold,
-    cfg.detailRetention,
+    cfg.externalBgThreshold,
   ]);
 
-  // Update 2D Preview Canvases when on 2D tab or when processedResult/imageSrc updates
+  // Update 2D Preview Canvases when on 2D tab or when processedResult updates
   useEffect(() => {
     if (activeTab !== '2d') return;
     const sCanvas = sourceCanvasRef.current;
@@ -484,7 +204,7 @@ export default function ReliefGenerator({ onBackToMenu }) {
     dCanvas.width = w;
     dCanvas.height = h;
 
-    const src = (engineMode === 'custom' && customDepthSrc) ? customDepthSrc : imageSrc;
+    const src = customDepthSrc;
     if (src) {
       const srcImg = new Image();
       srcImg.onload = () => {
@@ -511,7 +231,7 @@ export default function ReliefGenerator({ onBackToMenu }) {
       }
       dCtx.putImageData(depthImgData, 0, 0);
     }
-  }, [activeTab, processedResult, imageSrc, customDepthSrc, engineMode]);
+  }, [activeTab, processedResult, customDepthSrc]);
 
   // Export 3D STL File
   function handleDownloadSTL() {
@@ -579,9 +299,9 @@ export default function ReliefGenerator({ onBackToMenu }) {
     <div className="wrap app-screen active">
       <div className="topbar">
         <div>
-          <h1>Empire CNC — Görselden 3D Bas-Rölyef & G-Code Üretici</h1>
+          <h1>Empire CNC — Harici Derinlik Haritasından 3D Bas-Rölyef & G-Code Üretici</h1>
           <div className="sub">
-            Bas-Rölyef Derinlik Haritalama, Küre Uçlu Takım Telafisi ve Gerçekçi 3D Simülasyon.
+            Harici Derinlik Haritası, Küre Uçlu Takım Telafisi ve Gerçekçi 3D Simülasyon.
           </div>
         </div>
         <div className="top-actions">
@@ -595,270 +315,69 @@ export default function ReliefGenerator({ onBackToMenu }) {
 
       <div className="main-card">
         <div className="grid">
-          {/* 1. Görsel & Motor Seçim Kartı */}
+          {/* 1. Harici Derinlik Haritası Kartı */}
           <div className="card">
-            <h2>1. Görsel Seçimi & Derinlik Motoru</h2>
+            <h2>1. Harici Derinlik Haritası Yükle</h2>
 
-            <div
-              className={`relief-dropzone${isDragging ? ' dragging' : ''}`}
-              onDragOver={onDragOver}
-              onDragLeave={onDragLeave}
-              onDrop={onDrop}
-              onClick={() => fileInputRef.current?.click()}
-            >
+            <div className="ai-engine-box">
+              <div className="ai-engine-info">
+                <b>📥 Harici Derinlik Haritası</b>
+                <p>
+                  Dışarıda (ör. SculptOK gibi bir araçla) hazırlanmış gri tonlamalı depth map yükleyin —
+                  beyaz = yüzey/en yüksek, siyah = taban/en derin. Gri tonlama doğrudan yükseklik olarak
+                  okunur; foto-detay sentezi / AI hesaplaması uygulanmaz. Siyah fonlu haritalarda koyu fon
+                  varsayılan olarak düz tabana alınır.
+                </p>
+              </div>
+
               <input
-                ref={fileInputRef}
+                ref={customDepthInputRef}
                 type="file"
                 accept="image/png, image/jpeg, image/webp, image/bmp"
                 style={{ display: 'none' }}
-                onChange={(e) => e.target.files?.[0] && handleImageFile(e.target.files[0])}
+                onChange={(e) => e.target.files?.[0] && handleCustomDepthFile(e.target.files[0])}
               />
-              <div className="dropzone-content">
-                <span className="drop-icon">🖼️</span>
-                <div className="drop-text">
-                  <b>Rölyef yapılacak görseli buraya sürükleyin</b> veya seçmek için tıklayın
-                </div>
-                <div className="hint">
-                  Desteklenen: PNG, JPG, JPEG, WEBP
-                  {engineMode === 'custom' && ' — Harici Derinlik Haritası modunda bu adım zorunlu değil, aşağıdan doğrudan depth map yükleyebilirsiniz.'}
-                </div>
-              </div>
-            </div>
+              <button
+                type="button"
+                className="btn-accent2"
+                onClick={() => customDepthInputRef.current?.click()}
+              >
+                {customDepthSrc ? '🔁 Derinlik Haritasını Değiştir' : '📥 Derinlik Haritası Yükle'}
+              </button>
 
-            {/* Motor Seçimi */}
-            <div style={{ marginTop: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <label><b>Derinlik Üretim Motoru:</b></label>
-                {aiStatus && (
-                  <span
-                    style={{
-                      fontSize: '11px',
-                      padding: '2px 8px',
-                      borderRadius: '12px',
-                      background: aiStatus.available ? 'rgba(74, 222, 128, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                      color: aiStatus.available ? '#4ade80' : '#f87171',
-                      border: `1px solid ${aiStatus.available ? 'rgba(74, 222, 128, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
-                    }}
+              {customDepthSrc && (
+                <div className="ai-ready-badge" style={{ marginTop: 10 }}>
+                  ✅ <b>Harici Derinlik Haritası Yüklendi</b>
+                </div>
+              )}
+
+              <div className="row2" style={{ marginTop: 12 }}>
+                <div>
+                  <label htmlFor="customBackgroundMode">Arka Plan İşleme</label>
+                  <select
+                    id="customBackgroundMode"
+                    value={cfg.backgroundMode || 'natural'}
+                    onChange={(e) => updateField('backgroundMode', e.target.value)}
                   >
-                    {aiStatus.available ? `🟢 AI Aktif (${aiStatus.device_type || 'CPU/GPU'})` : '🔴 AI Mikroservis Kapalı'}
-                  </span>
-                )}
-              </div>
-
-              <div className="engine-mode-tabs">
-                <button
-                  type="button"
-                  className={`engine-tab ${engineMode === 'ai' ? 'active' : ''}`}
-                  onClick={() => {
-                    setEngineMode('ai');
-                    if (!aiDepthData && imageSrc) {
-                      generateAiDepth(false);
-                    }
-                  }}
-                  disabled={isAiLoading}
-                >
-                  <span className="engine-tab-icon">{isAiLoading ? '⏳' : '✨'}</span>
-                  <div className="engine-tab-body">
-                    <b>AI Akıllı Derinlik (Depth Anything V2) — Önerilen</b>
-                    <small>Düz fotoğraftan anatomik/geometrik 3D monoküler derinlik tahmini</small>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  className={`engine-tab ${engineMode === 'hybrid' ? 'active' : ''}`}
-                  onClick={() => setEngineMode('hybrid')}
-                >
-                  <span className="engine-tab-icon">🎨</span>
-                  <div className="engine-tab-body">
-                    <b>Akıllı Bas-Rölyef (Detay & Işık Telafili)</b>
-                    <small>Anında tarayıcıda çok ölçekli frekans filtreleme</small>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  className={`engine-tab ${engineMode === 'luma' ? 'active' : ''}`}
-                  onClick={() => setEngineMode('luma')}
-                >
-                  <span className="engine-tab-icon">⚡</span>
-                  <div className="engine-tab-body">
-                    <b>Klasik Gri Tonlama (Luminance)</b>
-                    <small>Doğrudan parlaklık tabanlı yükseklik</small>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  className={`engine-tab ${engineMode === 'custom' ? 'active' : ''}`}
-                  onClick={() => setEngineMode('custom')}
-                >
-                  <span className="engine-tab-icon">📥</span>
-                  <div className="engine-tab-body">
-                    <b>Harici Derinlik Haritası</b>
-                    <small>Dışarıda hazırlanmış depth map'i doğrudan kullan</small>
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            {/* AI Derinlik Kontrol Kutusu */}
-            {engineMode === 'ai' && (
-              <div className="ai-engine-box">
-                <div className="ai-engine-info">
-                  <b>✨ Depth Anything V2 Yapay Zeka Motoru</b>
-                  <p>
-                    Derin öğrenme tabanlı monoküler derinlik tahmini; insan yüzleri, kartal, hayvan figürleri ve heykellerde
-                    anatomik derinliği pürüzsüzce ayırarak 0-255 derinlik haritasına dönüştürür.
-                  </p>
+                    <option value="natural">İşleme yok (Natural)</option>
+                    <option value="flat">Koyu fonu düz tabana al</option>
+                    <option value="zero">Koyu fonu sıfırla</option>
+                  </select>
                 </div>
-
-                <div className="checkbox-row" style={{ marginTop: 10 }}>
+                <div>
+                  <label htmlFor="customBgThreshold">Koyu Fon Eşiği (0-255)</label>
                   <input
-                    type="checkbox"
-                    id="useBackgroundMaskCheck"
-                    checked={cfg.useBackgroundMask !== false}
-                    onChange={(e) => updateField('useBackgroundMask', e.target.checked)}
+                    id="customBgThreshold"
+                    type="number"
+                    min="0"
+                    max="255"
+                    step="1"
+                    value={cfg.externalBgThreshold ?? 18}
+                    onChange={(e) => updateField('externalBgThreshold', Math.max(0, Math.min(255, Number(e.target.value) || 0)))}
                   />
-                  <label htmlFor="useBackgroundMaskCheck" style={{ margin: 0, cursor: 'pointer', fontSize: 13 }}>
-                    Arka plan maskesini kullan
-                  </label>
-                </div>
-                <small style={{ display: 'block', color: '#94a3b8', marginTop: 5, fontSize: 11 }}>
-                  Çok karakterli veya yoğun posterlerde kapatmak, ikinci figür ve yazı detaylarının korunmasına yardımcı olur.
-                </small>
-
-                {isAiLoading && (
-                  <div className="ai-progress-wrap">
-                    <div className="ai-progress-bar">
-                      <div className="ai-progress-fill" style={{ width: '85%' }} />
-                    </div>
-                    <div className="ai-progress-text">
-                      🧠 Model derinlik çıkarımı yapıyor... Lütfen bekleyin.
-                    </div>
-                  </div>
-                )}
-
-                {aiStatus && !aiStatus.available && (
-                  <div
-                    style={{
-                      background: 'rgba(239, 68, 68, 0.1)',
-                      border: '1px solid rgba(239, 68, 68, 0.3)',
-                      padding: '10px',
-                      borderRadius: '6px',
-                      fontSize: '12px',
-                      color: '#fca5a5',
-                      marginBottom: '10px',
-                    }}
-                  >
-                    ⚠️ <b>AI Mikroservisi (Port 8000) çalışmıyor.</b>
-                    <div style={{ marginTop: '4px', color: '#cbd5e1' }}>
-                      Başlatmak için: <code>server/ai_service/start.bat</code> veya <code>start.ps1</code> çalıştırın.
-                    </div>
-                    <button
-                      type="button"
-                      className="btn-small btn-secondary"
-                      onClick={checkAiStatus}
-                      style={{ marginTop: '6px', padding: '3px 8px', fontSize: '11px' }}
-                    >
-                      🔄 Bağlantıyı Yeniden Dene
-                    </button>
-                  </div>
-                )}
-
-                {imageSrc && !isAiLoading && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <button
-                        type="button"
-                        className="btn-accent"
-                        style={{ flex: 1, minWidth: '180px', padding: '10px 14px', fontSize: '13px' }}
-                        onClick={() => generateAiDepth(false)}
-                      >
-                        {aiDepthData ? '🔄 AI Derinliği Yeniden Hesapla' : '✨ AI Derinlik Haritası Çıkar'}
-                      </button>
-
-                      <button
-                        type="button"
-                        className="btn-accent2"
-                        style={{ flex: 1, minWidth: '180px', padding: '10px 14px', fontSize: '13px' }}
-                        onClick={() => generateAiDepth(true)}
-                      >
-                        ⚡ AI Derinlik + Otomatik G-Code
-                      </button>
-                    </div>
-
-                    {aiDepthData && (
-                      <div className="ai-ready-badge" style={{ marginTop: 6 }}>
-                        ✅ <b>Depth Anything V2 Derinlik Haritası Aktif</b>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Custom Depth Map Upload */}
-            {engineMode === 'custom' && (
-              <div className="ai-engine-box">
-                <div className="ai-engine-info">
-                  <b>📥 Harici Derinlik Haritası</b>
-                  <p>
-                    SculptOK gibi harici bir araçtan alınmış gri tonlamalı depth map yükleyin — beyaz = yüzey,
-                    siyah = taban. Bu mod AI'ı devre dışı bırakır ve gri tonlamayı doğrudan yükseklik olarak okur;
-                    foto-detay sentezi uygulanmaz. Siyah fonlu haritalarda koyu fon varsayılan olarak düz tabana alınır.
-                  </p>
-                </div>
-
-                <input
-                  ref={customDepthInputRef}
-                  type="file"
-                  accept="image/png, image/jpeg, image/webp, image/bmp"
-                  style={{ display: 'none' }}
-                  onChange={(e) => e.target.files?.[0] && handleCustomDepthFile(e.target.files[0])}
-                />
-                <button
-                  type="button"
-                  className="btn-accent2"
-                  onClick={() => customDepthInputRef.current?.click()}
-                >
-                  {customDepthSrc ? '🔁 Derinlik Haritasını Değiştir' : '📥 Derinlik Haritası Yükle'}
-                </button>
-
-                {customDepthSrc && (
-                  <div className="ai-ready-badge" style={{ marginTop: 10 }}>
-                    ✅ <b>Harici Derinlik Haritası Yüklendi</b>
-                  </div>
-                )}
-
-                <div className="row2" style={{ marginTop: 12 }}>
-                  <div>
-                    <label htmlFor="customBackgroundMode">Arka Plan İşleme</label>
-                    <select
-                      id="customBackgroundMode"
-                      value={cfg.backgroundMode || 'natural'}
-                      onChange={(e) => updateField('backgroundMode', e.target.value)}
-                    >
-                      <option value="natural">İşleme yok (Natural)</option>
-                      <option value="flat">Koyu fonu düz tabana al</option>
-                      <option value="zero">Koyu fonu sıfırla</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="customBgThreshold">Koyu Fon Eşiği (0-255)</label>
-                    <input
-                      id="customBgThreshold"
-                      type="number"
-                      min="0"
-                      max="255"
-                      step="1"
-                      value={cfg.externalBgThreshold ?? 18}
-                      onChange={(e) => updateField('externalBgThreshold', Math.max(0, Math.min(255, Number(e.target.value) || 0)))}
-                    />
-                  </div>
                 </div>
               </div>
-            )}
+            </div>
           </div>
 
           {/* 2. Otomatik CNC Yüzey & Kalite Motoru */}
@@ -1109,7 +628,7 @@ export default function ReliefGenerator({ onBackToMenu }) {
               <button
                 type="button"
                 className="btn-accent2"
-                disabled={isGeneratingGcode || !imageSrc}
+                disabled={isGeneratingGcode || !processedResult}
                 onClick={generateGcode}
               >
                 {isGeneratingGcode ? 'G-Code Hesaplanıyor...' : '⚡ Kusursuz Rölyef G-Code Üret'}
@@ -1190,7 +709,7 @@ export default function ReliefGenerator({ onBackToMenu }) {
                   />
                 ) : (
                   <div className="empty-preview-box">
-                    <span>🖼️ Lütfen önce bir görsel yükleyin</span>
+                    <span>🖼️ Lütfen önce bir derinlik haritası yükleyin</span>
                   </div>
                 )}
 
@@ -1215,7 +734,7 @@ export default function ReliefGenerator({ onBackToMenu }) {
               <div>
                 <div className="relief-preview-row">
                   <div className="preview-box">
-                    <div className="preview-title">Orijinal Görsel</div>
+                    <div className="preview-title">Yüklenen Derinlik Haritası</div>
                     <canvas ref={sourceCanvasRef} className="preview-canvas" />
                   </div>
                   <div className="preview-box">
