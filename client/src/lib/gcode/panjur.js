@@ -386,7 +386,12 @@ export function generatePanjurGcode(c, offsetX = 0, offsetY = 0, isCombined = fa
       }
       lines.push(`N${n++} G0 Z${fmt(c.safeZ)}`);
     });
-    lines.push(`N${n++} M5`);
+    // M5 SADECE programın sonunda (veya tek parça modunda) yazılır.
+    // Birleşik/seri modda araya M5 girerse, sonraki parçanın çıkış kesimi
+    // spindle kapalıyken G1'lerle yol alır → takım kırılır.
+    if (!isCombined) {
+      lines.push(`N${n++} M5`);
+    }
   }
 
  // =========================================================

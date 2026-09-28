@@ -3,16 +3,82 @@
  * sequence shared by every Kapak operation (Tek Ölçü, Toplu Liste,
  * Nesting all read the same rows).
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { usePresets } from '../../hooks/usePresets.js';
 
-export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relative', setOffsetMode }) {
+// Seçilen preset, bir sonraki açılışta da bıçak listesinin başlangıç değeri
+// olarak kullanılsın diye saklanır. Anahtarlar modüle özeldir.
+const ACTIVE_PRESET_KEY = 'empire-cnc-active-tool-preset';
+
+// Presetten makine ayarlarına aktarılabilecek alanlar. rows/offsetMode dışarıda
+// tutulur çünkü onlar zaten tabloda ya da mod anahtarında karşılanıyor.
+const CFG_FIELDS = ['thickness', 'spindleSpeed', 'safeZ', 'toolChangeZ', 'homeZ', 'plungeFeed', 'cutFeed', 'topStyle', 'riseRatio'];
+
+// Preset satırları düzenlenirken nesne referansı paylaşılırsa, tabloda bir
+// satıra yapılan değişiklik kayıtlı preseti de sessizce bozabilir. Satırlar
+// her zaman kopyalanır.
+function cloneRows(rows) {
+  return (rows || []).map((r) => ({ ...r, ...(r.derz ? { derz: { ...r.derz } } : {}) }));
+}
+
+export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relative', setOffsetMode, setCfg }) {
   // ⚙ ile seçilen satırın ayarları tablonun altındaki panelde gösterilir.
   const [selected, setSelected] = useState(null);
+  const { presets, loading } = usePresets('kapak');
+  // null = henüz seçim yok (kullanıcı boş bıraktı), '__custom__' = elle düzenlendi.
+  const [activePresetId, setActivePresetId] = useState(() => {
+    try { return localStorage.getItem(ACTIVE_PRESET_KEY) || null; } catch { return null; }
+  });
+
+  function applyPreset(preset) {
+    setRows(cloneRows(preset.rows));
+    if (preset.offsetMode && setOffsetMode) setOffsetMode(preset.offsetMode);
+    if (setCfg) {
+      const patch = {};
+      CFG_FIELDS.forEach((f) => {
+        if (preset[f] !== undefined && preset[f] !== null && preset[f] !== '') patch[f] = preset[f];
+      });
+      if (Object.keys(patch).length) setCfg((prev) => ({ ...prev, ...patch }));
+    }
+  }
+
+  function handlePresetChange(id) {
+    setActivePresetId(id || null);
+    try {
+      if (id) localStorage.setItem(ACTIVE_PRESET_KEY, id);
+      else localStorage.removeItem(ACTIVE_PRESET_KEY);
+    } catch { /* localStorage kapalıysa seçim sadece bu oturumda geçerli */ }
+    if (!id) return; // boş seçim: mevcut satırlara dokunma
+    const preset = presets.find((p) => (p._id || p.id) === id);
+    if (preset) applyPreset(preset);
+  }
+
+  // Sayfa ilk açıldığında daha önce seçilmiş preseti varsayılan olarak getir.
+  // Presetler asenkron yüklendiği için liste gelince bir kez uygulanır.
+  const [restored, setRestored] = useState(false);
+  useEffect(() => {
+    if (restored || loading || !activePresetId || presets.length === 0) return;
+    const preset = presets.find((p) => (p._id || p.id) === activePresetId);
+    if (preset) applyPreset(preset);
+    setRestored(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presets, loading, activePresetId, restored]);
+
+  // Tablo elle değiştirilince seçili preset artık bu satırları tanımlamaz.
+  function markCustom() {
+    setActivePresetId((current) => {
+      if (current !== '__custom__') {
+        try { localStorage.removeItem(ACTIVE_PRESET_KEY); } catch { /* yoksay */ }
+      }
+      return '__custom__';
+    });
+  }
 
   function updateRow(idx, field, value) {
     const next = rows.slice();
     next[idx] = { ...next[idx], [field]: field === 'name' || field === 'toolNo' || field === 'operation' ? value : parseFloat(value) || 0 };
     setRows(next);
+    markCustom();
   }
 
   // cornerRadius / feed accept an empty string to mean "not set" (cleared),
@@ -22,6 +88,7 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
     const stored = value === '' || value === null || value === undefined ? null : parseFloat(value) || 0;
     next[idx] = { ...next[idx], [field]: stored };
     setRows(next);
+    markCustom();
   }
   function updateCarving(idx, field, value) {
     const next = rows.slice();
@@ -29,17 +96,21 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
     const stored = value === '' || value === null || value === undefined ? null : parseFloat(value) || 0;
     next[idx] = { ...next[idx], [field]: stored };
     setRows(next);
+    markCustom();
   }
   function updateDerz(idx, field, value) {
     const next = rows.slice();
     next[idx] = { ...next[idx], derz: { yon: 'dikey', margin: 0, spacing: 60, autoFit: true, overshoot: 1, overshootX: 1, overshootY: 1, edgeExtra: 0, respectPreviousOffset: true, ...(next[idx].derz || {}), [field]: field === 'yon' || field === 'autoFit' || field === 'respectPreviousOffset' ? value : parseFloat(value) || 0 } };
     setRows(next);
+    markCustom();
   }
   function addRow() {
     setRows([...rows, { name: '', toolNo: '', operation: 'offset', depth: 1, stepOffset: 10, derz: { yon: 'dikey', margin: 0, spacing: 60, autoFit: true, overshoot: 1, edgeExtra: 0, outerFrame: false } }]);
+    markCustom();
   }
   function removeRow(idx) {
     setRows(rows.filter((_, i) => i !== idx));
+    markCustom();
   }
 
   const isAbsolute = offsetMode === 'absolute';
@@ -57,6 +128,32 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
       <div className="tool-header-row" style={{ marginBottom: 12 }}>
         <h2 style={{ margin: 0 }}>Bıçaklar</h2>
         <span className="badge">{rows.length} bıçak</span>
+      </div>
+
+      {/* Küçük preset seçici: seçilen preset bıçak listesinin ve işleme
+          ayarlarının varsayılanı olur. Tablo elle düzenlenene kadar seçim
+          geçerli kalır ve sonraki açılışta da uygulanır. */}
+      <div className="tool-preset-picker">
+        <label htmlFor="toolPresetSelect">Preset</label>
+        <select
+          id="toolPresetSelect"
+          value={activePresetId === '__custom__' ? '' : activePresetId || ''}
+          onChange={(e) => handlePresetChange(e.target.value)}
+          disabled={loading}
+        >
+          <option value="">{loading ? 'Yükleniyor...' : 'Elle (preset yok)'}</option>
+          {presets.map((p) => (
+            <option key={p._id || p.id} value={p._id || p.id}>
+              {p.name}{p.category === 'kapi' ? ' (kapı)' : ''}
+            </option>
+          ))}
+        </select>
+        {activePresetId && activePresetId !== '__custom__' && (
+          <span className="badge" title="Bu preset şu an varsayılan olarak kullanılıyor">varsayılan</span>
+        )}
+        {activePresetId === '__custom__' && (
+          <span className="badge" title="Satırlar elle değiştirildi">özelleştirilmiş</span>
+        )}
       </div>
 
       <div className="mode-switch" style={{ marginBottom: 14 }}>

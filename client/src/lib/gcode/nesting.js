@@ -191,6 +191,78 @@ export function orderPartsTopRightToLeft(parts) {
  * @param {object} opts - { plateW, plateH, edge, gap, rotate, parts }
  * @returns {{plates: Array}}
  */
+/**
+ * Single source of truth for one placed part's derz (divider) geometry.
+ *
+ * Mirrors kapak.js's rules so a nested part is cut exactly like the same part cut
+ * standalone:
+ *  - the divider MARGIN builds on the cumulative offset of the last offset row
+ *    (unless derz.respectPreviousOffset is false),
+ *  - a VERTICAL divider starts on the bottom frame edge the FIRST offset row cut
+ *    (rows[0]'s cumulative offset) with NO bottom overshoot — overshooting there
+ *    would drive the tool into the neighbouring part in a nest,
+ *  - a vertical divider ends on the arch (topStyle != flat) when its X lies inside
+ *    the arc, otherwise at the top margin + overshootY,
+ *  - a HORIZONTAL divider runs from margin - overshootX to width - margin + overshootX.
+ *
+ * @param {object} part - a placed part ({x, y, placedWidth, placedHeight})
+ * @param {object} row - the derz tool row (row.derz carries the options)
+ * @param {Array} offsetRows - the OFFSET-only rows (derz/carving removed), in order
+ * @param {{prevOffset:number, topStyle?:string, riseRatio?:number}} ctx
+ * @returns {{vertical:boolean, positions:number[], segments:Array<{x1:number,y1:number,x2:number,y2:number}>}}
+ */
+export function buildPartDerzGeometry(part, row, offsetRows = [], ctx = {}) {
+  const derz = row.derz || {};
+  const prevOffset = Number(ctx.prevOffset) || 0;
+  const margin = prevOffset + (Number(derz.margin) || 0);
+  const opts = {
+    width: part.placedWidth,
+    height: part.placedHeight,
+    yon: derz.yon || 'dikey',
+    margin,
+    spacing: Number(derz.spacing) || Number(row.stepOffset) || 60,
+    autoFit: derz.autoFit !== false,
+    edgeExtra: Number(derz.edgeExtra) || 0,
+  };
+  const positions = computeDerzPositions(opts).positions;
+  const vertical = (derz.yon || 'dikey') === 'dikey';
+  const overshootX = Number(derz.overshootX ?? derz.overshoot) || 0;
+  const overshootY = Number(derz.overshootY ?? derz.overshoot) || 0;
+
+  // The bottom frame edge is the FIRST offset row's contour, not the derz margin
+  // box (kapak.js: rows[0].stepOffset).
+  const firstOffsetCum = offsetRows.length
+    ? computeCumOffsets([offsetRows[0]], 'relative')[0]
+    : 0;
+  const startYOverride = Number.isFinite(Number(derz.startY)) ? Number(derz.startY) : null;
+  const frameY = startYOverride != null ? startYOverride : firstOffsetCum;
+
+  // The arch belongs to the OUTERMOST offset contour, so the curve is built from
+  // that rectangle — using the derz margin would shrink the radius.
+  const shapeOffset = firstOffsetCum;
+  const shapeXl = part.x + shapeOffset;
+  const shapeXr = part.x + part.placedWidth - shapeOffset;
+  const shapeYt = part.y + part.placedHeight - shapeOffset;
+  const curve = (ctx.topStyle && ctx.topStyle !== 'flat')
+    ? computeTopCurve(shapeXl, shapeXr, shapeYt, ctx.topStyle, ctx.riseRatio)
+    : null;
+
+  const segments = positions.map((pos) => {
+    if (!vertical) {
+      const y = part.y + pos;
+      return { x1: part.x + margin - overshootX, y1: y, x2: part.x + part.placedWidth - margin + overshootX, y2: y };
+    }
+    const x = part.x + pos;
+    const posAbs = part.x + pos;
+    const y2 = (curve && posAbs > shapeXl && posAbs < shapeXr)
+      ? curve.yEnd(posAbs)
+      : part.y + part.placedHeight - margin + overshootY;
+    return { x1: x, y1: part.y + frameY, x2: x, y2 };
+  });
+
+  return { vertical, positions, segments, margin };
+}
+
 export function calculateNesting(opts) {
   const { plateW, plateH, edge = 0, gap = 0, rotate = true, parts: inputParts } = opts;
 
@@ -327,9 +399,16 @@ function getMachineParams(cfg) {
  * Calculates adaptive toolpath bounding coordinates for a given tool row across parts on a plate.
  * Returns array of { part, adRow, x1, y1, x2, y2, w, h } for parts where the row is not skipped.
  */
+// NOTE: `rows` MUST be the OFFSET-only row list (derz/carving rows removed) and
+// `rowIdx` its index inside that list — the nesting counterpart of kapak.js, where
+// an explicit `absoluteOffset` pins a row to an exact contour and the adaptive S0
+// shrink must NOT move it. Passing the full cfg.rows with a filtered index was
+// shifting every contour by however many derz/carving rows came before it.
 export function getAdaptiveRowPartCoords(parts, rows, rowIdx, offsetMode = 'relative') {
   if (!parts || !rows || !rows[rowIdx]) return [];
   const coords = [];
+  const pinned = Number(rows[rowIdx] && rows[rowIdx].absoluteOffset);
+  const hasPinned = Number.isFinite(pinned);
   parts.forEach((part) => {
     const adaptiveRows = calculateAdaptiveOffsets(
       part.placedWidth,
@@ -340,10 +419,12 @@ export function getAdaptiveRowPartCoords(parts, rows, rowIdx, offsetMode = 'rela
     const adRow = adaptiveRows[rowIdx];
     if (!adRow || adRow.skipped) return;
 
-    const x1 = part.x + adRow.leftOffset;
-    const y1 = part.y + adRow.bottomOffset;
-    const x2 = part.x + part.placedWidth - adRow.rightOffset;
-    const y2 = part.y + part.placedHeight - adRow.topOffset;
+    const offX = hasPinned ? pinned : adRow.leftOffset;
+    const offY = hasPinned ? pinned : adRow.bottomOffset;
+    const x1 = part.x + offX;
+    const y1 = part.y + offY;
+    const x2 = part.x + part.placedWidth - offX;
+    const y2 = part.y + part.placedHeight - offY;
     coords.push({
       part,
       adRow,
@@ -463,6 +544,7 @@ function emitAdaptiveProfilePasses(lines, plate, cfg, { thickness, plungeFeed, c
     });
   });
 
+  const offsetRowsForDerz = offsetRows;
   // Derz rows: evenly spaced divider lines INSIDE each part, driven by the row's
   // own derz options (yon/margin/spacing/autoFit/overshoot/edgeExtra) — the
   // nesting counterpart of kapak.js's derz block. Each part's lines are computed
@@ -485,29 +567,22 @@ function emitAdaptiveProfilePasses(lines, plate, cfg, { thickness, plungeFeed, c
     // "Önceki offset sınırlarına uy": derz margin sits on top of the deepest
     // offset row's cumulative offset (same rule as kapak.js).
     const prevOffset = derz.respectPreviousOffset === false ? 0 : (offsetCums[offsetCums.length - 1] || 0);
-    const overshootX = Number(derz.overshootX ?? derz.overshoot) || 1;
-    const overshootY = Number(derz.overshootY ?? derz.overshoot) || 1;
-    const vertical = (derz.yon || 'dikey') === 'dikey';
-
+    // Derz geometry is NOT recomputed here: buildPartDerzGeometry is the single
+    // source of truth shared by the G-code, the DXF and the on-screen preview, so
+    // all three place every divider identically (kapak.js uses the same helper
+    // rules: vertical lines start on the bottom frame edge cut by the FIRST
+    // offset row — never with a bottom overshoot, which in a nest would run into
+    // the neighbouring part — and end on the arch when the top is curved).
     plate.parts.forEach((part) => {
-      const opts = {
-        width: part.placedWidth,
-        height: part.placedHeight,
-        yon: derz.yon || 'dikey',
-        margin: prevOffset + (Number(derz.margin) || 0),
-        spacing: Number(derz.spacing) || Number(r.stepOffset) || 60,
-        autoFit: derz.autoFit !== false,
-        edgeExtra: Number(derz.edgeExtra) || 0,
-      };
-      const positions = computeDerzPositions(opts).positions;
-      positions.forEach((pos) => {
-        const x1 = vertical ? part.x + pos : part.x - overshootX;
-        const y1 = vertical ? part.y - overshootY : part.y + pos;
-        const x2 = vertical ? x1 : part.x + part.placedWidth + overshootX;
-        const y2 = vertical ? part.y + part.placedHeight + overshootY : y1;
-        lines.push(`G0 X${fmt(x1)} Y${fmt(y1)} Z${fmt(safeZ)}`);
+      const geo = buildPartDerzGeometry(part, r, offsetRowsForDerz, {
+        prevOffset,
+        topStyle: cfg.topStyle,
+        riseRatio: cfg.riseRatio,
+      });
+      geo.segments.forEach((s) => {
+        lines.push(`G0 X${fmt(s.x1)} Y${fmt(s.y1)} Z${fmt(safeZ)}`);
         lines.push(`G1   Z${fmt(z)} F${plungeFeed.toFixed(1)}`);
-        lines.push(`G1 X${fmt(x2)} Y${fmt(y2)}   F${feed.toFixed(1)}`);
+        lines.push(`G1 X${fmt(s.x2)} Y${fmt(s.y2)}   F${feed.toFixed(1)}`);
         lines.push(`G0   Z${fmt(safeZ)}`);
       });
     });
@@ -662,12 +737,15 @@ export function estimateNestingTime(result, cfg, presetMap = {}) {
       let cx = 0;
       let cy = 0;
 
-      (group.cfg.rows || []).forEach((r, rowIdx) => {
+      // Yalnızca offset satırları işlenir ve SATIR DİZİSİ offset'e göre verilir
+      // (derz/carving satırları hem profil çizmez hem indeksi kaydırırdı).
+      const estOffsetRows = (group.cfg.rows || []).filter((r) => (r.operation || 'offset') !== 'derz' && r.operation !== 'carving');
+      estOffsetRows.forEach((r, rowIdx) => {
         let usedInGroup = false;
         const rowDepth = Number(r.depth) || 2;
         const validCoords = getAdaptiveRowPartCoords(
           group.parts,
-          group.cfg.rows,
+          estOffsetRows,
           rowIdx,
           group.cfg.offsetMode || 'relative'
         );
@@ -875,12 +953,17 @@ export function buildNestingPlateDxf(plate, cfg = {}, presetMap = {}) {
     const label = groupLabel(group);
     // Derz satırları burada DIŞARIDA: onlar dikdörtgen profil değil, aşağıda
     // kendi bloklarında doğru biçimde tek tek çizgi (LINE) olarak çizilir.
-    const rectRows = (group.cfg.rows || []).filter((r) => (r.operation || 'offset') !== 'derz');
+    // Carving satırları da ayrı tutulur: adaptif zincir onların dağılımına göre
+    // hesaplanır, bu yüzden indeks eşleşmesi bozulmamalıdır.
+    const rectRows = (group.cfg.rows || []).filter((r) => (r.operation || 'offset') === 'offset');
     rectRows.forEach((r, rowIdx) => {
       const layerName = `4_ISLEME_${label}T${r.toolNo || rowIdx + 1}`;
+      // rectRows is the OFFSET-only list, so it must be the row list handed to
+      // getAdaptiveRowPartCoords too — passing group.cfg.rows with a filtered index
+      // shifted every contour by the derz/carving rows sitting before it.
       const validCoords = getAdaptiveRowPartCoords(
         group.parts,
-        group.cfg.rows,
+        rectRows,
         rowIdx,
         group.cfg.offsetMode || 'relative'
       );
@@ -888,11 +971,18 @@ export function buildNestingPlateDxf(plate, cfg = {}, presetMap = {}) {
         addRectLines(layerName, x1, y1, x2, y2);
       });
     });
+    // Carving profilleri: sabit offset'li kapalı V-bıçak profili (dikdörtgen).
+    (group.cfg.rows || []).filter((r) => r.operation === 'carving').forEach((r, cIdx) => {
+      const layerName = `4_ISLEME_${label}T${r.toolNo || cIdx + 1}`;
+      const o = Number(r.stepOffset) || 0;
+      group.parts.forEach((part) => {
+        addRectLines(layerName, part.x + o, part.y + o, part.x + part.placedWidth - o, part.y + part.placedHeight - o);
+      });
+    });
   });
 
-  // Derz satırları: her parçanın kendi ölçüsüne göre hesaplanan eşit aralıklı
-  // bölme çizgileri — G-code üretimindekiyle aynı parametreler (DXF kontrolü de
-  // gerçek kesimi görsün diye).
+  // Derz satırları: G-code ile BİREBİR aynı geometri (buildPartDerzGeometry),
+  // böylece kontrol/ölçüm gerçek kesimi görür.
   profileGroups.forEach((group) => {
     const label = groupLabel(group);
     const groupOffsetRows = (group.cfg.rows || []).filter((rr) => (rr.operation || 'offset') !== 'derz' && rr.operation !== 'carving');
@@ -901,24 +991,12 @@ export function buildNestingPlateDxf(plate, cfg = {}, presetMap = {}) {
       const layerName = `4_ISLEME_${label}T${r.toolNo || derzIdx + 1}`;
       const derz = r.derz || {};
       const prevOffset = derz.respectPreviousOffset === false ? 0 : (groupOffsetCums[groupOffsetCums.length - 1] || 0);
-      const vertical = (derz.yon || 'dikey') === 'dikey';
       group.parts.forEach((part) => {
-        const opts = {
-          width: part.placedWidth,
-          height: part.placedHeight,
-          yon: derz.yon || 'dikey',
-          margin: prevOffset + (Number(derz.margin) || 0),
-          spacing: Number(derz.spacing) || Number(r.stepOffset) || 60,
-          autoFit: derz.autoFit !== false,
-          edgeExtra: Number(derz.edgeExtra) || 0,
-        };
-        computeDerzPositions(opts).positions.forEach((pos) => {
-          if (vertical) {
-            addLine(layerName, part.x + pos, part.y, part.x + pos, part.y + part.placedHeight);
-          } else {
-            addLine(layerName, part.x, part.y + pos, part.x + part.placedWidth, part.y + pos);
-          }
-        });
+        buildPartDerzGeometry(part, r, groupOffsetRows, {
+          prevOffset,
+          topStyle: group.cfg.topStyle,
+          riseRatio: group.cfg.riseRatio,
+        }).segments.forEach((s) => addLine(layerName, s.x1, s.y1, s.x2, s.y2));
       });
     });
   });

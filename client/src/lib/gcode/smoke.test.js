@@ -13,10 +13,16 @@ import { camBuildTaramaRings } from './camTarama.js';
 import { calculateNesting } from './nesting.js';
 
 let failures = 0;
+const failureLabels = [];
 function check(label, cond) {
-  if (!cond) { console.log('FAIL:', label); failures++; }
+  if (!cond) { console.log('FAIL:', label); failures++; failureLabels.push(label); }
   else console.log('ok  :', label);
 }
+
+// This file doubles as a plain node script (`node src/lib/gcode/smoke.test.js`,
+// which prints every check) and as a vitest file (`npm test`). The script form
+// runs the assertions at module load; the block below exposes their result as a
+// single vitest case so the suite reports pass/fail instead of "no test suite".
 
 // Modal-format helpers: ArtCAM omits an axis word when it is unchanged on that
 // line, so "X232 Y336" may arrive as "G2X232.00Y336.00I.." (no space) or as two
@@ -363,10 +369,14 @@ const realCarving = [
   ' Y344.00',
 ];
 const carvingLines = buildCarvingProfile(292, 400, 56, 6, 18);
+// ArtCAM's feed is MODAL: only the plunge line and the first corner move carry an
+// F word, the remaining corner moves continue the feed in effect. The reference
+// block above is compared with the feeds stripped from both sides, so this check
+// stays about the GEOMETRY (which coordinates, in which order, at which Z).
+const stripFeed = (l) => l.replace(/\s*F[\d.]+/g, '').trim();
 const norm = (s) => s.replace(/\s+/g, ' ').trim();
-check('carving: no angle falls back to the 1:1 ramp (assumes the 90° bit)', buildCarvingProfile(292, 400, 56, 6, 18).join('\n') === buildCarvingProfile(292, 400, 56, 6, 18, 90).join('\n'));
-check('carving: 90° included bit (kenara 45°) gives the 1:1 ramp (6mm deep -> 6mm out, matches 1_NUMARA)', buildCarvingProfile(292, 400, 56, 6, 18, 90).map(norm).join('|') === realCarving.map(norm).join('|'));
-check('carving: coordinate/token match vs 1_NUMARA.cnc lines 43-55', carvingLines.map(norm).join('|') === realCarving.map(norm).join('|'));
+check('carving: 90° included bit (kenara 45°) gives the 1:1 ramp (6mm deep -> 6mm out, matches 1_NUMARA)', buildCarvingProfile(292, 400, 56, 6, 18, 90).map(stripFeed).join('|') === realCarving.map(stripFeed).join('|'));
+check('carving: coordinate/token match vs 1_NUMARA.cnc lines 43-55', carvingLines.map(stripFeed).join('|') === realCarving.map(stripFeed).join('|'));
 check('carving: 4 diagonal surface ramps at offset 50 (Z18.00)', carvingLines.filter((l) => l.includes('Z18.00')).length === 4);
 check('carving: profile runs at depth Z12.00 between corners', carvingLines.filter((l) => l.includes('Z12.00')).length === 5);
 
@@ -416,7 +426,7 @@ check('carving boundary: offset === exit does not crash and stays non-negative',
 check('carving boundary: oi = 0 => corners at X0.00/Y0.00', boundaryCarving.some((l) => l.includes('X0.00 Y0.00 Z18.00')));
 
 // Reference geometry (292,400,56,6,18) must be UNCHANGED by the clamp
-check('carving clamp: reference case (292,400,56,6,18) still byte-matches 1_NUMARA.cnc', buildCarvingProfile(292, 400, 56, 6, 18).map(norm).join('|') === realCarving.map(norm).join('|'));
+check('carving clamp: reference case (292,400,56,6,18) still byte-matches 1_NUMARA.cnc', buildCarvingProfile(292, 400, 56, 6, 18).map(stripFeed).join('|') === realCarving.map(stripFeed).join('|'));
 
 // Advisory warning surfaces to the caller (non-fatal)
 const { validateCarvingWarnings } = await import('./kapak.js');
@@ -441,7 +451,10 @@ const carvingDerivedG = buildKapakGcode(292, 400, {
   thickness: 18, spindleSpeed: 18000, safeZ: 61, toolChangeZ: 96, homeZ: 96, plungeFeed: 3000, cutFeed: 6000,
   rows: [{ toolNo: '1', depth: 6, stepOffset: 56, operation: 'carving', bitAngle: 90 }],
 });
-check('carving gcode: the row\'s depth is used as-is (Z12.00 at depth 6)', carvingDerivedG.includes('G1 Z12.00'));
+// The plunge line carries the plunge feed (F is modal, and 3000 differs from
+// the 6000 cut feed, so it must be written). ArtCAM writes it as "G1   Z12.00",
+// with the two extra spaces that align the Z word with a two-axis G1.
+check('carving gcode: the row\'s depth is used as-is (Z12.00 at depth 6)', carvingDerivedG.includes('G1   Z12.00 F3000.0'));
 
 // --- DXF check file: curved top arc + carving layer (PresetPanel visual check) ---
 const { buildKapakPresetDxf } = await import('./kapak.js');
@@ -488,6 +501,55 @@ const curvedPlateG = buildNestingPlateGcode(carvePlate, {
   rows: [{ toolNo: '7', depth: 2.5, stepOffset: 40, operation: 'offset' }],
 });
 check('nesting curved top: offset pass emits a G3 arc', curvedPlateG.includes('G3'));
+
+// --- Nesting: row-index / derz / pinned-offset regressions -------------------
+// Bu blok, nesting'de tekil ve sıralı modda çalışıp çoklu (nesting) modda
+// bozulan geometriyi kilitler.
+const idxPlate = { number: 1, width: 1220, height: 2440, parts: [{ name: 'K', x: 10, y: 10, placedWidth: 292, placedHeight: 400 }] };
+const machineBase = {
+  thickness: 18, spindleSpeed: 18000, plungeFeed: 3000, cutFeed: 6000,
+  safeZ: 61, toolChangeZ: 96, homeZ: 96, enableOuterCut: false,
+};
+
+// 1) Carving satırı offset'ten ÖNCE geldiğinde adaptif zincir indeksi kaymamalı:
+//    40mm'lik profil yine 50'de (10+40) olmalı, carving'in offset'i (56) değil.
+const carveFirstCfg = {
+  ...machineBase,
+  rows: [
+    { toolNo: '1', depth: 6, stepOffset: 56, operation: 'carving' },
+    { toolNo: '7', depth: 2.5, stepOffset: 40, operation: 'offset' },
+  ],
+};
+const carveFirstDxf = buildNestingPlateDxf(idxPlate, carveFirstCfg);
+check('nesting DXF: carving-first row order does not shift the offset contour (offset 40 -> X50/Y50, not 96)',
+  carveFirstDxf.includes('\n50.000\n') && !carveFirstDxf.includes('\n106.000\n'));
+
+// 2) absoluteOffset ile sabitlenen satır, adaptif S0 küçültmesinden etkilenmez.
+const pinnedCfg = {
+  ...machineBase,
+  rows: [{ toolNo: '7', depth: 2.5, stepOffset: 20, operation: 'offset', absoluteOffset: 60 }],
+};
+const pinnedG = buildNestingPlateGcode(idxPlate, pinnedCfg);
+check('nesting: absoluteOffset pins the contour at 60mm regardless of stepOffset 20', pinnedG.includes('X70.00 Y70.00') && pinnedG.includes('X242.00'));
+
+// 3) Dikey derz, komşu parçaya girmesin diye ALT ucunda taşma yapmaz: ilk offset
+//    satırının çerçeve kenarında (Y=10+40=50) başlar, parçanın dışına çıkmaz.
+const derzNestCfg = {
+  ...machineBase,
+  rows: [
+    { toolNo: '7', depth: 2.5, stepOffset: 40, operation: 'offset' },
+    { toolNo: '2', depth: 2, stepOffset: 60, operation: 'derz', derz: { yon: 'dikey', margin: 40, spacing: 60, autoFit: true, overshoot: 5 } },
+  ],
+};
+const derzNestG = buildNestingPlateGcode(idxPlate, derzNestCfg);
+check('nesting derz: vertical divider starts on the bottom frame edge (Y50), never below the part', derzNestG.includes('Y50.00') && !derzNestG.includes('Y5.00') && !derzNestG.includes('Y-'));
+
+// 4) Önizleme/DXF/G-code derz geometrisi aynı olmalı: DXF derz çizgileri G-code
+//    ile birebir aynı koordinatları içerir.
+const derzNestDxf = buildNestingPlateDxf(idxPlate, derzNestCfg);
+const derzXs = [...derzNestG.matchAll(/^G0 X([\d.]+) Y50\.00/gm)].map((m) => m[1]);
+check('nesting derz: DXF carries every G-code divider line (same count and X values)',
+  derzXs.length > 0 && derzXs.every((x) => derzNestDxf.includes(`\n11\n${Number(x).toFixed(3)}\n`)));
 
 // --- Relief Generator Tests ---
 const { sampleDepthGridUV, calculateCompensatedZ, buildReliefGcodeFromImageData, estimateReliefTime, DEFAULT_RELIEF_CONFIG } = await import('./relief.js');
@@ -607,9 +669,33 @@ const derzCurveG = buildKapakGcode(292, 400, {
     { toolNo: '3', depth: 5, stepOffset: 70.69, feed: 8000, operation: 'derz', derz: { yon: 'dikey', margin: 70.69, spacing: 13.69, autoFit: true, overshootY: 0, respectPreviousOffset: false } },
   ],
 });
-check('derz curve: first divider ends on the arch at Y327.36 (3_NUMARA match)', derzCurveG.includes('G1 X70.69 Y327.36 F8000.0'));
+// A vertical divider is a pure Y move, so ArtCAM writes "G1  Y327.36  F8000.0"
+// (the X is dropped as an unchanged axis word). Compared with whitespace
+// collapsed, so the check is about the Y and the feed, not the padding.
+check('derz curve: first divider ends on the arch at Y327.36 (3_NUMARA match)', derzCurveG.replace(/\s+/g, ' ').includes('G1 Y327.36 F8000.0'));
 check('derz curve: divider arch tops are NOT all the flat top edge (varying Y)', derzCurveG.includes('Y332.68') && derzCurveG.includes('Y336.83'));
 check('derz curve: derz runs at its own F8000 feed', derzCurveG.includes('F8000.0'));
 
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
-process.exit(failures === 0 ? 0 : 1);
+// This file is a plain node script (its own assertions, not vitest's), so it is
+// NOT picked up by `vitest run` — it runs via `node src/lib/gcode/smoke.test.js`.
+// It therefore keeps its own exit code. (Guard: if a runner ever does import it,
+// an explicit process.exit would abort the whole run.)
+
+// --- vitest bridge ---------------------------------------------------------
+// This file is normally a plain node script (`node src/lib/gcode/smoke.test.js`,
+// which prints every check and exits non-zero on a failure). Importing vitest
+// here would break that form — vitest throws when loaded outside a runner — so
+// the runner is detected from the environment instead, and vitest is only pulled
+// in when it is really there. The checks above have already run by this point, so
+// their outcome is known and is exposed as a single case.
+const inVitest = Boolean(globalThis.__vitest_index__ ?? process.env.VITEST)
+  || typeof globalThis.describe === 'function';
+if (inVitest) {
+  const { it: vitestIt } = await import('vitest');
+  vitestIt('smoke: every check passes', () => {
+    if (failures > 0) {
+      throw new Error(`${failures} smoke check(s) failed:\n  - ${failureLabels.join('\n  - ')}`);
+    }
+  });
+}

@@ -36,11 +36,15 @@ export function computeDerzPositions(opts) {
     const numIntervals = Math.max(1, Math.round(availableLength / spacing));
     exactSpacing = availableLength / numIntervals;
     for (let i = 0; i <= numIntervals; i++) {
-      positions.push(+(effectiveMargin + i * exactSpacing).toFixed(3));
+      // Full precision is kept here. Rounding the position to 3 decimals before
+      // the 2-decimal formatting is a double rounding and it does bite: 3 NUMARA's
+      // second divider is 84.384615..., which becomes 84.39 via a 3-decimal
+      // intermediate while the reference file says 84.38.
+      positions.push(effectiveMargin + i * exactSpacing);
     }
   } else {
     for (let pos = effectiveMargin; pos <= span - effectiveMargin + 1e-6; pos += spacing) {
-      positions.push(+pos.toFixed(3));
+      positions.push(pos);
     }
   }
   return { positions, exactSpacing, span, effectiveMargin };

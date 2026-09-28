@@ -1,6 +1,6 @@
 [
   {
-    "_id": "local_1790152683967_yjl1yc",
+    "_id": "local_1790351461941_l0nv9k",
     "category": "kapak",
     "imageDataUrl": "",
     "previewWidth": 292,
@@ -67,12 +67,12 @@
         "bitAngle": 90
       },
       {
-        "toolNo": "6",
+        "toolNo": "1",
         "depth": 6,
         "stepOffset": 70,
         "absoluteOffset": 70,
         "feed": 6000,
-        "name": "düz bitirme pası (carving sonrası)",
+        "name": "düz bitirme pası (carving sonrası, T1 devamı)",
         "operation": "offset"
       },
       {
@@ -93,18 +93,18 @@
         }
       }
     ],
-    "createdAt": "2026-09-23T08:38:03.966Z",
-    "updatedAt": "2026-09-23T08:38:03.966Z"
+    "createdAt": "2026-09-25T15:51:01.940Z",
+    "updatedAt": "2026-09-25T15:51:01.940Z"
   },
   {
-    "_id": "local_1790152683970_oocz4r",
+    "_id": "local_1790351461944_w7vjkw",
     "category": "kapak",
     "imageDataUrl": "",
     "previewWidth": 292,
     "previewHeight": 400,
     "name": "2 NUMARA",
     "module": "kapak",
-    "description": "Kemerli (yarım daire) üst + derz. 2_NUMARA.cnc ile xc=146 / r=86 / yc=254 doğrulandı. Derz: X çizgileri 60/90.67/121.33/152 (eşit 30.667mm aralık). Derz üst ucu kemer eğrisini takip eder (curve.yEnd), dosyadaki gibi Y326.66/338.62 noktalarında biter.",
+    "description": "Kemerli (yarım daire) üst + derz. 2_NUMARA.cnc ile xc=146 / r=86 / yc=254 doğrulandı. Derz: X çizgileri 100/130.67/161.33/192 (eşit 30.667mm aralık). Derz üst ucu kemer eğrisini takip eder (curve.yEnd), dosyadaki gibi Y326.66/338.62 noktalarında biter.",
     "thickness": 18,
     "spindleSpeed": 18000,
     "safeZ": 46,
@@ -150,18 +150,18 @@
         }
       }
     ],
-    "createdAt": "2026-09-23T08:38:03.970Z",
-    "updatedAt": "2026-09-23T08:38:03.970Z"
+    "createdAt": "2026-09-25T15:51:01.944Z",
+    "updatedAt": "2026-09-25T15:51:01.944Z"
   },
   {
-    "_id": "local_1790152683972_7hblrh",
+    "_id": "local_1790351461951_uh5wac",
     "category": "kapak",
     "imageDataUrl": "",
     "previewWidth": 292,
     "previewHeight": 400,
     "name": "3 NUMARA",
     "module": "kapak",
-    "description": "Sivri/basık kemer üst (riseRatio 0.125) + derz. 3_NUMARA.cnc G3 yayı ve derz bitiş noktası (Y327.36) doğrulandı. Derz: X çizgileri 70.69/84.38/... eşit 13.69mm aralık; çizgiler alttan dış çerçeve offsetinden (Y57) başlar ve kemer eğrisini takip ederek Y327.36/332.68/336.83 noktalarında biter.",
+    "description": "Sivri/basık kemer üst (riseRatio 0.125) + derz. 3_NUMARA.cnc G3 yayı (J-166.87, tam değer -166.875 sıfıra doğru yuvarlanır) ve derz bitiş noktası (Y327.36) doğrulandı. Derz çizgileri dış çerçevenin (X57..X235) 13 eşit aralığa bölünmesinden gelir: adım (235-57)/13 = 13.6923..., çizgiler 57 + k*adım (k=1..12) yani 70.69/84.38/.../193.92/207.62/221.31. Presette margin/spacing tam değerleriyle tutulur, yuvarlanmış değerler 0.01mm sapma verir. Çizgiler alttan dış çerçeve offsetinden (Y57) başlar ve kemer eğrisini takip ederek Y327.36/332.68/336.83 noktalarında biter.",
     "thickness": 18,
     "spindleSpeed": 18000,
     "safeZ": 46,
@@ -191,19 +191,19 @@
         "operation": "derz",
         "derz": {
           "yon": "dikey",
-          "margin": 70.69,
-          "spacing": 13.69,
+          "margin": 70.69230769230769,
+          "spacing": 13.692307692307692,
           "autoFit": true,
           "overshootY": 0,
           "respectPreviousOffset": false
         }
       }
     ],
-    "createdAt": "2026-09-23T08:38:03.972Z",
-    "updatedAt": "2026-09-23T08:38:03.972Z"
+    "createdAt": "2026-09-25T15:51:01.951Z",
+    "updatedAt": "2026-09-25T15:51:01.951Z"
   },
   {
-    "_id": "local_1790152683974_4za077",
+    "_id": "local_1790351461954_izn7g5",
     "category": "kapak",
     "imageDataUrl": "",
     "previewWidth": 292,
@@ -256,11 +256,11 @@
         "absoluteOffset": 74
       }
     ],
-    "createdAt": "2026-09-23T08:38:03.974Z",
-    "updatedAt": "2026-09-23T08:38:03.974Z"
+    "createdAt": "2026-09-25T15:51:01.954Z",
+    "updatedAt": "2026-09-25T15:51:01.954Z"
   },
   {
-    "_id": "local_1790152683976_bn4dam",
+    "_id": "local_1790351461957_chc80n",
     "category": "kapak",
     "imageDataUrl": "",
     "previewWidth": 292,
@@ -313,11 +313,11 @@
         "absoluteOffset": 75
       }
     ],
-    "createdAt": "2026-09-23T08:38:03.976Z",
-    "updatedAt": "2026-09-23T08:38:03.976Z"
+    "createdAt": "2026-09-25T15:51:01.957Z",
+    "updatedAt": "2026-09-25T15:51:01.957Z"
   },
   {
-    "_id": "local_1790152683978_y8f7da",
+    "_id": "local_1790351461962_er7ftm",
     "category": "kapak",
     "imageDataUrl": "",
     "previewWidth": 292,
@@ -343,6 +343,7 @@
         "feed": 9000,
         "name": "135° iç halka 1",
         "operation": "offset",
+        "repeatStartY": true,
         "absoluteOffset": 139.1
       },
       {
@@ -353,6 +354,7 @@
         "chain": true,
         "name": "135° halka 2",
         "operation": "offset",
+        "repeatStartY": true,
         "absoluteOffset": 115.4
       },
       {
@@ -363,6 +365,7 @@
         "chain": true,
         "name": "135° halka 3",
         "operation": "offset",
+        "repeatStartY": true,
         "absoluteOffset": 91.7
       },
       {
@@ -384,18 +387,18 @@
         "absoluteOffset": 53
       }
     ],
-    "createdAt": "2026-09-23T08:38:03.978Z",
-    "updatedAt": "2026-09-23T08:38:03.978Z"
+    "createdAt": "2026-09-25T15:51:01.962Z",
+    "updatedAt": "2026-09-25T15:51:01.962Z"
   },
   {
-    "_id": "local_1790152683980_ipl4fg",
+    "_id": "local_1790351461965_3xeujg",
     "category": "kapak",
     "imageDataUrl": "",
     "previewWidth": 292,
     "previewHeight": 400,
     "name": "8 NUMARA",
     "module": "kapak",
-    "description": "Rounded-corner (G2 köşe yaylı) T8 offset + düz T3/T12. 8_NUMARA.cnc köşe yayları doğrulandı (I4J0 / I0J-4 / I-4J-0). DİKKAT: dosyadaki BL köşesi bir yuvarlatma yayı değil, ArtCAM'in 45° teğetsel dalış (lead-in/lead-out) rampasıdır (R=4.002, merkez köşe çemberinde değil); bu motor yerine temiz 90° köşe yayı üretir — tezgâhta geometrik olarak eşdeğer ve daha pürüzsüzdür. Bıçak-başı feed (T3→F8000, T8/T12→F9000).",
+    "description": "Rounded-corner (G2 köşe yaylı) T8 offset + düz T3/T12. 8_NUMARA.cnc köşe yayları doğrulandı (I4J0 / I0J-4 / I-4J-0). T8 bloğunun BL köşesi temiz 90° yay değil, ArtCAM'in 45° teğetsel dalış rampasıdır: G0 X65.67 Y65.67 -> G2X64.50Y68.50I2.83J2.83 (yarıçap 2.828 = r*sqrt(2)/2, merkez BL köşe çemberinde) — bu motor aynı yolu birebir üretir. Bıçak-başı feed (T3→F8000, T8/T12→F9000).",
     "thickness": 18,
     "spindleSpeed": 18000,
     "safeZ": 46,
@@ -413,8 +416,7 @@
         "stepOffset": 57,
         "feed": 8000,
         "name": "düz dış offset",
-        "operation": "offset",
-        "absoluteOffset": 57
+        "operation": "offset"
       },
       {
         "toolNo": "8",
@@ -422,8 +424,7 @@
         "stepOffset": 60,
         "feed": 9000,
         "name": "düz kaba offset",
-        "operation": "offset",
-        "absoluteOffset": 60
+        "operation": "offset"
       },
       {
         "toolNo": "8",
@@ -432,8 +433,7 @@
         "cornerRadius": 4,
         "feed": 9000,
         "name": "yuvarlak köşe offset",
-        "operation": "offset",
-        "absoluteOffset": 64.5
+        "operation": "offset"
       },
       {
         "toolNo": "12",
@@ -441,11 +441,10 @@
         "stepOffset": 68.5,
         "feed": 9000,
         "name": "135° iç",
-        "operation": "offset",
-        "absoluteOffset": 68.5
+        "operation": "offset"
       }
     ],
-    "createdAt": "2026-09-23T08:38:03.980Z",
-    "updatedAt": "2026-09-23T08:38:03.980Z"
+    "createdAt": "2026-09-25T15:51:01.965Z",
+    "updatedAt": "2026-09-25T15:51:01.965Z"
   }
 ]

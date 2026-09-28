@@ -145,6 +145,7 @@ export default function KapakModule({ activeOp = 'single', onBackToMenu }) {
             thickness={machineCfg.thickness}
             offsetMode={machineCfg.offsetMode}
             setOffsetMode={(mode) => setMachineCfg((c) => ({ ...c, offsetMode: mode }))}
+            setCfg={setMachineCfg}
           />
         </div>
       </div>

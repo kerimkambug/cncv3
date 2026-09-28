@@ -8,10 +8,11 @@ import {
   estimateNestingTime,
   parseNestImportText,
   groupNestingPartsByPreset,
+  getAdaptiveRowPartCoords,
+  buildPartDerzGeometry,
 } from '../../lib/gcode/nesting.js';
-import { calculateAdaptiveOffsets, validateCarvingWarnings } from '../../lib/gcode/kapak.js';
+import { validateCarvingWarnings, computeTopCurve } from '../../lib/gcode/kapak.js';
 import { computeCumOffsets } from '../../lib/gcode/common.js';
-import { computeDerzPositions } from '../../lib/gcode/derz.js';
 import { useCtrlEnter } from '../../hooks/useCtrlEnter.js';
 import { usePresets } from '../../hooks/usePresets.js';
 
@@ -21,12 +22,6 @@ function hashHue(str) {
   let h = 0;
   for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) & 0xffffffff;
   return Math.abs(h) % 360;
-}
-
-function crispRect(x, y, w, h) {
-  const x1 = Math.round(x), y1 = Math.round(y);
-  const x2 = Math.round(x + w), y2 = Math.round(y + h);
-  return { x: x1 + 0.5, y: y1 + 0.5, w: Math.max(1, x2 - x1 - 1), h: Math.max(1, y2 - y1 - 1) };
 }
 
 export default function NestingPanel({ cfg, plateCfg }) {
@@ -297,32 +292,37 @@ export default function NestingPanel({ cfg, plateCfg }) {
 
     const plate = result.plates[selectedPlateIndex] || result.plates[0];
     // Keep the real plate aspect ratio. Do not force minimum canvas dimensions:
-    // that distorted vertical plates such as 2100 × 2800.
-    const maxW = 900, maxH = 700;
-    const scale = Math.min(maxW / result.plateW, maxH / result.plateH);
-    canvas.width = Math.max(1, Math.round(result.plateW * scale));
-    canvas.height = Math.max(1, Math.round(result.plateH * scale));
+    // that distorted vertical plates such as 2100 x 2800.
+    // Backstore is rendered at devicePixelRatio (and never below 2x) so that the
+    // canvas, which CSS stretches to 100% width, stays sharp instead of being an
+    // upscaled blur — that blur is what made the drawing "look wrong" even when
+    // the numbers were right.
+    const maxW = 1100, maxH = 900;
+    const dpr = Math.max(2, Math.min(3, (typeof window !== 'undefined' && window.devicePixelRatio) || 1));
+    const s = Math.min(maxW / result.plateW, maxH / result.plateH) * dpr;
+    canvas.width = Math.max(1, Math.round(result.plateW * s));
+    canvas.height = Math.max(1, Math.round(result.plateH * s));
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = '#171a21';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.strokeStyle = '#4f8cff';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2 * dpr;
     ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
 
     // 1. Draw Parts
     plate.parts.forEach((part, idx) => {
-      const x = part.x * scale, y = part.y * scale;
-      const w = part.placedWidth * scale, h = part.placedHeight * scale;
-      const r = crispRect(x, y, w, h);
+      const x = part.x * s, y = part.y * s;
+      const w = part.placedWidth * s, h = part.placedHeight * s;
 
       ctx.strokeStyle = `hsl(${hashHue(part.name)} 70% 62%)`;
-      ctx.lineWidth = 1;
-      ctx.strokeRect(r.x, r.y, r.w, r.h);
+      ctx.lineWidth = 1.5 * dpr;
+      // Parça sınırı dahi TAM ölçüde çizilir (piksel yuvarlama yok).
+      ctx.strokeRect(x, y, w, h);
 
       ctx.fillStyle = '#e6e8ec';
-      ctx.font = `${Math.max(9, Math.min(13, Math.min(w, h) / 7))}px sans-serif`;
+      ctx.font = `${Math.max(9, Math.min(13, Math.min(w, h) / 7)) * dpr}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
@@ -336,15 +336,15 @@ export default function NestingPanel({ cfg, plateCfg }) {
       if (enableOuterCut) {
         const cutToolRadius = (parseFloat(cutToolDia) || 6) / 2;
         ctx.strokeStyle = '#2fd08a';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([4, 3]);
+        ctx.lineWidth = 1.5 * dpr;
+        ctx.setLineDash([4 * dpr, 3 * dpr]);
         plate.parts.forEach((part) => {
-          const x1 = (part.x - cutToolRadius) * scale;
-          const y1 = (part.y - cutToolRadius) * scale;
-          const w2 = (part.placedWidth + 2 * cutToolRadius) * scale;
-          const h2 = (part.placedHeight + 2 * cutToolRadius) * scale;
-          const cr = crispRect(x1, y1, w2, h2);
-          ctx.strokeRect(cr.x, cr.y, cr.w, cr.h);
+          const x1 = (part.x - cutToolRadius) * s;
+          const y1 = (part.y - cutToolRadius) * s;
+          const w2 = (part.placedWidth + 2 * cutToolRadius) * s;
+          const h2 = (part.placedHeight + 2 * cutToolRadius) * s;
+          // Bıçak yarıçapı kadar dışarıdan — TAM ölçüde, yuvarlama yok.
+          ctx.strokeRect(x1, y1, w2, h2);
         });
         ctx.setLineDash([]);
       }
@@ -360,84 +360,78 @@ export default function NestingPanel({ cfg, plateCfg }) {
 
         offsetRows.forEach((r, rowIdx) => {
           ctx.strokeStyle = `hsl(${(rowIdx * 67 + hueShift) % 360} 90% 62%)`;
-          ctx.lineWidth = 1;
+          ctx.lineWidth = 1.25 * dpr;
 
-          group.parts.forEach((part) => {
-            const adaptiveRows = calculateAdaptiveOffsets(
-              part.placedWidth,
-              part.placedHeight,
-              offsetRows,
-              groupCfg.offsetMode || 'relative'
-            );
-            const adRow = adaptiveRows[rowIdx];
-            if (!adRow || adRow.skipped) return;
-
-            const x1 = (part.x + adRow.leftOffset) * scale;
-            const y1 = (part.y + adRow.bottomOffset) * scale;
-            const w2 = (part.placedWidth - adRow.leftOffset - adRow.rightOffset) * scale;
-            const h2 = (part.placedHeight - adRow.bottomOffset - adRow.topOffset) * scale;
-            const cr = crispRect(x1, y1, w2, h2);
+          // Profil koordinatları G-code ile BİREBİR aynı kaynaktan
+          // (getAdaptiveRowPartCoords) gelir: hem indeks eşleşmesi hem de
+          // absoluteOffset ile sabitlenen satırlar aynı davranır.
+          const coords = getAdaptiveRowPartCoords(
+            group.parts,
+            offsetRows,
+            rowIdx,
+            groupCfg.offsetMode || 'relative'
+          );
+          coords.forEach(({ x1, y1, x2, y2 }) => {
+            const px = x1 * s, py = y1 * s, pw = (x2 - x1) * s, ph = (y2 - y1) * s;
             if (groupCfg.topStyle && groupCfg.topStyle !== 'flat') {
-              // Draw the curved top edge (approximate) instead of a flat rectangle top.
-              const xc = part.x + part.placedWidth / 2;
-              const yt = (part.y + part.placedHeight - adRow.topOffset) * scale;
-              ctx.beginPath();
-              ctx.moveTo(cr.x, cr.y);
-              ctx.lineTo(cr.x + cr.w, cr.y);
-              ctx.lineTo(cr.x + cr.w, yt);
-              ctx.quadraticCurveTo(xc * scale, yt + adRow.topOffset * scale, cr.x, yt);
-              ctx.closePath();
-              ctx.stroke();
-            } else {
-              ctx.strokeRect(cr.x, cr.y, cr.w, cr.h);
+              // Gerçek kemer geometrisi: yEnd() ile üst kenarı nokta nokta çiz.
+              const curve = computeTopCurve(x1, x2, y2, groupCfg.topStyle, groupCfg.riseRatio);
+              if (curve) {
+                ctx.beginPath();
+                ctx.moveTo(px, py);
+                // Kiriş yarıçapı ne kadar büyükse o kadar çok örnek gerekir;
+                // sabit 24 nokta geniş yaylarda köşeli gösteriyordu.
+                const steps = Math.max(24, Math.min(240, Math.ceil(curve.r)));
+                for (let i = 1; i <= steps; i++) {
+                  const xx = x1 + ((x2 - x1) * i) / steps;
+                  ctx.lineTo(xx * s, curve.yEnd(xx) * s);
+                }
+                ctx.lineTo(px + pw, py + ph);
+                ctx.lineTo(px, py + ph);
+                ctx.closePath();
+                ctx.stroke();
+                return;
+              }
             }
+            ctx.strokeRect(px, py, pw, ph);
           });
         });
 
         // Carving profilleri (tek çizgi, V-bıçak)
         carvingRows.forEach((r) => {
           ctx.strokeStyle = `hsl(${(320 + hueShift) % 360} 85% 62%)`;
-          ctx.lineWidth = 1;
+          ctx.lineWidth = 1.25 * dpr;
           const o = Number(r.stepOffset) || 0;
           group.parts.forEach((part) => {
-            const x1 = (part.x + o) * scale;
-            const y1 = (part.y + o) * scale;
-            const x2 = (part.x + part.placedWidth - o) * scale;
-            const y2 = (part.y + part.placedHeight - o) * scale;
-            const cr = crispRect(x1, y1, x2 - x1, y2 - y1);
-            ctx.strokeRect(cr.x, cr.y, cr.w, cr.h);
+            const x1 = (part.x + o) * s;
+            const y1 = (part.y + o) * s;
+            const x2 = (part.x + part.placedWidth - o) * s;
+            const y2 = (part.y + part.placedHeight - o) * s;
+            ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
           });
         });
 
-        // Derz satırları (bölme çizgileri) — G-code ile aynı parametreler.
+        // Derz satırları (bölme çizgileri) — G-code ile aynı geometri.
         const derzRows = (groupCfg.rows || []).filter((r) => r.operation === 'derz');
         const groupOffsetCums = offsetRows.length ? computeCumOffsets(offsetRows, groupCfg.offsetMode || 'relative') : [];
         derzRows.forEach((r, derzIdx) => {
           ctx.strokeStyle = `hsl(${(30 + derzIdx * 47 + hueShift) % 360} 90% 60%)`;
-          ctx.lineWidth = 1;
-          ctx.setLineDash([6, 3]);
+          ctx.lineWidth = 1.25 * dpr;
+          ctx.setLineDash([6 * dpr, 3 * dpr]);
           const derz = r.derz || {};
           const prevOffset = derz.respectPreviousOffset === false ? 0 : (groupOffsetCums[groupOffsetCums.length - 1] || 0);
-          const vertical = (derz.yon || 'dikey') === 'dikey';
           group.parts.forEach((part) => {
-            const opts = {
-              width: part.placedWidth,
-              height: part.placedHeight,
-              yon: derz.yon || 'dikey',
-              margin: prevOffset + (Number(derz.margin) || 0),
-              spacing: Number(derz.spacing) || Number(r.stepOffset) || 60,
-              autoFit: derz.autoFit !== false,
-              edgeExtra: Number(derz.edgeExtra) || 0,
-            };
-            computeDerzPositions(opts).positions.forEach((pos) => {
+            buildPartDerzGeometry(part, r, offsetRows, {
+              prevOffset,
+              topStyle: groupCfg.topStyle,
+              riseRatio: groupCfg.riseRatio,
+            }).segments.forEach((seg) => {
+              // Gölge değişken çakışması: `s` canvas ölçeği, segment nesnesi
+              // asla `s` adıyla almaz (önceki hâli segmenti ölçek sanıp
+              // NaN üretiyordu).
               ctx.beginPath();
-              if (vertical) {
-                ctx.moveTo((part.x + pos) * scale, part.y * scale);
-                ctx.lineTo((part.x + pos) * scale, (part.y + part.placedHeight) * scale);
-              } else {
-                ctx.moveTo(part.x * scale, (part.y + pos) * scale);
-                ctx.lineTo((part.x + part.placedWidth) * scale, (part.y + pos) * scale);
-              }
+              ctx.moveTo(seg.x1 * s, seg.y1 * s);
+              ctx.lineTo(seg.x2 * s, seg.y2 * s);
               ctx.stroke();
             });
           });

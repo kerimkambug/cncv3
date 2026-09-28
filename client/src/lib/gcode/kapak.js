@@ -6,6 +6,37 @@ import { computeDerzPositions } from './derz.js';
 export const DEG2RAD = Math.PI / 180;
 
 /**
+ * ArtCAM 2008 rounds an exact .xx5 tie TOWARD ZERO (-166.875 -> -166.87), while
+ * JS's toFixed breaks it away from zero (-> -166.88). Nudging the value a hair
+ * toward zero first turns the tie into a strict round-down case. The nudge is
+ * 1e-9 mm - a billionth of a micron, far below the machine's resolution, so it
+ * can only ever matter in the tie case.
+ *
+ * Scope: the kapak module only. Panjur/cam/daire keep calling the shared fmt()
+ * and their output is byte-for-byte unchanged.
+ */
+function snapTie(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return v;
+  return v - Math.sign(v) * 1e-9;
+}
+
+/** Coordinate formatter that matches ArtCAM's tie rounding (2 decimals). */
+export const kfmt = (n) => fmt(snapTie(n));
+
+/**
+ * Arc I/J offset formatter. I/J are the arc-centre offsets from the actual arc
+ * start, which is mathematically zero on several of the corner arcs. ArtCAM
+ * prints a signed epsilon there ("I-0.00", "J-0.00"); the sign is its own
+ * rounding residue and is NOT uniform between models or even between passes of
+ * the same model, so it is not derivable from the geometry and is not
+ * reproduced. The normalising comparison treats -0.00 and 0.00 as equal.
+ */
+function arcOffset(n) {
+  return fmt(snapTie(n));
+}
+
+/**
  * A V-bit is quoted by its INCLUDED (full) angle — the angle between its two
  * flanks: 60°, 90°, 120°… The angle each flank makes with the part edge is half
  * of that, and that half-angle is what the cut geometry uses.
@@ -188,24 +219,25 @@ export function emitTopCurveGcode(lines, curve, z, feed) {
   // emits "J-0.00"), because the arc centre sits a hair BELOW the start point once
   // the radius is rounded — the machine reads "-0.00" as 0. Only an exact zero is
   // normalised here; a small negative must keep its sign to match the reference.
-  const jz = (n) => fmt(n === 0 ? 0 : n);
+  const jz = (n) => arcOffset(n);
 
   if (topStyle === 'semicircle') {
     // The caller leaves the tool on the bottom edge at (xr, y1), so first run up the
     // right edge to where the arc actually begins (xr, yc) — the reference does this
     // with its own "Y254.00" move before the first G3 (2_NUMARA.cnc).
     // Then two quarter arcs: right edge -> apex -> left edge.
-    lines.push(` Y${fmt(yEnd(xr))} `);
-    lines.push(`G3X${fmt(xc)}Y${fmt(yc + r)}I${fmt(iOf(xr))}J${jz(jOf(yEnd(xr)))}F${Number(feed || 0).toFixed(1)}`);
-    lines.push(`G3X${fmt(xl)}Y${fmt(yEnd(xl))}I${fmt(iOf(xc))}J${jz(jOf(yc + r))}`);
+    lines.push(` Y${kfmt(yEnd(xr))} `);
+    lines.push(`G3X${kfmt(xc)}Y${kfmt(yc + r)}I${arcOffset(iOf(xr))}J${arcOffset(jOf(yEnd(xr)))}F${Number(feed || 0).toFixed(1)}`);
+    lines.push(`G3X${kfmt(xl)}Y${kfmt(yEnd(xl))}I${arcOffset(iOf(xc))}J${arcOffset(jOf(yc + r))}`);
     return lines;
   }
 
   // 'pointed': single arc between the two shoulders, apex at yt = yc + r.
   // Sweep right shoulder -> left shoulder over the shallow top
-  // (matches 3_NUMARA.cnc: G3X57.00I-89.00J-166.87).
-  lines.push(`G1 X${fmt(xr)} Y${fmt(yShoulder)}`);
-  lines.push(`G3X${fmt(xl)}Y${fmt(yShoulder)}I${fmt(iOf(xr))}J${jz(jOf(yShoulder))}F${Number(feed || 0).toFixed(1)}`);
+  // (matches 3_NUMARA.cnc: G3X57.00I-89.00J-166.87, where J is the tie-rounded
+  // -166.875, see snapTie).
+  lines.push(`G1 X${kfmt(xr)} Y${kfmt(yShoulder)} `);
+  lines.push(`G3X${kfmt(xl)}Y${kfmt(yShoulder)}I${arcOffset(iOf(xr))}J${jz(jOf(yShoulder))}F${Number(feed || 0).toFixed(1)}`);
   return lines;
 }
 
@@ -247,8 +279,8 @@ export function emitTopCurveGcode(lines, curve, z, feed) {
  */
 export function buildRoundedRectProfile(x1, y1, x2, y2, r, z, plungeFeed, cutFeed, safeZ, ox = 0, oy = 0, chained = false) {
   const rr = Number(r) || 0;
-  const px = (v) => fmt(v + ox);
-  const py = (v) => fmt(v + oy);
+  const px = (v) => kfmt(v + ox);
+  const py = (v) => kfmt(v + oy);
   const pf = Number(plungeFeed).toFixed(1);
   const cf = Number(cutFeed).toFixed(1);
   // If the two sides are too short for the requested radius, clamp it so the
@@ -304,23 +336,23 @@ export function buildRoundedRectProfile(x1, y1, x2, y2, r, z, plungeFeed, cutFee
   }
   // BL corner arc: 45-deg point -> the left tangent point (x1, y1+rad).
   // No G1 between lead-in and arc (the real files go straight G2).
-  lines.push(`G2X${px(x1)}Y${py(y1 + rad)}I${fmt(k)}J${fmt(k)}F${cf}`);
+  lines.push(`G2X${px(x1)}Y${py(y1 + rad)}I${arcOffset(k)}J${arcOffset(k)}F${cf}`);
   // Left edge up to the top-left tangent point — modal G1, bare axis word.
   lines.push(`G1  Y${py(y2 - rad)}  `);
   // TL corner arc onto the top edge.
-  lines.push(`G2X${px(x1 + rad)}Y${py(y2)}I${fmt(rad)}J${fmt(0)}`);
+  lines.push(`G2X${px(x1 + rad)}Y${py(y2)}I${arcOffset(rad)}J${arcOffset(0)}`);
   // Top edge across to the top-right tangent point.
   lines.push(`G1 X${px(x2 - rad)}   `);
   // TR corner arc down onto the right edge.
-  lines.push(`G2X${px(x2)}Y${py(y2 - rad)}I${fmt(0)}J${fmt(-rad)}`);
+  lines.push(`G2X${px(x2)}Y${py(y2 - rad)}I${arcOffset(0)}J${arcOffset(-rad)}`);
   // Right edge down to the bottom-right tangent point.
   lines.push(`G1  Y${py(y1 + rad)}  `);
   // BR corner arc onto the bottom edge.
-  lines.push(`G2X${px(x2 - rad)}Y${py(y1)}I${fmt(-rad)}J${fmt(0)}`);
+  lines.push(`G2X${px(x2 - rad)}Y${py(y1)}I${arcOffset(-rad)}J${arcOffset(0)}`);
   // Bottom edge across to the bottom-left tangent point.
   lines.push(`G1 X${px(x1 + rad)}   `);
   // Closing arc back onto the 45-degree lead-in point.
-  lines.push(`G2X${px(startX)}Y${py(startY)}I${fmt(0)}J${fmt(rad)}`);
+  lines.push(`G2X${px(startX)}Y${py(startY)}I${arcOffset(0)}J${arcOffset(rad)}`);
   lines.push(`G0   Z${fmt(safeZ)}`);
   return lines;
 }
@@ -517,7 +549,7 @@ export function clampCarvingExit(rawExit, offset) {
  * @param {number} [oy=0] Y origin offset (mm) applied to every emitted coordinate
  * @returns {Array<string>} gcode lines for the profile
  */
-export function buildCarvingProfile(width, height, offset, depth, thickness, angleDeg = 0, ox = 0, oy = 0) {
+export function buildCarvingProfile(width, height, offset, depth, thickness, angleDeg = 0, ox = 0, oy = 0, cutFeed = null, plungeF = null) {
   const o = Number(offset) || 0;
   const d = Number(depth) || 0;
   const t = Number(thickness) || 0;
@@ -541,21 +573,29 @@ export function buildCarvingProfile(width, height, offset, depth, thickness, ang
   // corner, then walk the 4 corners CLOCKWISE (TR -> TL -> BL -> BR), each corner
   // doing an outward diagonal ramp to the surface (Z=thickness) and immediately
   // returning to the profile at the cutting depth. Matches byte-for-byte.
-  const px = (v) => fmt(v + ox);
-  const py = (v) => fmt(v + oy);
+  const px = (v) => kfmt(v + ox);
+  const py = (v) => kfmt(v + oy);
+  // Feed is modal (ArtCAM): the plunge line carries the plunge feed, the FIRST
+  // corner move starts the cut feed and the remaining corner moves continue it
+  // (1 NUMARA: "G1 X242.00 Y350.00 Z18.00 F6000.0" then bare "X236.00 ...").
+  // With no feed arguments the whole profile repeats the feed, which is the
+  // standalone/helper behaviour.
+  const cf = cutFeed == null ? null : `F${Number(cutFeed).toFixed(1)}`;
+  const feedOn = (i) => (cf === null || i === 0 ? (cf === null ? '' : ` ${cf}`) : '');
+  const plungeFeed = plungeF == null ? '' : ` F${Number(plungeF).toFixed(1)}`;
   const lines = [];
-  lines.push(`G1 Z${fmt(zCut)}`);
-  lines.push(`G1 X${px(ox2)} Y${py(oy2)} Z${fmt(zSurf)}`); // TR outward + surface ramp
-  lines.push(`X${px(x2)} Y${py(y2)} Z${fmt(zCut)}`);       // back to TR profile
+  lines.push(`G1 Z${kfmt(zCut)}${plungeFeed}`);
+  lines.push(`G1 X${px(ox2)} Y${py(oy2)} Z${kfmt(zSurf)}${feedOn(0)}`); // TR outward + surface ramp
+  lines.push(`X${px(x2)} Y${py(y2)} Z${kfmt(zCut)}${feedOn(1)}`);       // back to TR profile
   lines.push(`X${px(x1)}`);                                // TL profile (X only)
-  lines.push(`X${px(ox1)} Y${py(oy2)} Z${fmt(zSurf)}`);    // TL outward+rampa
-  lines.push(`X${px(x1)} Y${py(y2)} Z${fmt(zCut)}`);       // back to TL profile
+  lines.push(`X${px(ox1)} Y${py(oy2)} Z${kfmt(zSurf)}`);    // TL outward+rampa
+  lines.push(`X${px(x1)} Y${py(y2)} Z${kfmt(zCut)}`);       // back to TL profile
   lines.push(` Y${py(y1)}`);                               // BL profile (Y only)
-  lines.push(`X${px(ox1)} Y${py(oy1)} Z${fmt(zSurf)}`);    // BL outward+ramp
-  lines.push(`X${px(x1)} Y${py(y1)} Z${fmt(zCut)}`);       // back to BL profile
+  lines.push(`X${px(ox1)} Y${py(oy1)} Z${kfmt(zSurf)}`);    // BL outward+ramp
+  lines.push(`X${px(x1)} Y${py(y1)} Z${kfmt(zCut)}`);       // back to BL profile
   lines.push(`X${px(x2)}`);                                // BR profile (X only)
-  lines.push(`X${px(ox2)} Y${py(oy1)} Z${fmt(zSurf)}`);    // BR outward+ramp
-  lines.push(`X${px(x2)} Y${py(y1)} Z${fmt(zCut)}`);       // back to BR profile
+  lines.push(`X${px(ox2)} Y${py(oy1)} Z${kfmt(zSurf)}`);    // BR outward+ramp
+  lines.push(`X${px(x2)} Y${py(y1)} Z${kfmt(zCut)}`);       // back to BR profile
   lines.push(` Y${py(y2)}`);                               // close back up the right edge
   return lines;
 }
@@ -723,9 +763,9 @@ function emitOffsetPasses(ctx, passRows, passAdaptive) {
 
     if (toolChanged) {
       if (lastEmittedToolNo !== null) {
-        // ArtCAM order (1_NUMARA.cnc lines 37-41): retract, M5, M6T, M3, then a
-        // bare G0Z retract again before the next approach.
-        lines.push(`G0   Z${fmt(cfg.toolChangeZ)}`);
+        // ArtCAM order (1/5/6/7 NUMARA): the PREVIOUS pass already retracted with
+        // "G0   Z46.00", so the tool-change block only adds M5, M6T, M3 and the
+        // post-M3 bare retract. An extra "G0   Z" here duplicated the retract.
         lines.push('M5');
         lines.push(`M6T${r.toolNo}`);
         lines.push(`M3 S${activeSpindleSpeed}`);
@@ -755,16 +795,27 @@ function emitOffsetPasses(ctx, passRows, passAdaptive) {
     // (1_NUMARA.cnc: the 62..230 x 62..338 and 59..233 x 59..341 passes run as
     // plain rectangles before the r=6 / r=3 profile at 65.76..).
     if (srcRow && srcRow.roughing === true) {
+      // The approach rapid carries NO Z word: the modal normaliser adds it back
+      // for the first approach of a tool block (ArtCAM "G0 X62.00 Y62.00 Z46.00")
+      // and keeps later same-tool approaches Z-less.
       if (chainFromPrev) {
-        lines.push(`G1 X${fmt(x1)} Y${fmt(y1)}`);
+        // Chained clearing pass: bare modal move down to this pass's corner
+        // (1 NUMARA "X59.00 Y59.00" / "X233.00").
+        lines.push(`X${kfmt(x1)} Y${kfmt(y1)} `);
       } else {
-        lines.push(`G0 X${fmt(x1)} Y${fmt(y1)} `);
-        lines.push(`G1 Z${fmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
+        lines.push(`G0 X${kfmt(x1)} Y${kfmt(y1)} `);
+        lines.push(`G1 Z${kfmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
       }
-      lines.push(`G1 X${fmt(x2)}   F${Number(feed).toFixed(1)}`);
-      lines.push(` Y${fmt(y2)} `);
-      lines.push(`X${fmt(x1)}  `);
-      lines.push(` Y${fmt(y1)} `);
+      // A chained pass continues at the feed already in effect, so it carries no
+      // F word; a fresh pass starts the cut feed (F appears when it changes).
+      if (chainFromPrev) {
+        lines.push(`X${kfmt(x2)}`);
+      } else {
+        lines.push(`G1 X${kfmt(x2)}   F${Number(feed).toFixed(1)}`);
+      }
+      lines.push(` Y${kfmt(y2)} `);
+      lines.push(`X${kfmt(x1)}  `);
+      lines.push(` Y${kfmt(y1)} `);
       lines.push(`G0   Z${fmt(cfg.safeZ)}`);
       // A clearing pass is a complete rectangle on its own — returning here stops it
       // being cut a second time by the plain-profile fallback below.
@@ -779,53 +830,85 @@ function emitOffsetPasses(ctx, passRows, passAdaptive) {
     // the arch arc, and finally the left edge — each with retract/re-plunge.
     if (curve && topStyle === 'pointed' && !frameDone) {
       frameDone = true;
-      lines.push(`G0 X${fmt(x1)} Y${fmt(y1)} Z${fmt(cfg.safeZ)}`);
-      lines.push(`G1   Z${fmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
-      lines.push(`G1 X${fmt(x2)}   F${Number(feed).toFixed(1)}`);
+      lines.push(`G0 X${kfmt(x1)} Y${kfmt(y1)}`);
+      lines.push(`G1   Z${kfmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
+      lines.push(`G1 X${kfmt(x2)}   F${Number(feed).toFixed(1)}`);
       lines.push(`G0   Z${fmt(cfg.safeZ)}`);
       if (interleavedDerzPos != null && interleavedDerzPos > x1 - offsetX && interleavedDerzPos < x2 - offsetX) {
         derzPosEmitted = interleavedDerzPos;
-        lines.push(`G0 X${fmt(offsetX + interleavedDerzPos)}  `);
-        lines.push(`G1   Z${fmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
-        lines.push(`G1  Y${fmt(curve.yEnd(offsetX + interleavedDerzPos))}  F${Number(feed).toFixed(1)}`);
+        lines.push(`G0 X${kfmt(offsetX + interleavedDerzPos)}  `);
+        lines.push(`G1   Z${kfmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
+        lines.push(`G1  Y${kfmt(curve.yEnd(offsetX + interleavedDerzPos))}  F${Number(feed).toFixed(1)}`);
         lines.push(`G0   Z${fmt(cfg.safeZ)}`);
       }
-      lines.push(`G0 X${fmt(x2)} Y${fmt(curve.yShoulder)} `);
-      lines.push(`G1   Z${fmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
-      lines.push(`G1  Y${fmt(y1)}  F${Number(feed).toFixed(1)}`);
-      lines.push(` Y${fmt(curve.yShoulder)} `);
+      lines.push(`G0 X${kfmt(x2)} Y${kfmt(curve.yShoulder)} `);
+      lines.push(`G1   Z${kfmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
+      lines.push(`G1  Y${kfmt(y1)}  F${Number(feed).toFixed(1)}`);
+      lines.push(` Y${kfmt(curve.yShoulder)} `);
       const jv = curve.yc - curve.yShoulder;
-      lines.push(`G3X${fmt(x1)}I${fmt(curve.xc - x2)}J${fmt(Math.abs(jv) < 5e-3 ? 0 : jv)}`);
+      lines.push(`G3X${kfmt(x1)}I${kfmt(curve.xc - x2)}J${kfmt(Math.abs(jv) < 5e-3 ? 0 : jv)}`);
       lines.push(`G0   Z${fmt(cfg.safeZ)}`);
-      lines.push(`G0  Y${fmt(y1)} `);
-      lines.push(`G1   Z${fmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
-      lines.push(`G1  Y${fmt(curve.yShoulder)}  F${Number(feed).toFixed(1)}`);
-      lines.push(` Y${fmt(y1)} `);
+      lines.push(`G0  Y${kfmt(y1)} `);
+      lines.push(`G1   Z${kfmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
+      lines.push(`G1  Y${kfmt(curve.yShoulder)}  F${Number(feed).toFixed(1)}`);
+      lines.push(` Y${kfmt(y1)} `);
       lines.push(`G0   Z${fmt(cfg.safeZ)}`);
       chainState = { idx: r.rowIdx, tool: String(r.toolNo), z };
       return;
     }
 
     if (chainFromPrev && !curve) {
-      // ArtCAM chained pass (1/7_NUMARA): after the first pass (a full G1 line),
+      // ArtCAM chained pass (1/7 NUMARA): after the first pass (a full G1 line),
       // later chained passes in the same tool move with a BARE axis-word line —
-      // no G1, no F (the motion stays modal). 7_NUMARA lines 10/15/20: "X115.40 Y115.40 ".
-      lines.push(`X${fmt(x1)} Y${fmt(y1)} `);
-      // First cut of the chained pass carries X+Y together with F (7_NUMARA line 6:
-      // "G1 X152.90 Y139.10 F9000.0" — Y is repeated even though the move is X-only).
-      lines.push(`G1 X${fmt(x2)} Y${fmt(y1)}  F${Number(feed).toFixed(1)}`);
+      // no G1, no F (the motion stays modal). 7 NUMARA: "X115.40 Y115.40 " /
+      // "X176.60 Y115.40 ".
+      lines.push(`X${kfmt(x1)} Y${kfmt(y1)} `);
+      // The cut line repeats the start Y only when the row asks for it, which is
+      // the difference between the two observed ArtCAM styles: 7 NUMARA writes
+      // "G1 X152.90 Y139.10  F9000.0" / "X176.60 Y115.40 " while 1 NUMARA's
+      // finishing pass writes "G1 X222.00   F6000.0".
+      const cutWords = srcRow.repeatStartY === true
+        ? `G1 X${kfmt(x2)} Y${kfmt(y1)}  F${Number(feed).toFixed(1)}`
+        : `G1 X${kfmt(x2)}  F${Number(feed).toFixed(1)}`;
+      lines.push(cutWords);
     } else {
-      lines.push(`G0 X${fmt(x1)} Y${fmt(y1)} Z${fmt(cfg.safeZ)}`);
-      lines.push(`G1   Z${fmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
-      lines.push(`G1 X${fmt(x2)}   F${Number(feed).toFixed(1)}`);
+      lines.push(`G0 X${kfmt(x1)} Y${kfmt(y1)}`);
+      lines.push(`G1   Z${kfmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
+      const cutWords = srcRow.repeatStartY === true
+        ? `G1 X${kfmt(x2)} Y${kfmt(y1)}  F${Number(feed).toFixed(1)}`
+        : `G1 X${kfmt(x2)}   F${Number(feed).toFixed(1)}`;
+      lines.push(cutWords);
     }
     if (curve) {
       emitTopCurveGcode(lines, curve, z, feed);
-      lines.push(`G1 X${fmt(x1)} Y${fmt(y1)} `);
+      // ArtCAM closes a curved profile on the bottom-left corner with a full
+      // G1 X.. Y.. line (2 NUMARA: "G1 X60.00 Y60.00 " / "G1 X55.00 Y55.00 ";
+      // 3 NUMARA: "G1 X57.00 Y57.00 ").
+      lines.push(`G1 X${kfmt(x1)} Y${kfmt(y1)} `);
     } else {
-      lines.push(` Y${fmt(y2)} `);
-      lines.push(`X${fmt(x1)}  `);
-      lines.push(` Y${fmt(y1)} `);
+      lines.push(` Y${kfmt(y2)} `);
+      // ArtCAM closes a flat profile on the corner it started from. Which form it
+      // uses depends on the TOOLPATH GROUP, not on the pass itself: 8 NUMARA's
+      // plain T8 pass shares a group with the r=4 profile that follows it and
+      // closes with the full corner ("X60.00 Y60.00 "), while 1/5/6/7 NUMARA's
+      // passes are standalone and close with a bare axis (" Y62.00 "). A pass that
+      // carries a cornerRadius, or that is followed by one on the same tool, is in
+      // a rounded group.
+      const roundIndex = passRows.findIndex(
+        (it) => it !== srcRow && String(it.toolNo) === String(r.toolNo) && Number(it.cornerRadius) > 0,
+      );
+      const inRoundedGroup = Number(srcRow.cornerRadius) > 0
+        || (roundIndex !== -1 && passRows.indexOf(srcRow) < roundIndex);
+      // 8 NUMARA's plain pass ends with the corner written TWICE: once as the bare
+      // axis word that closes the left edge ("X60.00 ") and once as the full
+      // corner ("X60.00 Y60.00 "). Both are in the reference.
+      if (inRoundedGroup) {
+        lines.push(`X${kfmt(x1)}  `);
+        lines.push(`X${kfmt(x1)} Y${kfmt(y1)} `);
+      } else {
+        lines.push(`X${kfmt(x1)}  `);
+        lines.push(` Y${kfmt(y1)} `);
+      }
     }
     lines.push(`G0   Z${fmt(cfg.safeZ)}`);
     chainState = { idx: r.rowIdx, tool: String(r.toolNo), z };
@@ -856,22 +939,24 @@ function emitCarvingRows(ctx, carvingRows) {
     // Same-tool consecutive carving/derz rows must NOT re-issue M6T (1_NUMARA:
     // the sharpened profile, the plain offset-70 pass and the derz all run T1).
     if (String(row.toolNo) !== String(lastEmittedToolNo)) {
-      lines.push(`G0Z${fmt(cfg.toolChangeZ)}`);
+      // ArtCAM: the previous block already retracted, so the tool-change block is
+      // just M5 / M6T / M3 / bare G0Z. No leading "G0Z" here.
       lines.push('M5');
       lines.push(`M6T${row.toolNo}`);
       lines.push(`M3 S${cfg.spindleSpeed}`);
       lines.push(`G0Z${fmt(cfg.toolChangeZ)}`);
     }
-    // Lead-in to the TOP-RIGHT profile corner, matching 1_NUMARA.cnc (G0 X236 Y344 Z46).
-    lines.push(`G0 X${fmt(offsetX + width - offset)} Y${fmt(offsetY + height - offset)} Z${fmt(cfg.safeZ)}`);
+    // Lead-in to the TOP-RIGHT profile corner, matching 1_NUMARA (G0 X236.00 Y344.00 Z46.00).
+    lines.push(`G0 X${kfmt(offsetX + width - offset)} Y${kfmt(offsetY + height - offset)}`);
     // Offsets are applied numerically inside buildCarvingProfile (ox/oy) — no
     // string-level re-basing, which silently corrupted multi-word lines.
-    buildCarvingProfile(width, height, offset, depth, cfg.thickness, geo.angle, offsetX, offsetY).forEach((line) => {
-      // apply the cut feed (plunge feed on the Z approach line)
-      const fed = /^G1 Z/.test(line) ? `${line} F${cfg.plungeFeed.toFixed(1)}` : `${line} F${rowFeed(ctx, row).toFixed(1)}`;
-      lines.push(fed);
-    });
-    lines.push(`G0 Z${fmt(cfg.safeZ)}`);
+    // F is modal here too: the plunge line carries the plunge feed, the first
+    // corner move starts the cut feed and the rest continue it.
+    buildCarvingProfile(
+      width, height, offset, depth, cfg.thickness, geo.angle, offsetX, offsetY,
+      Number(rowFeed(ctx, row)).toFixed(1), cfg.plungeFeed,
+    ).forEach((line) => lines.push(line));
+    lines.push(`G0   Z${fmt(cfg.safeZ)}`);
     lastEmittedToolNo = row.toolNo;
   });
 
@@ -905,11 +990,14 @@ function emitDerzRows(ctx, derzRows) {
     // Consecutive derz rows that share a tool must NOT re-issue M6T — one tool
     // change covers the whole group (2 NUMARA: a single M6T2 for the "M3 S15000"
     // reference block).
+    let opensToolBlock = false;
     if (String(row.toolNo) !== String(lastEmittedToolNo)) {
       if (lastEmittedToolNo !== null) {
-        lines.push(`G0Z${fmt(cfg.toolChangeZ)}`);
+        // The previous block already retracted, so only M5 precedes the change.
         lines.push('M5');
       }
+      // This block's first approach must carry X, Y and Z.
+      opensToolBlock = true;
       lines.push(`M6T${row.toolNo}`);
       activeSpindleSpeed = derzSpeed;
       lines.push(`M3 S${activeSpindleSpeed}`);
@@ -950,21 +1038,45 @@ function emitDerzRows(ctx, derzRows) {
       const y1 = vertical ? offsetY + (startYOverride ?? verticalFrameOffset) : offsetY + pos;
       const x2 = vertical ? x1 : offsetX + width - opts.margin + opts.overshootX;
       // Vertical divider lines must END on the curve, not at the flat top edge.
-      // The curve arc only spans [shapeXl, shapeXr]; outside it (or for flat
-      // tops) the line returns to the flat top edge plus overshoot.
-      const curvedTop = vertical && curve && pos > shapeXl && pos < shapeXr;
-      // shapeXl/shapeYt are already absolute (include offsetX/offsetY), so yEnd
-      // returns an absolute Y — do NOT re-add offsetY here.
+      // The curve arc only spans [shapeXl, shapeXr] — both of which are ABSOLUTE
+      // (they include offsetX) — so the test and the yEnd lookup both need the
+      // divider's ABSOLUTE X. `pos` is part-local, so without this offset every
+      // nested part compares a local X against absolute bounds, misses the arc and
+      // cuts a straight line: the nesting render showed all of a part's dividers
+      // ending at one identical Y (330.31) instead of following the arch.
+      const posAbs = offsetX + pos;
+      const curvedTop = vertical && curve && posAbs > shapeXl && posAbs < shapeXr;
+      // yEnd takes and returns absolute coordinates (xc/yc already carry offsetX
+      // and offsetY), so it must NOT be given a part-local X or have offsetY added.
       const y2 = vertical
         ? (curvedTop
-            ? curve.yEnd(pos)
+            ? curve.yEnd(posAbs)
             : offsetY + (startYOverride != null
                 ? height - startYOverride
                 : height - opts.margin + opts.overshootY))
         : y1;
-      lines.push(`G0 X${fmt(x1)} Y${fmt(y1)} Z${fmt(cfg.safeZ)}`);
-      lines.push(`G1   Z${fmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
-      lines.push(`G1 X${fmt(x2)} Y${fmt(y2)} F${Number(feed).toFixed(1)}`);
+      // ArtCAM's FIRST divider in a group continues the previous pass modally and
+      // therefore drops the Y it already sits on (1 NUMARA "G0 X89.00" after the
+      // finishing pass left Y at 70; 3 NUMARA "G0 X70.69" after the frame pass left
+      // Y at 57). Every later divider is a full approach and repeats Y even when
+      // unchanged ("G0 X108.00 Y70.00 ", "G0 X84.38 Y57.00 "). A divider that OPENS
+      // a tool block is the block's first approach and writes X, Y and Z
+      // (2 NUMARA "G0 X100.00 Y60.00 Z46.00").
+      const isFirstDivider = positionsToCut.indexOf(pos) === 0;
+      if (isFirstDivider && !opensToolBlock) {
+        lines.push(`G0 X${kfmt(x1)} `);
+      } else {
+        lines.push(`G0 X${kfmt(x1)} Y${kfmt(y1)}`);
+      }
+      lines.push(`G1   Z${kfmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
+      // Only the axis that actually changes is written: a vertical divider is a
+      // pure Y move (1/2/3 NUMARA: "G1  Y330.00  F6000.0"), a horizontal one a
+      // pure X move. The redundant repeat is dropped.
+      if (vertical) {
+        lines.push(`G1  Y${kfmt(y2)}  F${Number(feed).toFixed(1)}`);
+      } else {
+        lines.push(`G1 X${kfmt(x2)}   F${Number(feed).toFixed(1)}`);
+      }
       lines.push(`G0   Z${fmt(cfg.safeZ)}`);
     });
   });
@@ -978,12 +1090,12 @@ function emitDerzRows(ctx, derzRows) {
  */
 function finalizeKapak(ctx) {
   const { cfg, isCombined, lines } = ctx;
-  if (ctx.lastEmittedToolNo !== null) {
-    lines.push('M5');
-  }
 
   if (!isCombined) {
-    lines.push(`G0 X0.00 Y0.00 `);
+    // ArtCAM tail (every reference): the last pass already retracted, then return
+    // to the work origin, retract home, repeat the origin, stop, end. There is no
+    // extra M5 here — the one after the second origin is the only one.
+    lines.push(`G0 X0.00 Y0.00 Z${fmt(cfg.homeZ)}`);
     lines.push(`G0Z${fmt(cfg.homeZ)}`);
     lines.push('X0.00Y0.00');
     lines.push('M5');
@@ -993,28 +1105,46 @@ function finalizeKapak(ctx) {
 }
 
 /**
- * Rewrites the emitted lines in ArtCAM's modal style (verified on every
- * numuneler/*.cnc file):
- *  - a rapid APPROACH (G0 with X/Y at safe Z) carries the Z word ONLY on the
- *    first approach after a tool change (M6T) — later same-tool approaches are
- *    `G0 X.. Y.. ` with no Z;
- *  - axis words whose value equals the current position are OMITTED
- *    (e.g. `G0 X89.00` when Y is already 70, `G1 Y330.00 F6000.0` when X is
- *    already 89);
- *  - a line whose every coordinate is unchanged is kept verbatim (ArtCAM
- *    sometimes repeats the closing corner, e.g. 8_NUMARA "X60.00 Y60.00").
+ * Rewrites the emitted lines in ArtCAM 2008's modal style. Every rule below is
+ * read off the seven reference programs in numuneler/artcam/:
+ *
+ *  - a rapid APPROACH carries the Z word ONLY on the first approach after a tool
+ *    change (M6T). Later same-tool approaches are Z-less and repeat both X and Y
+ *    even when one of them did not change (1 NUMARA: "G0 X108.00 Y70.00 " where Y
+ *    is already 70);
+ *  - a bare retract (`G0Z46.00`) is never an approach, so it does NOT consume the
+ *    pending "first approach" Z (1 NUMARA: "G0Z46.00" then
+ *    "G0 X236.00 Y344.00 Z46.00");
+ *  - axis words equal to the current position are omitted on a ONE-axis G1
+ *    (1 NUMARA: "G1  Y330.00  F6000.0" instead of "G1 X89.00 Y330.00"), while a
+ *    TWO-axis G1 is ArtCAM's "full corner" style and keeps both words
+ *    (2 NUMARA: "G1 X60.00 Y60.00 ");
+ *  - F is modal: it is written only when it changes (1 NUMARA: plunge
+ *    "G1   Z12.00 F3000.0", then the cut "G1 X230.00   F5000.0", then nothing
+ *    until the feed changes again). A G1 whose own F does not change loses both
+ *    the G1 and the F and becomes a bare continuation (1 NUMARA "X233.00",
+ *    7 NUMARA "X176.60 Y115.40 ");
+ *  - arcs always write I and J, and their F only when the feed changes
+ *    (1 NUMARA: "G2X64.00Y70.00I4.24J4.24F5000.0" then "G2X70.00Y336.00I6.00J0.00");
+ *  - column padding is reproduced exactly, so the output matches the production
+ *    files byte for byte and not only after whitespace normalisation.
+ *
  * Purely a text-level rewrite — the tool path itself is untouched.
  */
 function normalizeModalArtcam(lines, safeZ) {
   const sz = Number(safeZ).toFixed(2);
-  const state = { cx: 0, cy: 0, cz: null, needZ: true };
+  const state = { cx: 0, cy: 0, cz: null, needZ: true, F: null };
   return lines.map((raw) => {
     const line = parseModalLine(raw);
     if (line.kind === 'toolchange') { state.needZ = true; return line.l; }
-    // Arcs: keep verbatim, but update the tracked position from the end point.
+    // Arcs: I/J are always written; F only when it changes.
     if (line.kind === 'arc') {
       const aw = line.l.match(/[XY](-?[\d.]+)/g) || [];
       aw.forEach((t) => { const v = parseFloat(t.slice(1)); if (t[0] === 'X') state.cx = v; else state.cy = v; });
+      const af = /F(-?[\d.]+)/.exec(line.l);
+      if (!af) return line.l;
+      if (af[1] === state.F) return line.l.replace(/F-?[\d.]+/, '').replace(/\s+$/, '');
+      state.F = af[1];
       return line.l;
     }
     if (line.kind === 'mcode') return line.l; // M codes, bare text
@@ -1039,57 +1169,121 @@ function parseModalLine(raw) {
 }
 
 /**
- * Rewrites a rapid line. A rapid APPROACH (X/Y present at safe Z) carries the
- * Z word ONLY on the first approach after a tool change; later same-tool
- * approaches are `G0 X.. Y.. ` with no Z, and unchanged axis words are omitted.
+ * Rewrites a rapid line. An APPROACH is a G0 that names X and/or Y:
+ *  - the first approach of a tool block writes X, Y AND Z;
+ *  - a later approach is Z-less; a TWO-axis approach keeps both words verbatim
+ *    (ArtCAM repeats a stationary axis there: "G0 X108.00 Y70.00 "), while a
+ *    ONE-axis approach drops the axis it repeats (1 NUMARA's first divider is
+ *    "G0 X89.00" with Y already at 70);
+ *  - a bare retract (`G0Z46.00`) is not an approach and leaves the pending
+ *    "first approach" Z untouched.
  */
 function rewriteRapid(line, state, sz) {
   const { l, has } = line;
-  const isApproach = has.Z !== undefined && (has.X !== undefined || has.Y !== undefined);
-  if (!isApproach) return l; // bare retract (G0Z46.00) — keep verbatim
-  const keepZ = state.needZ || has.Z.toFixed(2) !== sz;
-  state.needZ = false;
-  const keepX = has.X !== undefined && has.X !== state.cx;
-  const keepY = has.Y !== undefined && has.Y !== state.cy;
-  if (!keepX && !keepY && !keepZ) return l;
+  const isApproach = has.X !== undefined || has.Y !== undefined;
+  if (!isApproach) {
+    // Bare retract: track Z, but do NOT consume needZ.
+    if (has.Z !== undefined) state.cz = has.Z;
+    return l;
+  }
+
+  // Read the position BEFORE updating the tracked state — the comparisons below
+  // are all of the form "did this axis actually change?".
+  const prevX = state.cx;
+  const prevY = state.cy;
+  if (has.X !== undefined) state.cx = has.X;
+  if (has.Y !== undefined) state.cy = has.Y;
+
+  if (state.needZ) {
+    state.needZ = false;
+    const parts = ['G0'];
+    if (has.X !== undefined) parts.push(`X${has.X.toFixed(2)}`);
+    if (has.Y !== undefined) parts.push(`Y${has.Y.toFixed(2)}`);
+    parts.push(`Z${sz}`);
+    return parts.join(' ');
+  }
+
+  // A Z-less two-axis approach is kept verbatim (the repeated axis is intentional).
+  if (has.Z === undefined && has.X !== undefined && has.Y !== undefined) return l;
+  const keepX = has.X !== undefined && has.X !== prevX;
+  const keepY = has.Y !== undefined && has.Y !== prevY;
+  if (!keepX && !keepY) return l;
   let s = 'G0 ';
   if (keepX) s += `X${has.X.toFixed(2)} `;
   if (keepY) s += `Y${has.Y.toFixed(2)} `;
-  if (keepZ) s += `Z${has.Z.toFixed(2)}`;
-  if (has.X !== undefined) state.cx = has.X;
-  if (has.Y !== undefined) state.cy = has.Y;
   return s.replace(/\s+$/, '');
 }
 
 /**
- * Rewrites a G1 / modal continuation line. A bare line (or G1) carrying BOTH X
- * and Y is ArtCAM's "full corner" style — keep it verbatim (7_NUMARA chained
- * cuts, 8_NUMARA closing corner). Single-axis lines get unchanged-axis omission.
+ * Rewrites a G1 / modal continuation line.
+ *
+ *  - a PLUNGE (a G1 with no X and no Y) is written verbatim: ArtCAM repeats its G
+ *    word and its plunge feed on every pass ("G1   Z12.00 F3000.0");
+ *  - a BARE line (no G word) is a modal continuation: ArtCAM writes exactly the
+ *    axis words that were emitted, even when one repeats the current position
+ *    (8 NUMARA "X60.00", 7 NUMARA "X176.60 Y115.40 "). A redundant F is dropped;
+ *  - a G1 whose F does NOT change loses both the G1 and the F and becomes a bare
+ *    continuation of its axis words (1 NUMARA "X233.00");
+ *  - a TWO-axis G1 without its own F keeps both words (2 NUMARA "G1 X60.00 Y60.00 ");
+ *  - otherwise unchanged axis words are dropped (1 NUMARA "G1  Y330.00  F6000.0").
  */
 function rewriteLinear(line, state) {
   const { l, has, isG1 } = line;
-  const bothXY = has.X !== undefined && has.Y !== undefined;
-  const keepX = has.X !== undefined && has.X !== state.cx;
-  const keepY = has.Y !== undefined && has.Y !== state.cy;
-  const keepZ = has.Z !== undefined && has.Z !== state.cz;
-  if (bothXY && !/^G1\s+Z/.test(l)) {
+  const f = /F(-?[\d.]+)/.exec(l);
+  const fVal = f ? f[1] : null;
+  // "Did the feed change on this line?" must be judged against the value in effect
+  // BEFORE the line, and the modal value is then updated.
+  const fChanged = fVal !== null && fVal !== state.F;
+  if (fVal !== null) state.F = fVal;
+
+  const track = () => {
     if (has.X !== undefined) state.cx = has.X;
     if (has.Y !== undefined) state.cy = has.Y;
     if (has.Z !== undefined) state.cz = has.Z;
-    return l;
-  }
-  if (!keepX && !keepY && !keepZ) return l;
-  const parts = [];
-  if (isG1) parts.push('G1');
-  if (keepX) parts.push(`X${has.X.toFixed(2)}`);
-  if (keepY) parts.push(`Y${has.Y.toFixed(2)}`);
-  if (keepZ) parts.push(`Z${has.Z.toFixed(2)}`);
-  const f = l.match(/F(-?[\d.]+)/);
-  if (f) parts.push(`F${f[1]}`);
-  if (has.X !== undefined) state.cx = has.X;
-  if (has.Y !== undefined) state.cy = has.Y;
-  if (has.Z !== undefined) state.cz = has.Z;
-  return parts.join(' ');
+  };
+  const dropF = (s) => s.replace(/F-?[\d.]+/, '').replace(/\s+$/, '');
+  const bareWords = () => {
+    const parts = [];
+    if (has.X !== undefined) parts.push(`X${has.X.toFixed(2)}`);
+    if (has.Y !== undefined) parts.push(`Y${has.Y.toFixed(2)}`);
+    if (has.Z !== undefined) parts.push(`Z${has.Z.toFixed(2)}`);
+    return parts.join(' ');
+  };
+
+  if (!isG1) { track(); return f && !fChanged ? dropF(l) : l; }
+
+  // Plunge: repeated G word and repeated plunge feed on every pass. The feed still
+  // becomes the modal value, so the next cut line knows it must write F.
+  if (has.X === undefined && has.Y === undefined) { track(); return `G1   ${l.replace(/^G1\s+/, '')}`; }
+
+  // A G1 whose feed is unchanged degenerates to a bare continuation.
+  if (f && !fChanged) { track(); return bareWords(); }
+
+  // A two-axis G1 with no feed of its own is the "full corner" style.
+  if (has.X !== undefined && has.Y !== undefined) { track(); return l; }
+
+  // Position must be read BEFORE track() updates it.
+  const keepX = has.X !== undefined && has.X !== state.cx;
+  const keepY = has.Y !== undefined && has.Y !== state.cy;
+  const keepZ = has.Z !== undefined && has.Z !== state.cz;
+  if (!keepX && !keepY && !keepZ) { track(); return l; }
+
+  const axes = [];
+  if (keepX) axes.push(`X${has.X.toFixed(2)}`);
+  if (keepY) axes.push(`Y${has.Y.toFixed(2)}`);
+  if (keepZ) axes.push(`Z${has.Z.toFixed(2)}`);
+  track();
+
+  // ArtCAM pads a G1 so the axis word starts in the same column as a two-word
+  // "G1 X222.00" line - a lone Y or Z word gets two spaces, a lone X one. The gap
+  // before F is the width of the axis word that is NOT written: a lone X leaves
+  // three spaces ("G1 X230.00   F5000.0"), a lone Y two ("G1  Y330.00  F6000.0").
+  // Reproduced so the output matches the production files byte for byte.
+  const pad = axes.length === 1 && axes[0][0] !== 'X' ? '  ' : ' ';
+  const head = `G1${pad}${axes.join(' ')}`;
+  const AXIS_ORDER = { X: 0, Y: 1, Z: 2 };
+  const lastAxis = axes.reduce((m, w) => Math.max(m, AXIS_ORDER[w[0]] ?? 0), 0);
+  return f ? `${head}${' '.repeat(3 - lastAxis)}F${f[1]}` : head;
 }
 
 /**

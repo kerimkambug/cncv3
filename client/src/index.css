@@ -94,6 +94,9 @@ button{
 .tool-table input{padding:6px 4px;font-size:11.5px;text-align:center}
 .tool-table td:first-child{width:26%}.tool-table td.name-cell input{text-align:left}
 .tool-header-row{display:flex;justify-content:space-between;align-items:center}
+.tool-preset-picker{display:flex;align-items:center;gap:8px;margin:-4px 0 12px;flex-wrap:wrap}
+.tool-preset-picker label{font-size:11px;color:var(--muted);white-space:nowrap}
+.tool-preset-picker select{flex:0 1 240px;min-width:140px;max-width:100%;padding:5px 8px;font-size:12px}
 .row-error td{background:rgba(255,92,92,.12)}
 .row-error td:first-child{box-shadow:inset 3px 0 0 var(--danger)}
 textarea{
