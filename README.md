@@ -39,12 +39,10 @@ empire-cnc-mern/
           PresetPanel.jsx          preset yükle/kaydet/sil (backend'e bağlı)
           TekOlcu.jsx
           TopluListe.jsx
-          NestingPanel.jsx
-          NestingPlateCanvas.jsx    plaka üzerinde renkli parça + kesim yolu önizlemesi (PNG export)
-          DaireKesimi.jsx
-          DerzBolme.jsx
-          PanjurBolme.jsx           panjur/jaluzi çıta kesimi (rampalı raster tarama)
-        cam/
+            NestingPanel.jsx         yerleşim + önizleme (canvas) + G-code/DXF/PNG
+            DaireKesimi.jsx
+            DerzBolme.jsx
+          cam/
           CamModule.jsx            ortak ölçü/takım ayarları
           CamKesimPanel.jsx
           CamTaramaPanel.jsx
@@ -81,8 +79,8 @@ empire-cnc-mern/
 | Daire merkez ofseti + iç-önce-dış-sonra kesim sırası | ✅ `circle.js` |
 | Derz oto-sığdırma + kenar payı azaltma | ✅ `derz.js` |
 | Offset Modu (Kümülatif / Mutlak) anahtarı | ✅ `MachineSettingsPanel.jsx` |
-| Nesting görsel önizleme (renkli parça + kesim yolu + legend) | ✅ `NestingPlateCanvas.jsx` |
-| Nesting PNG dışa aktarma | ✅ aynı bileşende |
+| Nesting görsel önizleme (renkli parça + kesim yolu + legend) | ✅ `NestingPanel.jsx` |
+| Nesting PNG dışa aktarma | ✅ `NestingPanel.jsx` |
 | Nesting'e dosyadan parça içe aktarma (CSV/TXT) | ✅ `parseNestImportText` |
 | Rounded-corner offset (G2/G3 köşe yaylı tek profil) | ✅ `buildRoundedRectProfile` + `row.cornerRadius` |
 | Bıçak-başı kesim hızı (satır bazlı feed) | ✅ `row.feed` — boşsa genel `cutFeed` kullanılır |

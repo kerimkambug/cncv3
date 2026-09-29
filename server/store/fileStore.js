@@ -128,9 +128,15 @@ export const fileStore = {
       }
       const now = new Date().toISOString();
       const preset = { _id: makeId(), category: 'kapak', imageDataUrl: '', previewWidth: 600, previewHeight: 600, ...data, module, createdAt: now, updatedAt: now };
-      all.push(preset);
+      // Normalization runs on WRITE too, not just on read. Otherwise a preset
+      // saved from absolute mode would be written to presets.json without
+      // absoluteOffset, and every consumer reading the raw file (DXF export,
+      // JSON import, an editor opening the data directory) would see the missing
+      // field — and, on the next read, would be silently patched to a different
+      // value. Writing it back keeps the file and the in-memory shape identical.
+      all.push(normalizeOffsetRows(preset));
       writeAll(all);
-      return preset;
+      return all[all.length - 1];
     });
   },
 
@@ -139,7 +145,7 @@ export const fileStore = {
       const all = readAll();
       const idx = all.findIndex((p) => p._id === id);
       if (idx === -1) return null;
-      all[idx] = { ...all[idx], ...data, updatedAt: new Date().toISOString() };
+      all[idx] = normalizeOffsetRows({ ...all[idx], ...data, updatedAt: new Date().toISOString() });
       writeAll(all);
       return all[idx];
     });

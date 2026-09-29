@@ -7,6 +7,19 @@ const ToolRowSchema = new mongoose.Schema(
     operation: { type: String, enum: ['offset', 'derz', 'carving'], default: 'offset' },
     depth: { type: Number, required: true },
     stepOffset: { type: Number, required: true },
+    // Rows pinned to an EXACT contour from the part edge, in mm, independent of
+    // stepOffset. kapak.js's calculateAdaptiveOffsets freezes the offset chain at
+    // this value and every later row keeps adding its own step on top — that is
+    // how a coarse clearing pass listed at 3mm still cuts on the real 16mm
+    // contour of the production file.
+    //
+    // It MUST exist in the schema: the Mongoose schema is strict by default, so
+    // without the field a POST/PUT would silently strip absoluteOffset and the
+    // saved preset would no longer reproduce the contour it was captured from.
+    // fileStore.js and usePresets.js both backfill it from stepOffset for
+    // absolute-mode presets saved before this field existed; this keeps that
+    // fallback working for data already in Mongo.
+    absoluteOffset: { type: Number, default: null },
     // Rounded-corner offset pass: radius in mm (null = plain square corner).
     // When set, the pass is cut as a single closed profile with G2/G3 corner arcs.
     cornerRadius: { type: Number, default: null },

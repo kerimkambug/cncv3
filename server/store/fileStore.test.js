@@ -7,9 +7,16 @@ import os from 'node:os';
 import path from 'node:path';
 
 let failures = 0;
-function check(name, fn) {
+// check(name, condition) — istemci testleriyle AYNI imza. Bu dosya oradan
+// kopyalandığında imza fn almak üzere kalmış, çağrılar boolean geçirdiği için
+// "fn is not a function" ile tüm dosya çöküyordu.
+function check(name, cond) {
   try {
-    fn();
+    let ok;
+    if (typeof cond === 'function') ok = cond();
+    else if (cond === undefined) ok = true;   // assert.throws(...) undefined döner; varlığı yeter
+    else ok = cond;
+    if (!ok) throw new Error('koşul sağlanmadı');
     console.log(`PASS  ${name}`);
   } catch (e) {
     failures++;

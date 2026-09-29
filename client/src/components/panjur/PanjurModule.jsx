@@ -159,10 +159,12 @@ export default function PanjurModule({ onBackToMenu }) {
           for (const line of res.gcode.split('\n')) {
             if (line.trim()) combined.push(line);
           }
-          n = res.nextN;
-          t4Header = false;
+          n = res.nextN; t4Header = false;
           exX += cv.width + (multi ? coverGap : 0);
         }
+        combined.push(`N${n++} M5`);
+      } else {
+        // T4 kullanılmıyorsa spindle T14'den beri açıktı; yine de kapat.
         combined.push(`N${n++} M5`);
       }
 

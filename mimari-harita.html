@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Empire CNC — Mimari Zihin Ağı</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#131824; --panel2:#1a2130; --border:#243044;
+    --txt:#e6e8ec; --muted:#8b95a8;
+    --shell:#64748b; --ui:#3b82f6; --modal:#6366f1; --engine:#10b981;
+    --relief:#f59e0b; --shared:#ec4899; --server:#a855f7; --dead:#ef4444;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden}
+  body{
+    background:var(--bg); color:var(--txt);
+    font:14px/1.5 "Segoe UI",system-ui,-apple-system,sans-serif;
+  }
+
+  /* ---------- Üst bar ---------- */
+  header{
+    position:fixed; inset:0 0 auto 0; height:58px; z-index:10;
+    display:flex; align-items:center; gap:14px; padding:0 16px;
+    background:rgba(19,24,36,.92); backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--border);
+  }
+  header h1{font-size:16px;margin:0;font-weight:650;letter-spacing:.2px}
+  header h1 span{color:var(--muted);font-weight:400;font-size:12px;margin-left:8px}
+  .spacer{flex:1}
+
+  input[type=search], select{
+    background:var(--panel2); border:1px solid var(--border); color:var(--txt);
+    padding:7px 10px; border-radius:6px; font-size:13px; outline:none;
+  }
+  input[type=search]{width:230px}
+  input[type=search]:focus, select:focus{border-color:var(--ui)}
+
+  button{
+    background:var(--panel2); border:1px solid var(--border); color:var(--txt);
+    padding:7px 12px; border-radius:6px; font-size:13px; cursor:pointer;
+  }
+  button:hover{background:#232c3d;border-color:#33415a}
+
+  /* ---------- Canvas ---------- */
+  #stage{position:fixed;inset:58px 0 0 0;overflow:hidden;cursor:grab}
+  #stage.drag{cursor:grabbing}
+  svg{width:100%;height:100%;display:block}
+
+  .link{
+    fill:none; stroke:#33415a; stroke-width:1.6;
+    transition:stroke .18s, stroke-width .18s, opacity .18s;
+  }
+  .link.hot{stroke:var(--ui); stroke-width:2.6}
+  .link.dim{opacity:.13}
+
+  .node{cursor:pointer;transition:opacity .18s}
+  .node .box{
+    fill:var(--panel); stroke:var(--border); stroke-width:1.5; rx:8;
+    transition:stroke .18s, fill .18s;
+  }
+  .node:hover .box{stroke:#4b5a75}
+  .node.dim{opacity:.22}
+  .node.sel .box{stroke:#fff; stroke-width:2.6; fill:#1d2740}
+  .node.rel .box{stroke:var(--ui); stroke-width:2.2}
+  .node.hit .box{stroke:var(--engine); stroke-width:2.4}
+  .node text{pointer-events:none; user-select:none}
+  .t-title{font-size:12.5px; font-weight:600; fill:var(--txt)}
+  .t-sub{font-size:10.5px; fill:var(--muted); font-family:Consolas,monospace}
+  .t-badge{font-size:9.5px; font-weight:700}
+
+  /* ---------- Detay paneli ---------- */
+  aside{
+    position:fixed; top:70px; right:14px; width:330px; max-height:calc(100vh - 86px);
+    background:rgba(19,24,36,.97); border:1px solid var(--border); border-radius:10px;
+    padding:14px 16px; overflow:auto; z-index:9; display:none;
+    box-shadow:0 12px 40px rgba(0,0,0,.5);
+  }
+  aside.on{display:block}
+  aside h3{margin:0 0 2px;font-size:15px}
+  aside .path{font-family:Consolas,monospace;font-size:11px;color:var(--muted);word-break:break-all}
+  aside .kind{display:inline-block;margin:8px 0 10px;padding:2px 8px;border-radius:20px;
+    font-size:10.5px;font-weight:700;letter-spacing:.4px}
+  aside p{margin:0 0 12px;font-size:12.5px;color:#c3cad6}
+  aside h4{margin:12px 0 6px;font-size:11px;letter-spacing:.7px;color:var(--muted);text-transform:uppercase}
+  aside ul{margin:0;padding-left:16px;font-size:12px}
+  aside li{margin-bottom:3px;cursor:pointer}
+  aside li:hover{color:var(--ui);text-decoration:underline}
+
+  /* ---------- Efsane ---------- */
+  .legend{
+    position:fixed; left:14px; bottom:14px; z-index:9;
+    background:rgba(19,24,36,.94); border:1px solid var(--border); border-radius:10px;
+    padding:10px 12px; display:flex; flex-direction:column; gap:6px; font-size:11.5px;
+  }
+  .legend .row{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+  .legend .row.off{opacity:.35}
+  .legend i{width:11px;height:11px;border-radius:3px;display:inline-block}
+
+  .hint{
+    position:fixed; left:14px; top:70px; z-index:9; font-size:11.5px; color:var(--muted);
+    background:rgba(19,24,36,.94); border:1px solid var(--border);
+    border-radius:8px; padding:8px 11px; line-height:1.7;
+  }
+  .hint kbd{background:var(--panel2);border:1px solid var(--border);border-radius:4px;padding:0 5px;font-size:10.5px}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Empire CNC — Zihin Ağı <span>60 dosya · 5 modül · 2 çalışma zamanı</span></h1>
+  <div class="spacer"></div>
+  <input type="search" id="q" placeholder="Dosya / fonksiyon ara…" />
+  <select id="mode">
+    <option value="deps">Bağımlılık (tüketen → tüketilen)</option>
+    <option value="users">Ters yön (tüketilen → tüketen)</option>
+  </select>
+  <button id="fit">Ekrana sığdır</button>
+  <button id="reset">Sıfırla</button>
+</header>
+
+<div id="stage">
+  <svg id="svg">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+              markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#33415a" id="arrowFill"/>
+      </marker>
+    </defs>
+    <g id="viewport">
+      <g id="edges"></g>
+      <g id="nodes"></g>
+    </g>
+  </svg>
+</div>
+
+<div class="hint">
+  <b>Kaydır</b> sürükle &nbsp;·&nbsp; <b>Yakınlaştır</b> tekerlek<br/>
+  <b>Düğüme tıkla</b> → bağlantılarını ve detayını göster<br/>
+  <kbd>Esc</kbd> seçimi kapat
+</div>
+
+<div class="legend" id="legend"></div>
+<aside id="panel"></aside>
+
+<script>
+/* ═══════════════════════════════════════════════════════════
+   VERİ: dosyalar + bağımlılıklar
+   track: 'client' | 'server'   kind: renk grubu
+   ═══════════════════════════════════════════════════════════ */
+const K = {
+  shell :{c:'#64748b',t:'Çekirdek / Kabuk'},
+  ui    :{c:'#3b82f6',t:'Arayüz bileşeni'},
+  modal :{c:'#6366f1',t:'Ayar / Preset paneli'},
+  engine:{c:'#10b981',t:'G-code motoru'},
+  relief:{c:'#f59e0b',t:'Rölyef / mesh'},
+  shared:{c:'#ec4899',t:'Paylaşılan çekirdek'},
+  server:{c:'#a855f7',t:'Sunucu katmanı'},
+  dead  :{c:'#ef4444',t:'Ölü kod (import edilmiyor)'},
+};
+
+const NODES = [
+  // ── Kabuk ──────────────────────────────────────────────
+  {id:'main', label:'main.jsx', sub:'11 satır', kind:'shell', track:'client',
+   desc:'React kök bağlama noktası. index.css\'i yükler, App\'i StrictMode ile render eder.'},
+  {id:'App', label:'App.jsx', sub:'52 satır', kind:'shell', track:'client',
+   desc:'Modül yönlendirici. activeModule/activeOp state\'ini tutar, tema (dark/light) localStorage\'da saklar. 5 modülü koşullu render eder.'},
+  {id:'Topnav', label:'Topnav.jsx', sub:'26 satır', kind:'shell', track:'client',
+   desc:'Marka çubuğu + açık/kapalı tema düğmesi.'},
+  {id:'Sidebar', label:'Sidebar.jsx', sub:'84 satır', kind:'shell', track:'client',
+   desc:'Sol gezinme. Kapak modülü 5 alt sekmeye açılır; diğer modüller düz giriş.'},
+  {id:'MainMenu', label:'MainMenu.jsx', sub:'64 satır', kind:'shell', track:'client',
+   desc:'Modül seçim kartları (kapak / cam / panjur / rölyef / gcode-dxf).'},
+  {id:'Footer', label:'Footer.jsx', sub:'9 satır', kind:'shell', track:'client',
+   desc:'Statik alt bilgi şeridi.'},
+
+  // ── Modüller ───────────────────────────────────────────
+  {id:'Kapak', label:'KapakModule.jsx', sub:'155 satır', kind:'shell', track:'client',
+   desc:'Kapak modülü kabuğu. machineCfg + rows state\'ini 5 sekme ve 2 modal arasında yükseltir. cfg={...machineCfg,rows} olarak birleştirip dağıtır.'},
+  {id:'Cam', label:'CamModule.jsx', sub:'89 satır', kind:'shell', track:'client',
+   desc:'Cam modülü. Kendi cfg state\'ini bağımsız tutar — Kapak\'ta değişen kalınlık burayı etkilemez.'},
+  {id:'Panjur', label:'PanjurModule.jsx', sub:'~180 satır', kind:'shell', track:'client',
+   desc:'Panjur modülü. Konik T14 bıçak + T4 zemin çıkışı ayarları, seri kapak üretimi.'},
+  {id:'ReliefUI', label:'ReliefGenerator.jsx', sub:'~400 satır', kind:'shell', track:'client',
+   desc:'Rölyef arayüzü. Görsel yükleme, 3 sekme (3D/2D/G-code), STL ve G-code üretimi.'},
+  {id:'Gdxf', label:'GcodeDxfConverter.jsx', sub:'~120 satır', kind:'shell', track:'client',
+   desc:'G-code dosyası yükleyip katmanlı DXF\'e çevirir. Ölçek/ofset/plaka sınırı ayarları.'},
+
+  // ── Ayar / preset panelleri ────────────────────────────
+  {id:'MS', label:'MachineSettingsPanel', sub:'122 satır', kind:'modal', track:'client',
+   desc:'Kalınlık, devir, safeZ/toolChangeZ/homeZ, feed\'ler, offset modu, üst kenar şekli (düz/yarım daire/sivri), plaka boyutları.'},
+  {id:'ToolRows', label:'ToolRows.jsx', sub:'~330 satır', kind:'modal', track:'client',
+   desc:'Bıçak sırası editörü + preset dropdown\'u. Seçilen preset varsayılan olur ve localStorage\'da saklanır. Tablo elle değişince "özelleştirilmiş" işaretlenir.'},
+  {id:'PP', label:'PresetPanel.jsx', sub:'262 satır', kind:'modal', track:'client',
+   desc:'Preset kaydet/yükle/sil, model görseli, DXF kontrol ölçüsü, preset.json içe-dışa aktarma.'},
+
+  // ── Kapak sekmeleri ────────────────────────────────────
+  {id:'Tek', label:'TekOlcu.jsx', sub:'256 satır', kind:'ui', track:'client',
+   desc:'Tek/yan yana kapak. Ölçüleri birleştirilmiş G-code olarak üretir (isCombined=true). Plaka genişliği kontrolü.'},
+  {id:'Toplu', label:'TopluListe.jsx', sub:'74 satır', kind:'ui', track:'client',
+   desc:'Satır satır ölçü listesi → JSZip ile .zip indirir. Hatalı satırlar atlanır, raporlanır.'},
+  {id:'Nesting', label:'NestingPanel.jsx', sub:'~560 satır', kind:'ui', track:'client',
+   desc:'MaxRects yerleşim + vakum güvenliği sıralama + canvas önizleme (dpr ölçekli) + G-code/DXF/PNG dışa aktarma + süre tahmini.'},
+  {id:'Daire', label:'DaireKesimi.jsx', sub:'94 satır', kind:'ui', track:'client',
+   desc:'Düz daire veya çember kesimi. Canlı çözülmüş geometri önizlemesi gösterir.'},
+  {id:'DerzUI', label:'DerzBolme.jsx', sub:'115 satır', kind:'ui', track:'client',
+   desc:'Tek bağımsız derz bölme. Pozisyon/aralık önizlemesi canlı hesaplanır.'},
+
+  // ── Hook'lar ───────────────────────────────────────────
+  {id:'usePresets', label:'usePresets.js', sub:'150 satır', kind:'ui', track:'client',
+   desc:'Preset CRUD. API başarısızsa localStorage\'a düşer. Gerçek API hataları (409/400) gizlenmez, yalnızca ağ hatası sessizce yakalanır.'},
+  {id:'useCtrl', label:'useCtrlEnter.js', sub:'16 satır', kind:'ui', track:'client',
+   desc:'Ctrl+Enter / ⌘+Enter kısayolu. 6 bileşen kullanır.'},
+
+  // ── G-code motorları ───────────────────────────────────
+  {id:'eng_kapak', label:'kapak.js', sub:'1358 satır', kind:'engine', track:'client',
+   desc:'PROJENİN KALBİ. calculateAdaptiveOffsets (dar parçada S0 küçültme), buildKapakGcode (4 aşama), V-bıçak trigonometrisi, normalizeModalArtcam (ArtCAM 2008 modalsız stil yeniden yazımı). Üretim .nc dosyalarıyla bayt bayt eşleşir.'},
+  {id:'eng_nest', label:'nesting.js', sub:'914 satır', kind:'engine', track:'client',
+   desc:'MaxRects yerleşim + vakum güvenliği sıralama (sağ-üst başlangıç, bant toleransı max(30, ortH×0.55)). buildPartDerzGeometry derzin tek kaynağıdır — G-code/DXF/canvas hepsi bunu çağırır.'},
+  {id:'eng_derz', label:'derz.js', sub:'90 satır', kind:'engine', track:'client',
+   desc:'Bölme çizgisi konumları. autoFit ile kenardan kenara eşit dağıtır; kayan nokta hassasiyeti korunur (84.384615 → 84.38).'},
+  {id:'eng_circle', label:'circle.js', sub:'55 satır', kind:'engine', track:'client',
+   desc:'Daire/çember. Merkez SADECE nominal yarıçaptan hesaplanır (çift telafi hatası düzeltildi). Halka modunda iç daire önce kesilir.'},
+  {id:'eng_cam', label:'cam.js', sub:'76 satır', kind:'engine', track:'client',
+   desc:'Cam göz ızgarası kesimi. Göz/sütun tamsayı bölünmesi ve bıçak çapı kontrolü.'},
+  {id:'eng_tarama', label:'camTarama.js', sub:'86 satır', kind:'engine', track:'client',
+   desc:'Clipper.js ile poligon boolean + ofset kenar taraması. Köşeler kare gelir (ArtCAM rozete taklit edilmiyor).'},
+  {id:'eng_panjur', label:'panjur.js', sub:'452 satır', kind:'engine', track:'client',
+   desc:'Panjur kademe bölme + T14 konik ballnose eğimli raster + T4 zemin çıkışı. 15 geometrik kısıt doğrulaması. ISO format (N satır, O program, % kabuğu).'},
+  {id:'eng_relief', label:'relief.js', sub:'394 satır', kind:'engine', track:'client',
+   desc:'3D bas-rölyef. sampleDepthGridUV (bilinear + gradyan), calculateCompensatedZ (küre uç telafisi), smoothZTrack + simplifyPathPoints (~%60 boyut düşüşü).'},
+  {id:'eng_dxf', label:'gcodeToDxf.js', sub:'153 satır', kind:'engine', track:'client',
+   desc:'G-code → DXF. G20/G21 inç-mm, G90/G91, G0-G3 modu, I/J yay merkezi. 5 katman.'},
+  {id:'eng_shim', label:'common.js (shim)', sub:'11 satır', kind:'engine', track:'client',
+   desc:'Yeniden dışa aktarma katmanı. İstemci kaynakları aynen ./common.js import etmeye devam eder.'},
+
+  // ── Rölyef yardımcıları ─────────────────────────────────
+  {id:'rel_engine', label:'basReliefEngine.js', sub:'223 satır', kind:'relief', track:'client',
+   desc:'Yüzey işleme: gaussianBlurFloat, bilateralFilterFloat (kenar koruyucu), despeckleSpikesFloat, smoothMeshTaubin, buildDepthGridFromExternalMap.'},
+  {id:'rel_stl', label:'stlExporter.js', sub:'193 satır', kind:'relief', track:'client',
+   desc:'Catmull-Rom interpolasyonu ile yeniden örnekleme + ikili STL üretimi.'},
+  {id:'rel_3d', label:'Relief3DViewer.jsx', sub:'three.js', kind:'relief', track:'client',
+   desc:'Three.js ile 3B yüzey görüntüleyici.'},
+  {id:'rel_2d', label:'ReliefSliceViewer.jsx', sub:'2D dilim', kind:'relief', track:'client',
+   desc:'2B kesit/dilim görüntüleyici.'},
+
+  // ── Paylaşılan çekirdek ────────────────────────────────
+  {id:'shared', label:'shared/gcode/common.js', sub:'61 satır', kind:'shared', track:'client',
+   desc:'TEK PAYLAŞILAN ÇEKİRDEK. fmt() ArtCAM uyumlu yuvarlama (-0.00 imzası korunur, 1e-9 snap), computeCumOffsets, emitRectCutPath, makine varsayılanları. Hem istemci hem sunucu aynı fonksiyonları kullanır.'},
+
+  // ── Sunucu ─────────────────────────────────────────────
+  {id:'srv_index', label:'server/index.js', sub:'53 satır', kind:'server', track:'server',
+   desc:'Express kurulumu, CORS, 25mb JSON limiti, statik client/dist sunumu, genel hata yakalayıcı.'},
+  {id:'srv_routes', label:'routes/*', sub:'2 dosya', kind:'server', track:'server',
+   desc:'presetRoutes (CRUD) + reliefRoutes (POST /generate).'},
+  {id:'srv_ctl', label:'presetController.js', sub:'95 satır', kind:'server', track:'server',
+   desc:'Her handler aynı deseni izler: Mongo varsa sorgula, yoksa fileStore\'a düş. serializeMongoDoc iki kaynağı aynı şekle normalleştirir.'},
+  {id:'srv_svc', label:'services/reliefGcode.js', sub:'141 satır', kind:'server', track:'server',
+   desc:'Sunucu tarafı düz raster. normalizeConfig yazılmış ama sayı olmayan değerlerde SESSİZ varsayılan yerine hata fırlatır.'},
+  {id:'srv_model', label:'models/Preset.js', sub:'76 satır', kind:'server', track:'server',
+   desc:'Mongoose şemaları. ToolRowSchema + PresetSchema. Bileşik indeks {name, module} unique.'},
+  {id:'srv_store', label:'store/fileStore.js', sub:'145 satır', kind:'server', track:'server',
+   desc:'Atomik yazma (tmp + rename) ve asenkron mutex (withLock). absoluteOffset geriye-uyumlu normalizasyonu.'},
+  {id:'srv_db', label:'config/db.js', sub:'28 satır', kind:'server', track:'server',
+   desc:'MongoDB\'ye bağlanmayı DENER, başarısız olursa SÜREÇ ÖLMEZ — fileStore devreye girer.'},
+  {id:'srv_data', label:'data/presets.json', sub:'~450 satır', kind:'server', track:'server',
+   desc:'8 NUMARA referans preset\'i. absoluteOffset alanı olmayan eski kayıtlar okunurken geriye uyumlu hale getirilir.'},
+];
+
+/* tüketen → tüketilen */
+const EDGES = [
+  ['main','App'], ['App','Topnav'], ['App','Sidebar'], ['App','MainMenu'], ['App','Footer'],
+  ['App','Kapak'], ['App','Cam'], ['App','Panjur'], ['App','ReliefUI'], ['App','Gdxf'],
+
+  ['Kapak','Tek'], ['Kapak','Toplu'], ['Kapak','Nesting'], ['Kapak','Daire'], ['Kapak','DerzUI'],
+  ['Kapak','MS'], ['Kapak','ToolRows'], ['Kapak','PP'],
+  ['Cam','CamK'], ['Cam','CamT'],
+  ['ReliefUI','rel_3d'], ['ReliefUI','rel_2d'],
+  ['ReliefUI','rel_engine'], ['ReliefUI','rel_stl'], ['ReliefUI','eng_relief'],
+  ['Gdxf','eng_dxf'],
+  ['Panjur','eng_panjur'], ['Panjur','useCtrl'],
+
+  ['Tek','eng_kapak'], ['Tek','useCtrl'],
+  ['Toplu','eng_kapak'], ['Toplu','useCtrl'],
+  ['Nesting','eng_nest'], ['Nesting','eng_kapak'], ['Nesting','usePresets'], ['Nesting','useCtrl'],
+  ['Daire','eng_circle'], ['Daire','useCtrl'],
+  ['DerzUI','eng_derz'], ['DerzUI','useCtrl'],
+  ['ToolRows','usePresets'], ['PP','usePresets'], ['PP','eng_kapak'],
+
+  ['eng_nest','eng_kapak'], ['eng_nest','eng_derz'],
+  ['eng_kapak','eng_derz'],
+  ['eng_tarama2','eng_tarama'],
+  ['eng_shim2','eng_shim'],
+
+  ['rel_stl','rel_engine'],
+
+  ['srv_index','srv_routes'], ['srv_routes','srv_ctl'], ['srv_routes','srv_svc'],
+  ['srv_ctl','srv_model'], ['srv_ctl','srv_store'], ['srv_ctl','srv_db'],
+  ['srv_svc','shared'],
+
+  ['eng_kapak2','shared'],
+];
+
+/* Cam alt bileşenleri (EDGE içinde kısaltma için) */
+NODES.push(
+  {id:'CamK', label:'CamKesimPanel.jsx', sub:'46 satır', kind:'ui', track:'client',
+   desc:'Kesim G-code üretir. hata durumunda output boşaltılır.'},
+  {id:'CamT', label:'CamTaramaPanel.jsx', sub:'47 satır', kind:'ui', track:'client',
+   desc:'Kenar taraması G-code üretir ve köşelerin kare olduğunu uyarır.'}
+);
+
+/* gerçek kenar kümesi (kısaltmaları çöz) */
+const EXTRA_EDGES = [
+  ['eng_kapak','shared'], ['eng_nest','shared'], ['eng_derz','shared'],
+  ['eng_circle','shared'], ['eng_cam','shared'], ['eng_tarama','shared'],
+  ['eng_relief','shared'], ['eng_shim','shared'], ['eng_tarama','eng_cam'],
+];
+const ALL_EDGES = EDGES.filter(([a,b]) => NODES.some(n=>n.id===a) && NODES.some(n=>n.id===b)).concat(EXTRA_EDGES);
+
+const DEAD = new Set();
+
+const NW=186, NH=44;
+const byId = Object.fromEntries(NODES.map(n=>[n.id,n]));
+const outE = {}, inE = {};
+NODES.forEach(n=>{outE[n.id]=[];inE[n.id]=[]});
+ALL_EDGES.forEach(([a,b])=>{ outE[a].push(b); inE[b].push(a); });
+
+function layersFor(track){
+  const ids = NODES.filter(n=>n.track===track).map(n=>n.id);
+  const layer = {}; ids.forEach(i=>layer[i]=0);
+  // yinelemeli en uzun yol (DAG olduğu için güvenli)
+  for(let pass=0; pass<ids.length; pass++){
+    let changed=false;
+    ids.forEach(i=>{
+      outE[i].forEach(j=>{
+        if(layer[j]!==undefined && layer[j] < layer[i]+1){ layer[j]=layer[i]+1; changed=true; }
+      });
+    });
+    if(!changed) break;
+  }
+  return layer;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Katman + sıra-baryer yerleşimi.
+   Kuvvet tabanlı denendi ama yüksek düğüm dereceli (kapak.js 7 tüketicili)
+   grafiklerde kararsız hale geliyor ve ağ dikeyde çöküyordu. Katman+sıra
+   deterministik, tekrarlanabilir ve her zaman okunur.
+   ═══════════════════════════════════════════════════════════ */
+const ROW_H = 58, COL_W = 214;
+
+function layout(){
+  const cl = layersFor('client'), sl = layersFor('server');
+  const maxClient = Math.max(...Object.values(cl));
+  const colOf = id => byId[id].track==='server' ? (maxClient+2+sl[id]) : cl[id];
+
+  // ── Sütun sıkıştırma ─────────────────────────────────────
+  // En uzun yol (longest-path) yerleşimi doğru ama geniştir: bir düğümün
+  // girdiği en derin sütun çok boşluk bırakabilir. Bir düğümü, solundaki
+  // sütunda ÖNCÜLÜ yoksa ve kenarlar geriye doğru çaprazlanmıyorsa bir sütun
+  // sola kaydır. Kenarlar hep sağa bakmaya devam eder (DAG bozulmaz), genişlik
+  // ise belirgin şekilde daralır -> "Ekrana sığdır" daha okunaklı olur.
+  const layer = {}; NODES.forEach(n=>layer[n.id]=colOf(n.id));
+  for(let pass=0; pass<40; pass++){
+    let moved=false;
+    for(const n of NODES){
+      if(n.id==='main') continue;
+      const L = layer[n.id];
+      if(L<=0) continue;
+      const preds = inE[n.id].filter(p=>layer[p]===L-1);
+      if(preds.length) continue;              // solu dolu, kıpırdama
+      // sol sütuna geçiş: neredeyse hiçbir kenar geriye çaprazlanmasın
+      let cross=0;
+      for(const [a,b] of ALL_EDGES){
+        if(a===n.id && layer[b]<L) cross++;
+        if(b===n.id && layer[a]<L-1) cross++;
+      }
+      if(cross) continue;
+      layer[n.id]=L-1; moved=true;
+    }
+    if(!moved) break;
+  }
+
+  const p = {}, order = {};
+  const cols = {};
+  NODES.forEach(n=>{ const L=layer[n.id]; (cols[L] ||= []).push(n.id); });
+
+  Object.values(cols).forEach(list=>{
+    const score = id => -(inE[id].length*3 + outE[id].length*0.5);
+    list.sort((a,b)=> score(a)-score(b) || a.localeCompare(b));
+    list.forEach((id,i)=>{ order[id]=i; });
+  });
+
+  // Baryer geçişleri ile dikey sıralamayı birkaç kez iyileştir
+  for(let pass=0; pass<5; pass++){
+    for(const L of Object.keys(cols).map(Number).sort((a,b)=>a-b)){
+      const list = cols[L];
+      const score = id => list.reduce((s,other)=>{
+        if(other===id) return s;
+        const dir = order[other] < order[id] ? 1 : -1;
+        return s + dir*(outE[id].includes(other)?1.0:0)
+                 + dir*(outE[other].includes(id)?1.6:0);
+      }, 0);
+      list.sort((a,b)=> score(b)-score(a) || a.localeCompare(b));
+      list.forEach((id,i)=>{ order[id]=i; });
+    }
+  }
+  // Geri bağımlılıkları (shared/common gibi alt düğümler) en alta
+  Object.values(cols).forEach(list=>{
+    const last = id => (byId[id].kind==='shared'||outE[id].length===0) ? 1 : 0;
+    list.sort((a,b)=> last(a)-last(b));
+    list.forEach((id,i)=>{ order[id]=i; });
+  });
+
+  Object.values(cols).forEach(list=>{
+    const h = (list.length-1)*ROW_H;
+    list.forEach((id,i)=>{ p[id] = { x: layer[id]*COL_W, y: i*ROW_H - h/2 }; });
+  });
+  return p;
+}
+
+const pos = layout();
+(function snap(){
+  const ids=Object.keys(pos);
+  const minX=Math.min(...ids.map(i=>pos[i].x)), minY=Math.min(...ids.map(i=>pos[i].y));
+  ids.forEach(i=>{ pos[i].x-=minX; pos[i].y-=minY; });
+})();
+
+/* ═══════════════════════════════════════════════════════════
+   ÇİZİM
+   ═══════════════════════════════════════════════════════════ */
+const svg=document.getElementById('svg'), gE=document.getElementById('edges'),
+      gN=document.getElementById('nodes'), vp=document.getElementById('viewport');
+
+/* kenar yönü modu: aynı görsel düzen, sadece oklar ters yöne bakar —
+   hangi dosya kimin malzemesini tükettiği sorusunun cevabı değişir. */
+let reverse=false;
+const modeSel=document.getElementById('mode');
+modeSel.onchange=e=>{ reverse=e.target.value==='users'; build(); paintEdges(); };
+
+/* ters yönde aynı görsel kalsın ama ok ters döner */
+function linkPath(a,b){
+  const A=pos[a],B=pos[b];
+  if(!A||!B) return null;
+  const x1=A.x+NW, y1=A.y+NH/2, x2=B.x, y2=B.y+NH/2;
+  if(x2>=x1){ const mx=(x1+x2)/2; return `M${x1},${y1} H${mx} V${y2} H${x2}`; }
+  const mx=x1+90, mx2=x2-90;           // geriye dönüş (elbow)
+  return `M${x1},${y1} H${mx} V${y2+18} H${mx2} V${y2} H${x2}`;
+}
+
+const pathEls={}, nodeEls={};
+
+function build(){
+  gE.innerHTML=''; gN.innerHTML='';
+  Object.keys(pathEls).forEach(k=>delete pathEls[k]);
+  Object.keys(nodeEls).forEach(k=>delete nodeEls[k]);
+
+  ALL_EDGES.forEach(([a,b])=>{
+    const d=linkPath(a,b); if(!d) return;
+    const p=document.createElementNS('http://www.w3.org/2000/svg','path');
+    p.setAttribute('d',d);
+    p.setAttribute('class','link');
+    p.dataset.a=a; p.dataset.b=b;
+    gE.appendChild(p); pathEls[a+'>'+b]=p;
+  });
+  paintEdges();
+
+  NODES.forEach(n=>{
+    const P=pos[n.id]; if(!P) return;
+    const g=document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.setAttribute('class','node');
+    g.setAttribute('transform',`translate(${P.x},${P.y})`);
+
+    const box=document.createElementNS('http://www.w3.org/2000/svg','rect');
+    box.setAttribute('class','box');
+    box.setAttribute('width',NW); box.setAttribute('height',NH);
+    g.appendChild(box);
+
+    // sol renk şeridi
+    const bar=document.createElementNS('http://www.w3.org/2000/svg','rect');
+    bar.setAttribute('width',4); bar.setAttribute('height',NH-12);
+    bar.setAttribute('x',0); bar.setAttribute('y',6); bar.setAttribute('rx',2);
+    bar.setAttribute('fill',K[n.kind].c);
+    g.appendChild(bar);
+
+    const t1=document.createElementNS('http://www.w3.org/2000/svg','text');
+    t1.setAttribute('class','t-title'); t1.setAttribute('x',11); t1.setAttribute('y',19);
+    t1.textContent=n.label.length>21 ? n.label.slice(0,20)+'…' : n.label;
+    g.appendChild(t1);
+
+    const t2=document.createElementNS('http://www.w3.org/2000/svg','text');
+    t2.setAttribute('class','t-sub'); t2.setAttribute('x',11); t2.setAttribute('y',33);
+    t2.textContent=n.sub;
+    g.appendChild(t2);
+
+    g.addEventListener('click',()=>select(n.id));
+    gN.appendChild(g); nodeEls[n.id]=g;
+  });
+}
+
+/* Ters yön modunda ok ters döner: [a,b] -> [b,a] */
+function paintEdges(){
+  Object.values(pathEls).forEach(p=>{
+    p.setAttribute('marker-end','url(#arrow)');
+    p.style.opacity='';
+  });
+  if(!reverse) return;
+  Object.entries(pathEls).forEach(([key,p])=>{
+    const [a,b]=key.split('>');
+    const d=linkPath(b,a);
+    if(d) p.setAttribute('d',d);
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════
+   ETKİLEŞİM: seçim / arama
+   ═══════════════════════════════════════════════════════════ */
+let selected=null, query='';
+
+function clearVis(){
+  Object.values(nodeEls).forEach(g=>g.classList.remove('dim','sel','rel','hit'));
+  Object.values(pathEls).forEach(p=>p.classList.remove('dim','hot'));
+  document.getElementById('arrowFill').setAttribute('fill','#33415a');
+}
+
+function select(id){
+  selected = (selected===id) ? null : id;
+  clearVis();
+  const panel=document.getElementById('panel');
+
+  if(!selected){ panel.classList.remove('on'); return; }
+
+  const n=byId[selected];
+  const anc=new Set(), des=new Set();
+  (function up(x){ inE[x].forEach(p=>{ if(!anc.has(p)){anc.add(p); up(p);} }); })(selected);
+  (function dn(x){ outE[x].forEach(c=>{ if(!des.has(c)){des.add(c); dn(c);} }); })(selected);
+  anc.forEach(x=>nodeEls[x]&&nodeEls[x].classList.add('rel'));
+  des.forEach(x=>nodeEls[x]&&nodeEls[x].classList.add('rel'));
+  nodeEls[selected].classList.add('sel');
+  Object.values(nodeEls).forEach((g,i)=>{ if(!relHas(i,selected)) g.classList.add('dim'); });
+
+  Object.values(pathEls).forEach(p=>{
+    const a=p.dataset.a,b=p.dataset.b;
+    if(a===selected||b===selected||(anc.has(a)&&(anc.has(b)||b===selected))||(des.has(a)&&(des.has(b)||a===selected))){
+      p.classList.add('hot');
+    } else p.classList.add('dim');
+  });
+  document.getElementById('arrowFill').setAttribute('fill','#3b82f6');
+
+  panel.classList.add('on');
+  panel.innerHTML = `
+    <h3>${n.label}</h3>
+    <div class="path">${n.file||fileOf(n)}</div>
+    <span class="kind" style="background:${K[n.kind].c}22;color:${K[n.kind].c}">${K[n.kind].t.toUpperCase()}</span>
+    <p>${n.desc}</p>
+    <h4>Bağımlı olduğu (${inE[n.id].length})</h4>
+    <ul>${inE[n.id].map(x=>`<li data-go="${x}">${byId[x].label}</li>`).join('')||'<li>—</li>'}</ul>
+    <h4>Kullanan (${outE[n.id].length})</h4>
+    <ul>${outE[n.id].map(x=>`<li data-go="${x}">${byId[x].label}</li>`).join('')||'<li>—</li>'}</ul>`;
+  panel.querySelectorAll('li[data-go]').forEach(li=>
+    li.onclick=()=>select(li.dataset.go));
+}
+function relHas(_a,_b){return false;}
+
+/* arama */
+document.getElementById('q').addEventListener('input',e=>{
+  query=e.target.value.trim().toLowerCase();
+  clearVis();
+  if(selected) selected=null;
+  document.getElementById('panel').classList.remove('on');
+  if(!query) return;
+  let any=false;
+  NODES.forEach(n=>{
+    const hay=(n.label+' '+n.sub+' '+n.desc).toLowerCase();
+    if(hay.includes(query)){ nodeEls[n.id].classList.add('hit'); any=true; }
+    else nodeEls[n.id].classList.add('dim');
+  });
+  Object.values(pathEls).forEach(p=>{
+    const a=byId[p.dataset.a],b=byId[p.dataset.b];
+    const hit=(n)=>n && (n.label+' '+n.desc).toLowerCase().includes(query);
+    if(hit(a)||hit(b)) p.classList.add('hot'); else p.classList.add('dim');
+  });
+  if(any) fit();
+});
+
+function fileOf(n){
+  if(n.track==='server') return 'server/'+n.label.replace('.js','.js');
+  return 'client/src/'+n.label.replace('.js','.js');
+}
+
+/* ═══════════════════════════════════════════════════════════
+   PAN / ZOOM
+   ═══════════════════════════════════════════════════════════ */
+let k=1,tx=0,ty=0; const stage=document.getElementById('stage');
+function apply(){ vp.setAttribute('transform',`translate(${tx},${ty}) scale(${k})`); }
+
+stage.addEventListener('wheel',e=>{
+  e.preventDefault();
+  const r=stage.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top;
+  const f=e.deltaY<0?1.12:1/1.12, nk=Math.max(.15,Math.min(3.2,k*f));
+  tx = mx-(mx-tx)*(nk/k); ty = my-(my-ty)*(nk/k); k=nk; apply();
+},{passive:false});
+
+let drag=false,px=0,py=0;
+stage.addEventListener('mousedown',e=>{drag=true;px=e.clientX;py=e.clientY;stage.classList.add('drag');});
+window.addEventListener('mouseup',()=>{drag=false;stage.classList.remove('drag');});
+window.addEventListener('mousemove',e=>{
+  if(!drag)return; tx+=e.clientX-px; ty+=e.clientY-py; px=e.clientX; py=e.clientY; apply();
+});
+
+function fit(){
+  const xs=Object.values(pos).map(p=>p.x), ys=Object.values(pos).map(p=>p.y);
+  const minX=Math.min(...xs), minY=Math.min(...ys);
+  const maxX=Math.max(...xs)+NW, maxY=Math.max(...ys)+NH;
+  const w=maxX-minX, h=maxY-minY;
+  const r=stage.getBoundingClientRect();
+  const pad=20;
+  // Sığdırma: HER ŞEY görünmeli. Aşırı büyütme, ağın ekrandan taşmasına
+  // ve kenarlardaki düğümlerin kırpılmasına yol açıyordu.
+  k=Math.min((r.width-pad*2)/w, (r.height-pad*2)/h, 1.25);
+  tx=(r.width-w*k)/2 - minX*k;
+  ty=(r.height-h*k)/2 - minY*k;
+  apply();
+}
+document.getElementById('fit').onclick=fit;
+document.getElementById('reset').onclick=()=>{selected=null;query='';document.getElementById('q').value='';clearVis();document.getElementById('panel').classList.remove('on');k=1;tx=0;ty=0;apply();};
+window.addEventListener('keydown',e=>{if(e.key==='Escape'){selected=null;clearVis();document.getElementById('panel').classList.remove('on');}});
+window.addEventListener('resize',()=>{});
+
+/* ═══════════════════════════════════════════════════════════
+   EFSANE
+   ═══════════════════════════════════════════════════════════ */
+const hidden=new Set();
+const legend=document.getElementById('legend');
+Object.entries(K).forEach(([k,v])=>{
+  const row=document.createElement('div'); row.className='row';
+  row.innerHTML=`<i style="background:${v.c}"></i><span>${v.t}</span>`;
+  row.onclick=()=>{
+    const on=hidden.has(k);
+    on?hidden.delete(k):hidden.add(k);
+    row.classList.toggle('off',on);
+    NODES.forEach(n=>{const e=nodeEls[n.id];if(e)e.style.display=(!on&&n.kind===k)?'none':'';});
+    ALL_EDGES.forEach(([a,b])=>{
+      const p=pathEls[a+'>'+b];
+      if(p) p.style.display=(!on&&(byId[a].kind===k||byId[b].kind===k))?'none':'';
+    });
+  };
+  legend.appendChild(row);
+});
+
+/* başlat */
+build();
+requestAnimationFrame(fit);
+</script>
+</body>
+</html>

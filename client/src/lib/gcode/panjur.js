@@ -288,6 +288,11 @@ function emitRasterPass(axis, lines, n, c, crossStart, crossEnd, safeStart, step
   return n;
 }
 
+// Birl esik üretim çağrı zincirinde spindle durumunu taşıyan durum.
+// Modül düzeyinde yaşar: generatePanjurGcode çağrıları arasında devredilir.
+// Standalone kullanımda da güvenlidir — zincir sonunda stopSpindle() ile
+// kapatılır, sonraki zincir sıfırdan başlar.
+const spindleState = { on: false };
 /**
  * 1708.html tam motoru: Otomatik panjur bölme + T14 konik ballnose eğimli raster + T4 zemin çıkışı
  * @param {object} c - Panjur konfigürasyonu
@@ -308,6 +313,31 @@ export function generatePanjurGcode(c, offsetX = 0, offsetY = 0, isCombined = fa
   const y0 = g.alongStart + offsetY;
   const y1 = g.alongEnd + offsetY;
 
+  // ── Spindle durumu IZLEME ────────────────────────────────────
+  // ÖNEMLİ: M5'i "program sonuna erteleme" kuralı güvenli DEĞİLDİR. Takım
+  // değişiminden önce spindle durmazsa, eski takımın kestiği hattı yeni takım
+  // kesmeye devam eder (donma, bıçak kırılması, iş parçası kayması). Bu
+  // yüzden M5 artık bir bayrağa güvenmek yerine ÜRETİLEN AKIŞTAN türetiliyor:
+  // her M3 yeni bir "spindle açık" durumu açar, her takım değişimi ve her
+  // program sonu kendi M5'ini kendisi yazar. Çağıran M5'i unutsa da program
+  // güvenli kalır.
+    // (durum spindleState ile modul duzeyinde tasinir)
+  const stopSpindle = () => {
+    if (!spindleState.on) return;
+    lines.push(`N${n++} M5`);
+    spindleState.on = false;
+  };
+  // Gerçek bir takım değişimi başlıyorsa M5 KOŞULSUZ yazılır. "spindleOn"
+  // durumu bu fonksiyon çağrısına yereldir; birleşik seri üretimde T14 bloğu
+  // bir çağrıda, T4 bloğu BAŞKA bir çağrıda üretilir. Bu yüzden bir önceki
+  // çağrının spindle'ı açık bırakmış olabilir ve biz burada onu göremeyiz.
+  // Takım değişimi öncesi M5'i atlarsak yeni takım, eski takımın bıraktığı
+  // yüzeye batar. Bu yüzden burada güvenli taraf: her zaman M5 yaz.
+  const forceStopSpindle = () => {
+    lines.push(`N${n++} M5`);
+    spindleState.on = false;
+  };
+
   const toolRT4 = c.exitToolDia / 2;
   // T4=4 mm için takım izi tam olarak 3 mm eski panjur + 1 mm yeni
   // panjur alanıdır. Merkez hattı, eski ucun 1 mm içine yerleşir:
@@ -319,9 +349,17 @@ export function generatePanjurGcode(c, offsetX = 0, offsetY = 0, isCombined = fa
   // 1. AŞAMA: TÜM T14 RÖLYEF TARAMALARI (HEPSİ BİRDEN)
   // =========================================================
   if (t14Header) {
+    // İlk parça: program henüz başlamadı, M5 gereksiz olurdu ama üretim
+    // dosyalarıyla tutarlılık için yalnızca gerçekten açık bir varklıysa yaz.
+    stopSpindle();
     lines.push(`N${n++} M6T${c.toolNo}`);
     lines.push(`N${n++} S${c.spindle} M3`);
     lines.push(`N${n++} M7`);
+    spindleState.on = true;
+  } else if (phase === 'all' || phase === 'raster') {
+    // Başlık yazılmadıysa bu birleşik bir parçadır ve T14 hâlâ dönüyor
+    // olmalıdır; aksi hâlde aşağıdaki G1'ler durmuş bir spindlle yol alır.
+    spindleState.on = true;
   }
 
   if (phase === 'all' || phase === 'raster') {
@@ -347,11 +385,17 @@ export function generatePanjurGcode(c, offsetX = 0, offsetY = 0, isCombined = fa
   // =========================================================
   if (c.groundEntry && (phase === 'all' || phase === 'exit')) {
     if (t4Header) {
-      lines.push(`N${n++} M5`);
+      // Takım değişiminden ÖNCE spindle durdurulmalı. Artık "program sonunda
+      // M5 var mı" diye ummaya bırakılmaz, akıştan zorunlu olarak yazılır.
+      forceStopSpindle();
       lines.push(`N${n++} G0 Z${fmt(c.toolChangeZ)}`);
       lines.push(`N${n++} M6T${c.drillTool}`);
       lines.push(`N${n++} S${c.drillSpindle} M3`);
       lines.push(`N${n++} M7`);
+      spindleState.on = true;
+    } else {
+      // Başlık önceki parçada yazıldı; T4 hâlâ dönüyor olmalı.
+      spindleState.on = true;
     }
 
     g.groups.forEach((grp) => {
@@ -386,25 +430,28 @@ export function generatePanjurGcode(c, offsetX = 0, offsetY = 0, isCombined = fa
       }
       lines.push(`N${n++} G0 Z${fmt(c.safeZ)}`);
     });
-    // M5 SADECE programın sonunda (veya tek parça modunda) yazılır.
-    // Birleşik/seri modda araya M5 girerse, sonraki parçanın çıkış kesimi
-    // spindle kapalıyken G1'lerle yol alır → takım kırılır.
-    if (!isCombined) {
-      lines.push(`N${n++} M5`);
-    }
   }
 
  // =========================================================
-  // 3. AŞAMA: GÜVENLİ BİTİŞ
-  // =========================================================
-  if (!isCombined) {
-    lines.push(`N${n++} G0 Z${fmt(c.homeZ)}`);
-    lines.push(`N${n++} G0 X0.00 Y0.00`);
-    lines.push(`N${n++} M9`);
-    lines.push(`N${n++} M16`);
-    lines.push(`N${n++} M30`);
-    lines.push('%');
-  }
+ // 3. AŞAMA: GÜVENLİ BİTİŞ
+ // =========================================================
+ // Program sonu bir kapatma noktasıdır. Ancak BİRLEŞİK üretimde her ara
+ // parça çağrısı bu bloğa girer; parçanın kendi sonunda M5 yazmak, sonraki
+ // parçanın T14 rasterını durmuş bir spindlle yol aldırırdı. Bu yüzden
+ // yalnızca GERÇEK program sonunda (isCombined === false) kapatılır.
+ //
+ // Birleşik zincirin sonunda M5'i çağıran yazar (PanjurModule). O yazmazsa
+ // takım çalışmaya devam eder — bu yüzden zincir sonundaki kapatma, durumu
+ // temizleyip bir sonraki zincire devredilmesini de sağlar.
+ if (!isCombined) {
+   forceStopSpindle();
+   lines.push(`N${n++} G0 Z${fmt(c.homeZ)}`);
+   lines.push(`N${n++} G0 X0.00 Y0.00`);
+   lines.push(`N${n++} M9`);
+   lines.push(`N${n++} M16`);
+   lines.push(`N${n++} M30`);
+   lines.push('%');
+ }
 
   const approxStep = g.groups.length
     ? Math.abs(g.groups[0].end - g.groups[0].start) / Math.max(1, Math.ceil(Math.abs(g.groups[0].end - g.groups[0].start) / c.stepover))
