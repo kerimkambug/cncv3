@@ -32,6 +32,25 @@ const ToolRowSchema = new mongoose.Schema(
     // depth says how deep, and the angle derives the corner ramp (depth/tan(angle/2)).
     // null = legacy row: no angle, corner ramp falls back to the 1:1 rule (a 90° bit).
     bitAngle: { type: Number, default: null },
+    // --- Row-emission flags read by kapak.js / nesting.js -------------------
+    // These three are read by the G-code engine (kapak.js emitOffsetPasses) but
+    // were missing from the schema. Because Mongoose is strict by default, an
+    // API POST/PUT would silently strip them, so a preset saved through the app
+    // no longer reproduced the toolpath it was captured from (1 NUMARA's square
+    // roughing passes and 7 NUMARA's chained inner rings were being lost).
+    //
+    // roughing: cut this offset pass as a plain SQUARE rectangle instead of the
+    //   rounded profile — ArtCAM's "2D Area Clearing / Pocket" pass. 1 NUMARA
+    //   uses it for the 62/59 mm clearing rectangles.
+    roughing: { type: Boolean, default: false },
+    // chain: continue at depth from the previous pass without retracting to
+    //   safe Z and re-plunging (consecutive rowIdx, same tool, same depth).
+    //   1 NUMARA (r6->r3) and 7 NUMARA (four inner rings) use it.
+    chain: { type: Boolean, default: false },
+    // repeatStartY: on the cut move, repeat the start Y even though it did not
+    //   change ("G1 X152.90 Y139.10 F9000.0" instead of "G1 X152.90 F9000.0").
+    //   ArtCAM emits this style for 7 NUMARA's chained rings.
+    repeatStartY: { type: Boolean, default: false },
     derz: {
       yon: { type: String, enum: ['dikey', 'yatay'], default: 'dikey' },
       margin: { type: Number, default: 0 },

@@ -79,6 +79,52 @@ check('derz rows are NOT backfilled', stored.rows[2].absoluteOffset === undefine
 const absPreset = (await fileStore.list()).find((p) => p.name === 'AbsMode');
 check('backfilled preset round-trips through readAll normalization', absPreset.rows[0].absoluteOffset === 62);
 
+// --- row-emission flags (roughing / chain / repeatStartY) ---
+// These three are read by kapak.js emitOffsetPasses but were missing from the
+// Mongoose schema, so an API POST/PUT stripped them and a preset saved through
+// the app lost its toolpath (1 NUMARA roughing -> square clearing passes,
+// 7 NUMARA chain -> no retract/re-plunge between the inner rings). The store
+// must persist the true flags and materialise the rest as explicit false.
+const flagPreset = await fileStore.create({
+  name: 'FlagMode',
+  offsetMode: 'absolute',
+  rows: [
+    { name: 'rough', toolNo: '6', depth: 6, stepOffset: 62, absoluteOffset: 62, roughing: true },
+    { name: 'chained', toolNo: '6', depth: 6, stepOffset: 59, absoluteOffset: 59, chain: true },
+    { name: 'ring', toolNo: '12', depth: 5, stepOffset: 139.1, absoluteOffset: 139.1, repeatStartY: true },
+    { name: 'plain', toolNo: '9', depth: 3, stepOffset: 60, absoluteOffset: 60 },
+  ],
+});
+const flagStored = JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8')).find((p) => p.name === 'FlagMode');
+check('roughing survives the write path', flagStored.rows[0].roughing === true);
+check('chain survives the write path', flagStored.rows[1].chain === true);
+check('repeatStartY survives the write path', flagStored.rows[2].repeatStartY === true);
+check('rows without a flag are written as explicit false (not undefined)', flagStored.rows[3].roughing === false && flagStored.rows[3].chain === false && flagStored.rows[3].repeatStartY === false);
+check('create() returns the flag-carrying preset', flagPreset.rows[0].roughing === true);
+
+const flagRead = (await fileStore.list()).find((p) => p.name === 'FlagMode');
+check('flags round-trip through readAll', flagRead.rows[0].roughing === true && flagRead.rows[1].chain === true && flagRead.rows[2].repeatStartY === true);
+
+// A flag flipping off must also persist (not be re-derived as true).
+await fileStore.update(flagPreset._id, {
+  rows: [
+    { name: 'rough', toolNo: '6', depth: 6, stepOffset: 62, absoluteOffset: 62 },
+  ],
+});
+const flagUpdated = (await fileStore.list()).find((p) => p.name === 'FlagMode');
+check('update clears flags when the new rows omit them', flagUpdated.rows[0].roughing === false && flagUpdated.rows.length === 1);
+
+// --- legacy rows: a preset saved without the flags still reads cleanly ---
+// Simulates an existing presets.json entry (pre-migration) with no flags on any row.
+const legacy = JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
+legacy.push({
+  _id: 'legacy_1', name: 'LegacyRow', module: 'kapak', offsetMode: 'absolute',
+  rows: [{ name: 'old', toolNo: '6', depth: 6, stepOffset: 62, absoluteOffset: 62 }],
+});
+fs.writeFileSync(DATA_FILE, JSON.stringify(legacy, null, 2), 'utf-8');
+const legacyRead = (await fileStore.list()).find((p) => p.name === 'LegacyRow');
+check('legacy rows (no flags in file) read as explicit false', legacyRead.rows[0].roughing === false && legacyRead.rows[0].chain === false && legacyRead.rows[0].repeatStartY === false);
+
 // --- corrupt file surfaces a readable error ---
 fs.writeFileSync(DATA_FILE, '{not json', 'utf-8');
 let readErr = null;

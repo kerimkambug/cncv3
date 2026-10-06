@@ -46,6 +46,35 @@ function normalizeOffsetRows(preset) {
   };
 }
 
+// Row-emission flags the G-code engine reads (kapak.js emitOffsetPasses) but which
+// do NOT appear on every row: `roughing` (square clearing pass), `chain`
+// (continue at depth without retract/re-plunge) and `repeatStartY` (repeat the
+// start Y on the cut move). The server schema now stores them explicitly; this
+// mirrors that so a preset loaded from localStorage (the no-server fallback) or
+// from an older API payload without the flags still reaches kapak.js with a
+// defined boolean instead of `undefined` (the engine tests `=== true`, so
+// undefined and false behave the same — normalising just keeps the data shape
+// identical between the API and localStorage paths).
+const ROW_FLAG_KEYS = ['roughing', 'chain', 'repeatStartY'];
+function normalizeRowFlags(preset) {
+  if (!preset || !Array.isArray(preset.rows)) return preset;
+  return {
+    ...preset,
+    rows: preset.rows.map((row) => {
+      if (row == null) return row;
+      const missing = ROW_FLAG_KEYS.some((key) => row[key] === undefined);
+      if (!missing) return row;
+      const next = { ...row };
+      ROW_FLAG_KEYS.forEach((key) => { if (next[key] === undefined) next[key] = false; });
+      return next;
+    }),
+  };
+}
+
+function normalizePresetRows(preset) {
+  return normalizeRowFlags(normalizeOffsetRows(preset));
+}
+
 // Validation pass: flags absolute-mode offset rows whose source data carried no
 // usable absoluteOffset. The loader backfills them from stepOffset, so this is
 // advisory — it makes silently-fixed data visible instead of invisible.
@@ -85,12 +114,12 @@ export function usePresets(moduleName) {
       const data = await res.json();
       const list = Array.isArray(data) ? data : [];
       validateOffsetRows(list);
-      setPresets(list.map(normalizeOffsetRows));
+      setPresets(list.map(normalizePresetRows));
       setError(null);
     } catch {
       const localData = readLocalPresets().filter((item) => item.module === moduleName).map(normalizePreset);
       validateOffsetRows(localData);
-      setPresets(localData.map(normalizeOffsetRows));
+      setPresets(localData.map(normalizePresetRows));
       setError(null);
     } finally {
       setLoading(false);

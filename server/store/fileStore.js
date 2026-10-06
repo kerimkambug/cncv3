@@ -21,7 +21,8 @@ function readAll() {
       throw new Error('Preset data must be a JSON array.');
     }
     validateAbsoluteOffsets(parsed);
-    return parsed.map(normalizeOffsetRows);
+    validateRowFlags(parsed);
+    return parsed.map((p) => normalizeRowFlags(normalizeOffsetRows(p)));
   } catch (err) {
     const error = new Error(`Unable to read preset data from ${DATA_FILE}: ${err.message}`, { cause: err });
     error.code = err.code || 'PRESET_DATA_READ_ERROR';
@@ -67,6 +68,55 @@ function normalizeOffsetRows(preset) {
     return { ...row, absoluteOffset: row.stepOffset };
   });
   return changed ? { ...preset, rows } : preset;
+}
+
+// Row-emission flags the G-code engine reads (kapak.js emitOffsetPasses) but
+// which do NOT appear on every row: `roughing` (square clearing pass), `chain`
+// (continue at depth, no retract/re-plunge) and `repeatStartY` (repeat the start
+// Y on the cut move). They were absent from the Mongoose schema, so an API
+// POST/PUT stripped them and a preset saved through the app lost its toolpath
+// (1 NUMARA roughing, 7 NUMARA chained rings). normalizeRowFlags is the store
+// counterpart: it backfills the explicit false and reports rows that carried
+// them, so the same flags survive a file-store round-trip.
+const ROW_FLAG_KEYS = ['roughing', 'chain', 'repeatStartY'];
+function normalizeRowFlags(preset) {
+  if (!preset || !Array.isArray(preset.rows)) return preset;
+  let changed = false;
+  const rows = preset.rows.map((row) => {
+    if (row == null) return row;
+    const next = { ...row };
+    let rowChanged = false;
+    for (const key of ROW_FLAG_KEYS) {
+      if (next[key] === undefined) { next[key] = false; rowChanged = true; }
+    }
+    if (rowChanged) changed = true;
+    return rowChanged ? next : row;
+  });
+  return changed ? { ...preset, rows } : preset;
+}
+
+// Advisory pass: makes the row flags visible in the log instead of silent. It
+// only warns when a row actually carries a truthy flag, so operators can see
+// which presets depend on retract-skipping (chain) or square clearing (roughing)
+// — both of which change the physical toolpath when a data source drops them.
+const warnedRowFlags = new Set();
+function validateRowFlags(presets) {
+  if (!Array.isArray(presets)) return;
+  presets.forEach((preset, presetIdx) => {
+    if (!preset || !Array.isArray(preset.rows)) return;
+    const presetKey = String(preset._id || preset.name || `index-${presetIdx}`);
+    preset.rows.forEach((row, rowIdx) => {
+      if (row == null) return;
+      const active = ROW_FLAG_KEYS.filter((key) => row[key] === true);
+      if (active.length === 0) return;
+      const warnKey = `${presetKey}:${rowIdx}:${active.join(',')}`;
+      if (warnedRowFlags.has(warnKey)) return;
+      warnedRowFlags.add(warnKey);
+      console.warn(
+        `[presets.json] "${preset.name || presetKey}" satır ${rowIdx + 1}${row.name ? ` (${row.name})` : ''}: ${active.join(', ')} aktif — tezgâh yolu bu bayraklara bağlı (retract atlama / kare talaş boşaltma / Y tekrarı).`,
+      );
+    });
+  });
 }
 
 // Validation pass: flags (never blocks) absolute-mode offset rows whose source
@@ -134,7 +184,9 @@ export const fileStore = {
       // JSON import, an editor opening the data directory) would see the missing
       // field — and, on the next read, would be silently patched to a different
       // value. Writing it back keeps the file and the in-memory shape identical.
-      all.push(normalizeOffsetRows(preset));
+      // The row-emission flags (roughing/chain/repeatStartY) go through the same
+      // path so they are persisted explicitly instead of being re-derived.
+      all.push(normalizeRowFlags(normalizeOffsetRows(preset)));
       writeAll(all);
       return all[all.length - 1];
     });
@@ -145,7 +197,7 @@ export const fileStore = {
       const all = readAll();
       const idx = all.findIndex((p) => p._id === id);
       if (idx === -1) return null;
-      all[idx] = normalizeOffsetRows({ ...all[idx], ...data, updatedAt: new Date().toISOString() });
+      all[idx] = normalizeRowFlags(normalizeOffsetRows({ ...all[idx], ...data, updatedAt: new Date().toISOString() }));
       writeAll(all);
       return all[idx];
     });
