@@ -20,7 +20,7 @@ export default function TopluListe({ cfg }) {
     linesRaw.forEach((line, idx) => {
       const parsed = parseBatchLine(line);
       if (!parsed) { errors.push(`Satır ${idx + 1} ("${line}") okunamadı, atlandı.`); return; }
-      const err = validateKapakSize(parsed.width, parsed.height, cfg.rows, cfg.offsetMode);
+      const err = validateKapakSize(parsed.width, parsed.height, cfg.rows, cfg.offsetMode, cfg.thickness);
       if (err) { errors.push(`Satır ${idx + 1} ("${line}"): ${err}`); return; }
 
       const gcode = buildKapakGcode(parsed.width, parsed.height, cfg);

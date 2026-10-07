@@ -170,6 +170,23 @@ describe('kapak: tool offsets', () => {
     expect(validateKapakSize(500, 500, [])).toBeTypeOf('string');
     expect(validateKapakSize(500, 500, [{ name: 'x', depth: 10, stepOffset: 5 }])).toBeTypeOf('string');
   });
+
+  it('rejects the geometry mistakes that would put metal below the table', () => {
+    const base = { name: 'pocket', toolNo: 2, depth: 6, stepOffset: 50 };
+    // depth > thickness would cut through the plate into the bed
+    expect(validateKapakSize(500, 500, [base], 'relative', 18)).toBe(null);
+    expect(validateKapakSize(500, 500, [{ ...base, depth: 25 }], 'relative', 18)).toBeTypeOf('string');
+    // depth <= 0 removes nothing (or lifts the bit above the surface)
+    expect(validateKapakSize(500, 500, [{ ...base, depth: 0 }], 'relative', 18)).toBeTypeOf('string');
+    expect(validateKapakSize(500, 500, [{ ...base, depth: -3 }], 'relative', 18)).toBeTypeOf('string');
+    // non-numeric tool number
+    expect(validateKapakSize(500, 500, [{ ...base, toolNo: 'T' }])).toBeTypeOf('string');
+    // negative relative step offset runs the pass off the stock (absolute is exempt)
+    expect(validateKapakSize(500, 500, [{ ...base, stepOffset: -5 }], 'relative')).toBeTypeOf('string');
+    expect(validateKapakSize(500, 500, [{ ...base, stepOffset: -5 }], 'absolute')).toBe(null);
+    // without a thickness argument the depth check is simply skipped (back-compat)
+    expect(validateKapakSize(500, 500, [{ ...base, depth: 25 }])).toBe(null);
+  });
 });
 
 describe('kapak: bit-angle sensitivity (V-carve math)', () => {

@@ -1386,16 +1386,36 @@ export function buildKapakPresetDxf(width, height, cfg = {}) {
 
 /**
  * Validates a size against a tool-row set before generating gcode.
- * Only validates missing configuration fields (not narrow dimensions).
+ * Missing fields are fatal. Three GEOMETRY mistakes are also fatal because they
+ * put metal where it must never go (a Z below the table, or an offset that eats
+ * the part), so they are checked here instead of being left to the shop:
+ *   - depth > thickness : the pass would cut through the plate AND into the bed
+ *   - depth <= 0        : the pass cuts nothing (or lifts above the surface)
+ *   - offset < 0        : the profile would run outside the stock
+ * Narrow dimensions are NOT validated here: calculateAdaptiveOffsets absorbs
+ * those (it shrinks S0 and silently skips the rows that no longer fit).
+ * @param {number} [thickness] - material thickness; when given, a depth greater
+ *   than it is rejected (the pass would cut into the machine bed)
  * @returns {string|null} an error message, or null if valid
  */
-export function validateKapakSize(width, height, rows, offsetMode = 'relative') {
+export function validateKapakSize(width, height, rows, offsetMode = 'relative', thickness = undefined) {
   if (!rows || rows.length === 0) return 'En az bir bıçak tanımla.';
+  const t = Number(thickness);
+  const hasThickness = Number.isFinite(t) && t > 0;
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
+    const label = r.name || `Satır ${i + 1}`;
     if (r.toolNo === '' || r.toolNo === undefined || r.toolNo === null) return 'Bir satırda Tool No eksik.';
-    if (!Number.isFinite(r.depth)) return `${r.name || 'bir bıçak'} için derinlik eksik.`;
-    if (!Number.isFinite(r.stepOffset)) return `${r.name || 'bir bıçak'} için adım offset eksik.`;
+    if (!Number.isFinite(Number(r.toolNo))) return `${label} için Tool No geçersiz (${r.toolNo}).`;
+    if (!Number.isFinite(r.depth)) return `${label} için derinlik eksik.`;
+    if (!Number.isFinite(r.stepOffset)) return `${label} için adım offset eksik.`;
+    if (r.depth <= 0) return `${label}: derinlik ${r.depth}mm — sıfır/negatif derinlik talaş kaldırmaz.`;
+    if (hasThickness && r.depth > t) {
+      return `${label}: derinlik (${r.depth}mm) kalınlıktan (${t}mm) büyük — tabla delinebilir.`;
+    }
+    if (offsetMode !== 'absolute' && Number(r.stepOffset) < 0) {
+      return `${label}: adım offset negatif (${r.stepOffset}mm) — paso plaka dışına taşar.`;
+    }
   }
   return null;
 }

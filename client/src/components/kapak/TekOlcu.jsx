@@ -66,7 +66,7 @@ export default function TekOlcu({ cfg, plateCfg }) {
     let xOffset = 0;
 
     for (const m of measurements) {
-      const err = validateKapakSize(m.width, m.height, cfg.rows, cfg.offsetMode);
+      const err = validateKapakSize(m.width, m.height, cfg.rows, cfg.offsetMode, cfg.thickness);
       if (err) {
         setMessage({ type: 'err', text: `Ölçü ${m.width}×${m.height}: ${err}` });
         return;

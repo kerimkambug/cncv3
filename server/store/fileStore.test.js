@@ -105,6 +105,22 @@ check('create() returns the flag-carrying preset', flagPreset.rows[0].roughing =
 const flagRead = (await fileStore.list()).find((p) => p.name === 'FlagMode');
 check('flags round-trip through readAll', flagRead.rows[0].roughing === true && flagRead.rows[1].chain === true && flagRead.rows[2].repeatStartY === true);
 
+// --- derz sub-fields read by kapak.js (startY / spindleSpeed) ---
+// Same failure class as the row flags above: emitDerzRows reads derz.startY
+// (1/12 NUMARA dividers start at Y70, not rows[0]'s 62) and derz.spindleSpeed
+// (2 NUMARA's derz block runs at S15000), but neither was in the Mongoose schema.
+const derzPreset = await fileStore.create({
+  name: 'DerzFields',
+  offsetMode: 'absolute',
+  rows: [
+    { name: 'derz', toolNo: '1', depth: 3, stepOffset: 89, operation: 'derz', derz: { yon: 'dikey', margin: 89, spacing: 19, overshootY: 0, startY: 70, spindleSpeed: 15000, respectPreviousOffset: false } },
+  ],
+});
+const derzStored = JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8')).find((p) => p.name === 'DerzFields');
+check('derz.startY survives the write path', derzStored.rows[0].derz.startY === 70);
+check('derz.spindleSpeed survives the write path', derzStored.rows[0].derz.spindleSpeed === 15000);
+check('derz.startY round-trips through readAll', derzPreset.rows[0].derz.startY === 70);
+
 // A flag flipping off must also persist (not be re-derived as true).
 await fileStore.update(flagPreset._id, {
   rows: [

@@ -139,6 +139,113 @@ export const NUMUNE_PRESETS = [
       ],
     },
   },
+  {
+    name: '4 NUMARA',
+    width: 292,
+    height: 400,
+    description: 'Pah/kertme motifi (T1 V-bicak) + T4 4mm duz kanal + T6 dis kontur. T1 bloklari 503.7,2010 ile 321.1,1960.1 arasinda GENIS bir (X 278.6-380.5 = 101.9 mm) kapali V-profil kanal acar (Z18 dis rampalar, taban Z13.88), ardindan 321.1 de T1 kose keskinlestirmesi (Z18-13.25-18) yapar. T4 dar kanali (Z18-Z2 = 16 mm derin, kalinlik siniri) acar; T6 1390x1850 plaka konturunu cikarir.',
+    cfg: {
+      topStyle: 'flat',
+      rows: [
+        { toolNo: '1', depth: 6, stepOffset: 62, feed: 8000, name: 'T1 V pah kanalı (90° = kenara 45°)', operation: 'offset' },
+        { toolNo: '4', depth: 16, stepOffset: 60, feed: 9000, name: 'T4 4mm düz kanal', operation: 'offset' },
+        { toolNo: '6', depth: 2, stepOffset: 62, feed: 9000, name: '6mm dış kontur', operation: 'offset' },
+      ],
+    },
+  },
+  {
+    name: '9 NUMARA',
+    width: 292,
+    height: 400,
+    description: 'T10 10mm düz çift çerçeve (iç çerçeve içine 5 kademeli rampa) + T9 tabla profili (R118.75/R113.75 köşe yayları) + T11 iç kanal (S14000) + T2 10mm ballnose derz (F13000).',
+    cfg: {
+      topStyle: 'flat',
+      rows: [
+        { toolNo: '10', depth: 6, stepOffset: 67, feed: 12000, name: '10mm dış çerçeve', operation: 'offset' },
+        { toolNo: '10', depth: 6, stepOffset: 62, feed: 12000, name: '10mm iç çerçeve', operation: 'offset' },
+        { toolNo: '9', depth: 3, stepOffset: 57, feed: 6000, name: '20mm tabla profili (köşe yaylı)', operation: 'offset' },
+        { toolNo: '11', depth: 14.5, stepOffset: 118, feed: 4000, spindleSpeed: 14000, name: 'iç kanal (S14000)', operation: 'offset' },
+        { toolNo: '2', depth: 2.5, stepOffset: 78.75, feed: 13000, name: '10mm ballnose derz', operation: 'derz', derz: { yon: 'dikey', margin: 78.75, spacing: 34.42, autoFit: true, overshootY: 0, respectPreviousOffset: false } },
+      ],
+    },
+  },
+  {
+    name: '10 NUMARA',
+    width: 292,
+    height: 400,
+    description: 'İç çerçeveli tabla modülü: T3 dış + T3 iç offset, T12 135° kanal (üç blok: Z18→9.9 yüzey rampalı kanal, Z18→10.4675, Z18→10), T11 (S14000) ve T10 + T6 kademeli çerçeveler.',
+    cfg: {
+      topStyle: 'flat',
+      rows: [
+        { toolNo: '3', depth: 5, stepOffset: 57, feed: 6000, name: 'T3 dış', operation: 'offset' },
+        { toolNo: '3', depth: 5, stepOffset: 70, feed: 6000, name: 'T3 iç', operation: 'offset' },
+        { toolNo: '12', depth: 5, stepOffset: 47, feed: 9000, name: '135° iç offset', operation: 'offset' },
+        { toolNo: '11', depth: 4, stepOffset: 45, feed: 7000, spindleSpeed: 14000, name: 'iç kanal (S14000)', operation: 'offset' },
+        { toolNo: '10', depth: 4, stepOffset: 40, feed: 10000, name: '10mm iç çerçeve', operation: 'offset' },
+        { toolNo: '6', depth: 4, stepOffset: 35, feed: 6000, name: '6mm iç çerçeve', operation: 'offset' },
+      ],
+    },
+  },
+  {
+    name: '11 NUMARA',
+    width: 292,
+    height: 400,
+    description: 'Kademeli derinlikli tabla: T5 (13 mm derin) + T10 + T10 + T6 (5 mm derin) + T12 135° (Z18→10.985, kenara 22.5°) + T10 sığ kanal (Z18→15) + T10 orta derinlik (Z5? → Z18→2.5) + T9 geniş yaylı profil.',
+    cfg: {
+      topStyle: 'flat',
+      rows: [
+        { toolNo: '5', depth: 13, stepOffset: 57, feed: 6000, name: 'T5 derin kaba', operation: 'offset' },
+        { toolNo: '10', depth: 8.795, stepOffset: 60, feed: 12000, name: 'T10 orta', operation: 'offset' },
+        { toolNo: '10', depth: 9.06, stepOffset: 65, feed: 12000, name: 'T10 orta', operation: 'offset' },
+        { toolNo: '6', depth: 13, stepOffset: 45, feed: 6000, name: '6mm iç kaba', operation: 'offset' },
+        { toolNo: '12', depth: 7.015, stepOffset: 55, feed: 7000, name: '135° iç kanal', operation: 'offset' },
+        { toolNo: '10', depth: 3, stepOffset: 100, feed: 12000, name: '10mm sığ kanal', operation: 'offset' },
+        { toolNo: '10', depth: 15.5, stepOffset: 80, feed: 12000, name: '10mm derin kanal', operation: 'offset' },
+        { toolNo: '9', depth: 3, stepOffset: 55, feed: 6000, name: '20mm tabla profili (yaylı)', operation: 'offset' },
+      ],
+    },
+  },
+  {
+    name: '12 NUMARA',
+    width: 292,
+    height: 400,
+    description: 'Panel dış kesimi + derz. T4 4mm dış kontur (Z18→Z8 = 10 mm, kalınlık sınırı) ve T6 6mm top-derz blokları: 15 çizgi (aralık 69.5 mm), T6 top köşesinde R40 yuvarlatma (G2 +2.0 mm dışa rampalı), son dört çizgi Y1855/1860/1865 ofsetleriyle açık (panel dışına pah kırar).',
+    cfg: {
+      topStyle: 'flat',
+      rows: [
+        { toolNo: '4', depth: 10, stepOffset: 60, feed: 6000, name: 'T4 4mm dış kontur', operation: 'offset' },
+        { toolNo: '6', depth: 6, stepOffset: 60, feed: 6000, name: '6mm top-derz (15 çizgi + R40 köşe)', operation: 'derz', derz: { yon: 'dikey', margin: 60, spacing: 69.5, autoFit: true, overshootY: 5, respectPreviousOffset: false } },
+      ],
+    },
+  },
+  {
+    name: '13 NUMARA',
+    width: 292,
+    height: 400,
+    description: 'Dış çerçeve + iç kabartma alanı: T6 6mm dış offset (Z18→Z6 = 12 mm, kalınlık sınırı) ve T2 10mm ballnose iç offset (Z18→Z15.5), geniş plaka üzerinde kabartma yüzeyi hazırlar.',
+    cfg: {
+      topStyle: 'flat',
+      rows: [
+        { toolNo: '6', depth: 12, stepOffset: 70, feed: 6000, name: '6mm dış çerçeve (kalınlık sınırı)', operation: 'offset' },
+        { toolNo: '2', depth: 2.5, stepOffset: 60, feed: 4000, name: '10mm ballnose iç kabartma', operation: 'offset' },
+      ],
+    },
+  },
+  {
+    name: '14 NUMARA',
+    width: 292,
+    height: 400,
+    description: 'Kemerli (sivri) üst + derz + T12 135° köşe keskinleştirmesi. topStyle=pointed (riseRatio 0.125), T9 20mm kemer profili (R>40), derz 13.69 mm aralıkla kemer eğrisini takip eder, T12 135° iç kanal 17 mm derinliğe iner (kalınlık sınırı).',
+    cfg: {
+      topStyle: 'pointed',
+      riseRatio: 0.125,
+      rows: [
+        { toolNo: '9', depth: 3, stepOffset: 57, feed: 6000, name: '20mm kemer profili (yaylı)', operation: 'offset' },
+        { toolNo: '12', depth: 17, stepOffset: 60, feed: 7000, name: '135° iç kanal (kalınlık sınırı)', operation: 'offset' },
+        { toolNo: '9', depth: 3, stepOffset: 70.69, feed: 6000, name: 'kemer derz', operation: 'derz', derz: { yon: 'dikey', margin: 70.69, spacing: 13.69, autoFit: true, overshootY: 0, respectPreviousOffset: false } },
+      ],
+    },
+  },
 ];
 
 /** Turns a seed definition into the preset document shape. */

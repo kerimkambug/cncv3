@@ -5103,6 +5103,35 @@ function normalizeOffsetRows(preset) {
   };
 }
 
+// Row-emission flags the G-code engine reads (kapak.js emitOffsetPasses) but which
+// do NOT appear on every row: `roughing` (square clearing pass), `chain`
+// (continue at depth without retract/re-plunge) and `repeatStartY` (repeat the
+// start Y on the cut move). The server schema now stores them explicitly; this
+// mirrors that so a preset loaded from localStorage (the no-server fallback) or
+// from an older API payload without the flags still reaches kapak.js with a
+// defined boolean instead of `undefined` (the engine tests `=== true`, so
+// undefined and false behave the same — normalising just keeps the data shape
+// identical between the API and localStorage paths).
+const ROW_FLAG_KEYS = ['roughing', 'chain', 'repeatStartY'];
+function normalizeRowFlags(preset) {
+  if (!preset || !Array.isArray(preset.rows)) return preset;
+  return {
+    ...preset,
+    rows: preset.rows.map((row) => {
+      if (row == null) return row;
+      const missing = ROW_FLAG_KEYS.some((key) => row[key] === undefined);
+      if (!missing) return row;
+      const next = { ...row };
+      ROW_FLAG_KEYS.forEach((key) => { if (next[key] === undefined) next[key] = false; });
+      return next;
+    }),
+  };
+}
+
+function normalizePresetRows(preset) {
+  return normalizeRowFlags(normalizeOffsetRows(preset));
+}
+
 // Validation pass: flags absolute-mode offset rows whose source data carried no
 // usable absoluteOffset. The loader backfills them from stepOffset, so this is
 // advisory — it makes silently-fixed data visible instead of invisible.
@@ -5142,12 +5171,12 @@ export function usePresets(moduleName) {
       const data = await res.json();
       const list = Array.isArray(data) ? data : [];
       validateOffsetRows(list);
-      setPresets(list.map(normalizeOffsetRows));
+      setPresets(list.map(normalizePresetRows));
       setError(null);
     } catch {
       const localData = readLocalPresets().filter((item) => item.module === moduleName).map(normalizePreset);
       validateOffsetRows(localData);
-      setPresets(localData.map(normalizeOffsetRows));
+      setPresets(localData.map(normalizePresetRows));
       setError(null);
     } finally {
       setLoading(false);
@@ -12755,6 +12784,25 @@ const ToolRowSchema = new mongoose.Schema(
     // depth says how deep, and the angle derives the corner ramp (depth/tan(angle/2)).
     // null = legacy row: no angle, corner ramp falls back to the 1:1 rule (a 90° bit).
     bitAngle: { type: Number, default: null },
+    // --- Row-emission flags read by kapak.js / nesting.js -------------------
+    // These three are read by the G-code engine (kapak.js emitOffsetPasses) but
+    // were missing from the schema. Because Mongoose is strict by default, an
+    // API POST/PUT would silently strip them, so a preset saved through the app
+    // no longer reproduced the toolpath it was captured from (1 NUMARA's square
+    // roughing passes and 7 NUMARA's chained inner rings were being lost).
+    //
+    // roughing: cut this offset pass as a plain SQUARE rectangle instead of the
+    //   rounded profile — ArtCAM's "2D Area Clearing / Pocket" pass. 1 NUMARA
+    //   uses it for the 62/59 mm clearing rectangles.
+    roughing: { type: Boolean, default: false },
+    // chain: continue at depth from the previous pass without retracting to
+    //   safe Z and re-plunging (consecutive rowIdx, same tool, same depth).
+    //   1 NUMARA (r6->r3) and 7 NUMARA (four inner rings) use it.
+    chain: { type: Boolean, default: false },
+    // repeatStartY: on the cut move, repeat the start Y even though it did not
+    //   change ("G1 X152.90 Y139.10 F9000.0" instead of "G1 X152.90 F9000.0").
+    //   ArtCAM emits this style for 7 NUMARA's chained rings.
+    repeatStartY: { type: Boolean, default: false },
     derz: {
       yon: { type: String, enum: ['dikey', 'yatay'], default: 'dikey' },
       margin: { type: Number, default: 0 },
@@ -13727,7 +13775,8 @@ function readAll() {
       throw new Error('Preset data must be a JSON array.');
     }
     validateAbsoluteOffsets(parsed);
-    return parsed.map(normalizeOffsetRows);
+    validateRowFlags(parsed);
+    return parsed.map((p) => normalizeRowFlags(normalizeOffsetRows(p)));
   } catch (err) {
     const error = new Error(`Unable to read preset data from ${DATA_FILE}: ${err.message}`, { cause: err });
     error.code = err.code || 'PRESET_DATA_READ_ERROR';
@@ -13773,6 +13822,55 @@ function normalizeOffsetRows(preset) {
     return { ...row, absoluteOffset: row.stepOffset };
   });
   return changed ? { ...preset, rows } : preset;
+}
+
+// Row-emission flags the G-code engine reads (kapak.js emitOffsetPasses) but
+// which do NOT appear on every row: `roughing` (square clearing pass), `chain`
+// (continue at depth, no retract/re-plunge) and `repeatStartY` (repeat the start
+// Y on the cut move). They were absent from the Mongoose schema, so an API
+// POST/PUT stripped them and a preset saved through the app lost its toolpath
+// (1 NUMARA roughing, 7 NUMARA chained rings). normalizeRowFlags is the store
+// counterpart: it backfills the explicit false and reports rows that carried
+// them, so the same flags survive a file-store round-trip.
+const ROW_FLAG_KEYS = ['roughing', 'chain', 'repeatStartY'];
+function normalizeRowFlags(preset) {
+  if (!preset || !Array.isArray(preset.rows)) return preset;
+  let changed = false;
+  const rows = preset.rows.map((row) => {
+    if (row == null) return row;
+    const next = { ...row };
+    let rowChanged = false;
+    for (const key of ROW_FLAG_KEYS) {
+      if (next[key] === undefined) { next[key] = false; rowChanged = true; }
+    }
+    if (rowChanged) changed = true;
+    return rowChanged ? next : row;
+  });
+  return changed ? { ...preset, rows } : preset;
+}
+
+// Advisory pass: makes the row flags visible in the log instead of silent. It
+// only warns when a row actually carries a truthy flag, so operators can see
+// which presets depend on retract-skipping (chain) or square clearing (roughing)
+// — both of which change the physical toolpath when a data source drops them.
+const warnedRowFlags = new Set();
+function validateRowFlags(presets) {
+  if (!Array.isArray(presets)) return;
+  presets.forEach((preset, presetIdx) => {
+    if (!preset || !Array.isArray(preset.rows)) return;
+    const presetKey = String(preset._id || preset.name || `index-${presetIdx}`);
+    preset.rows.forEach((row, rowIdx) => {
+      if (row == null) return;
+      const active = ROW_FLAG_KEYS.filter((key) => row[key] === true);
+      if (active.length === 0) return;
+      const warnKey = `${presetKey}:${rowIdx}:${active.join(',')}`;
+      if (warnedRowFlags.has(warnKey)) return;
+      warnedRowFlags.add(warnKey);
+      console.warn(
+        `[presets.json] "${preset.name || presetKey}" satır ${rowIdx + 1}${row.name ? ` (${row.name})` : ''}: ${active.join(', ')} aktif — tezgâh yolu bu bayraklara bağlı (retract atlama / kare talaş boşaltma / Y tekrarı).`,
+      );
+    });
+  });
 }
 
 // Validation pass: flags (never blocks) absolute-mode offset rows whose source
@@ -13840,7 +13938,9 @@ export const fileStore = {
       // JSON import, an editor opening the data directory) would see the missing
       // field — and, on the next read, would be silently patched to a different
       // value. Writing it back keeps the file and the in-memory shape identical.
-      all.push(normalizeOffsetRows(preset));
+      // The row-emission flags (roughing/chain/repeatStartY) go through the same
+      // path so they are persisted explicitly instead of being re-derived.
+      all.push(normalizeRowFlags(normalizeOffsetRows(preset)));
       writeAll(all);
       return all[all.length - 1];
     });
@@ -13851,7 +13951,7 @@ export const fileStore = {
       const all = readAll();
       const idx = all.findIndex((p) => p._id === id);
       if (idx === -1) return null;
-      all[idx] = normalizeOffsetRows({ ...all[idx], ...data, updatedAt: new Date().toISOString() });
+      all[idx] = normalizeRowFlags(normalizeOffsetRows({ ...all[idx], ...data, updatedAt: new Date().toISOString() }));
       writeAll(all);
       return all[idx];
     });
@@ -13954,6 +14054,52 @@ check('derz rows are NOT backfilled', stored.rows[2].absoluteOffset === undefine
 // re-read through the store: the backfilled preset keeps its values and readAll stays valid
 const absPreset = (await fileStore.list()).find((p) => p.name === 'AbsMode');
 check('backfilled preset round-trips through readAll normalization', absPreset.rows[0].absoluteOffset === 62);
+
+// --- row-emission flags (roughing / chain / repeatStartY) ---
+// These three are read by kapak.js emitOffsetPasses but were missing from the
+// Mongoose schema, so an API POST/PUT stripped them and a preset saved through
+// the app lost its toolpath (1 NUMARA roughing -> square clearing passes,
+// 7 NUMARA chain -> no retract/re-plunge between the inner rings). The store
+// must persist the true flags and materialise the rest as explicit false.
+const flagPreset = await fileStore.create({
+  name: 'FlagMode',
+  offsetMode: 'absolute',
+  rows: [
+    { name: 'rough', toolNo: '6', depth: 6, stepOffset: 62, absoluteOffset: 62, roughing: true },
+    { name: 'chained', toolNo: '6', depth: 6, stepOffset: 59, absoluteOffset: 59, chain: true },
+    { name: 'ring', toolNo: '12', depth: 5, stepOffset: 139.1, absoluteOffset: 139.1, repeatStartY: true },
+    { name: 'plain', toolNo: '9', depth: 3, stepOffset: 60, absoluteOffset: 60 },
+  ],
+});
+const flagStored = JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8')).find((p) => p.name === 'FlagMode');
+check('roughing survives the write path', flagStored.rows[0].roughing === true);
+check('chain survives the write path', flagStored.rows[1].chain === true);
+check('repeatStartY survives the write path', flagStored.rows[2].repeatStartY === true);
+check('rows without a flag are written as explicit false (not undefined)', flagStored.rows[3].roughing === false && flagStored.rows[3].chain === false && flagStored.rows[3].repeatStartY === false);
+check('create() returns the flag-carrying preset', flagPreset.rows[0].roughing === true);
+
+const flagRead = (await fileStore.list()).find((p) => p.name === 'FlagMode');
+check('flags round-trip through readAll', flagRead.rows[0].roughing === true && flagRead.rows[1].chain === true && flagRead.rows[2].repeatStartY === true);
+
+// A flag flipping off must also persist (not be re-derived as true).
+await fileStore.update(flagPreset._id, {
+  rows: [
+    { name: 'rough', toolNo: '6', depth: 6, stepOffset: 62, absoluteOffset: 62 },
+  ],
+});
+const flagUpdated = (await fileStore.list()).find((p) => p.name === 'FlagMode');
+check('update clears flags when the new rows omit them', flagUpdated.rows[0].roughing === false && flagUpdated.rows.length === 1);
+
+// --- legacy rows: a preset saved without the flags still reads cleanly ---
+// Simulates an existing presets.json entry (pre-migration) with no flags on any row.
+const legacy = JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
+legacy.push({
+  _id: 'legacy_1', name: 'LegacyRow', module: 'kapak', offsetMode: 'absolute',
+  rows: [{ name: 'old', toolNo: '6', depth: 6, stepOffset: 62, absoluteOffset: 62 }],
+});
+fs.writeFileSync(DATA_FILE, JSON.stringify(legacy, null, 2), 'utf-8');
+const legacyRead = (await fileStore.list()).find((p) => p.name === 'LegacyRow');
+check('legacy rows (no flags in file) read as explicit false', legacyRead.rows[0].roughing === false && legacyRead.rows[0].chain === false && legacyRead.rows[0].repeatStartY === false);
 
 // --- corrupt file surfaces a readable error ---
 fs.writeFileSync(DATA_FILE, '{not json', 'utf-8');
@@ -14266,6 +14412,29 @@ console.log('\nchecks:');
 console.log('  45deg ramp corner X41.51 Y385.51 present :', g45.includes('X41.51 Y385.51 Z18.00'));
 console.log('  90deg ramp corner X50.00 Y350.00 present :', g90.includes('X50.00 Y350.00 Z18.00'));
 console.log('  1 NUMARA ramp (X50.00 Y350.00 Z18.00) reproduced at 90deg:', g90.includes('X50.00 Y350.00 Z18.00'));
+
+
+================================================================================
+DOSYA: _scan_dxf.ps1
+YOL  : _scan_dxf.ps1
+================================================================================
+$d = [IO.File]::ReadAllLines((Get-Item "C:\Users\selma\OneDrive\Masaüstü\proj\numuneler\TABLA MODELLERİMİZ pano şeklinde.dxf").FullName)
+$inEnt = $false
+$cur = ''
+$stats = @{}
+for ($i = 0; $i -lt $d.Count - 1; $i++) {
+    $t = $d[$i].Trim()
+    if ($t -eq 'SECTION' -and $d[$i+2].Trim() -eq 'ENTITIES') { $inEnt = $true; continue }
+    if ($t -eq 'ENDSEC' -and $inEnt) { $inEnt = $false; continue }
+    if (-not $inEnt) { continue }
+    if ($t -eq '0') { $cur = $d[$i+1].Trim() }
+    elseif ($t -eq '8') {
+        $k = "$cur|$($d[$i+1].Trim())"
+        if ($stats.ContainsKey($k)) { $stats[$k]++ } else { $stats[$k] = 1 }
+    }
+}
+Write-Host "=== ENTITY x LAYER counts ==="
+$stats.GetEnumerator() | Sort-Object Name | ForEach-Object { Write-Host ("{0,6}  {1}" -f $_.Value, $_.Name) }
 
 
 ================================================================================

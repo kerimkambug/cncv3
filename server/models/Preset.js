@@ -62,6 +62,15 @@ const ToolRowSchema = new mongoose.Schema(
       edgeExtra: { type: Number, default: 0 },
       outerFrame: { type: Boolean, default: false },
       respectPreviousOffset: { type: Boolean, default: true },
+      // startY: explicit bottom-edge start of a vertical divider (mm from the part
+      //   bottom), overriding the first offset row's stepOffset. 1/12 NUMARA's
+      //   dividers start at Y70 (the rounded-frame offset), not rows[0]'s 62.
+      //   Read by kapak.js emitDerzRows; missing from the schema until now, so an
+      //   API POST/PUT silently stripped it (same failure class as absoluteOffset).
+      startY: { type: Number, default: null },
+      // spindleSpeed: per-derz-block spindle override (2 NUMARA's derz block runs
+      //   at S15000 while the rest of the program is S18000). Also read by kapak.js.
+      spindleSpeed: { type: Number, default: null },
     },
   },
   { _id: false }
