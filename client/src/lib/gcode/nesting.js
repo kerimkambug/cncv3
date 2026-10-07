@@ -7,6 +7,9 @@
 //    - Aşama 3 (Final Kesim - İşleme Sonrası): 6mm kesim bıçağıyla Z0'a kadar inilerek parça plakadan ayrılır.
 // 3. Sıralama: Sağ en üstteki parçadan sola doğru, satır satır yukarıdan aşağıya (sağdan sola).
 import { fmt, computeCumOffsets, emitRectCutPath } from './common.js';
+import { numOr, toFiniteNumber, validateNestingGap, validateDepthAgainstThickness } from '../../../../shared/gcode/validation.js';
+import { parseNestImportText } from '../../../../shared/nest/csvImport.js';
+export { parseNestImportText };
 import { computeDerzPositions } from './derz.js';
 import { validateKapakSize, calculateAdaptiveOffsets, buildCarvingProfile, clampCarvingExit, solveCarveGeometry, computeTopCurve, emitTopCurveGcode } from './kapak.js';
 
@@ -70,6 +73,44 @@ function tryPackPlateMaxRects(plate, part, gap, rotate) {
 
   plate.parts.push({ ...part, x: best.x, y: best.y, placedWidth: best.w, placedHeight: best.h, rotated: best.rotated });
   return true;
+}
+
+/**
+ * Smallest axis-aligned clearance between any two placed parts on a plate.
+ *
+ * Returns the smallest gap along X or Y between two rectangles that OVERLAP on
+ * the other axis (i.e. the real separation the cutter would have to cross).
+ * Diagonal-only neighbours are ignored — a part corner-to-corner across empty
+ * plate does not put two toolpaths in conflict.
+ *
+ * @param {Array<{x:number,y:number,placedWidth:number,placedHeight:number}>} parts
+ * @returns {number|null} null when fewer than two parts are placed
+ */
+export function minPartSpacing(parts) {
+  if (!Array.isArray(parts) || parts.length < 2) return null;
+  let min = Infinity;
+  for (let i = 0; i < parts.length; i++) {
+    const a = parts[i];
+    for (let j = i + 1; j < parts.length; j++) {
+      const b = parts[j];
+      // Overlap on Y => the X separation is what matters (and vice versa).
+      const overlapY = a.y < b.y + b.placedHeight && a.y + a.placedHeight > b.y;
+      const overlapX = a.x < b.x + b.placedWidth && a.x + a.placedWidth > b.x;
+      if (overlapY) {
+        const gapX = a.x + a.placedWidth <= b.x
+          ? b.x - (a.x + a.placedWidth)
+          : a.x - (b.x + b.placedWidth);
+        if (gapX >= 0) min = Math.min(min, gapX);
+      }
+      if (overlapX) {
+        const gapY = a.y + a.placedHeight <= b.y
+          ? b.y - (a.y + a.placedHeight)
+          : a.y - (b.y + b.placedHeight);
+        if (gapY >= 0) min = Math.min(min, gapY);
+      }
+    }
+  }
+  return Number.isFinite(min) ? min : null;
 }
 
 function orderPartsByProximity(parts) {
@@ -213,21 +254,23 @@ export function orderPartsTopRightToLeft(parts) {
  */
 export function buildPartDerzGeometry(part, row, offsetRows = [], ctx = {}) {
   const derz = row.derz || {};
-  const prevOffset = Number(ctx.prevOffset) || 0;
-  const margin = prevOffset + (Number(derz.margin) || 0);
+  const prevOffset = numOr(ctx.prevOffset, 0);
+  const margin = prevOffset + numOr(derz.margin, 0);
   const opts = {
     width: part.placedWidth,
     height: part.placedHeight,
     yon: derz.yon || 'dikey',
     margin,
-    spacing: Number(derz.spacing) || Number(row.stepOffset) || 60,
+    spacing: numOr(derz.spacing, null) ?? numOr(row.stepOffset, 60),
     autoFit: derz.autoFit !== false,
-    edgeExtra: Number(derz.edgeExtra) || 0,
+    edgeExtra: numOr(derz.edgeExtra, 0),
   };
   const positions = computeDerzPositions(opts).positions;
   const vertical = (derz.yon || 'dikey') === 'dikey';
-  const overshootX = Number(derz.overshootX ?? derz.overshoot) || 0;
-  const overshootY = Number(derz.overshootY ?? derz.overshoot) || 0;
+  // A derz overshoot of 0 is meaningful ("stop on the frame edge"); numOr keeps
+  // it instead of the old `|| 0`-style coercion that also swallowed an explicit 0.
+  const overshootX = numOr(derz.overshootX ?? derz.overshoot, 0);
+  const overshootY = numOr(derz.overshootY ?? derz.overshoot, 0);
 
   // The bottom frame edge is the FIRST offset row's contour, not the derz margin
   // box (kapak.js: rows[0].stepOffset).
@@ -265,6 +308,7 @@ export function buildPartDerzGeometry(part, row, offsetRows = [], ctx = {}) {
 
 export function calculateNesting(opts) {
   const { plateW, plateH, edge = 0, gap = 0, rotate = true, parts: inputParts } = opts;
+  const gapCfg = opts.gapSafety || {};
 
   if (!Number.isFinite(plateW) || !Number.isFinite(plateH) || plateW <= 0 || plateH <= 0) {
     throw new Error('Geçerli bir plaka ölçüsü gir.');
@@ -274,6 +318,21 @@ export function calculateNesting(opts) {
   }
   if (!inputParts || inputParts.length === 0) {
     throw new Error('En az bir geçerli parça ekle.');
+  }
+
+  // PHYSICAL SAFETY GATE (server-side equivalent runs in the generator too).
+  // When the outer cut is enabled every part gets a toolpath expanded by the
+  // cutter radius on all four sides. Two parts closer together than one full
+  // cutter diameter therefore have overlapping compensated paths and the tool
+  // cuts into the neighbour. This is checked BEFORE any packing happens.
+  if (inputParts.length > 1) {
+    const gapErr = validateNestingGap({
+      partGap: gap,
+      cutToolDia: gapCfg.cutToolDia,
+      outerCutEnabled: gapCfg.outerCutEnabled !== false,
+      safetyMargin: gapCfg.safetyMargin,
+    });
+    if (gapErr) throw new Error(gapErr);
   }
 
   // Her giriş satırını qty adet gerçek parçaya aç (qty yoksa/geçersizse 1 kabul edilir).
@@ -384,14 +443,17 @@ export function groupNestingPartsByPreset(parts, defaultCfg, presetMap = {}) {
 }
 
 function getMachineParams(cfg) {
+  // numOr (NOT `Number(x) || default`) — a legitimate zero must survive. A
+  // spindle speed of 0 is still nonsense, but plungeFeed/cutFeed/safeZ are
+  // validated explicitly where they are used rather than silently replaced.
   return {
-    thickness: Number(cfg.thickness) || 18,
-    plungeFeed: Number(cfg.plungeFeed) || 3000,
-    cutFeed: Number(cfg.cutFeed) || 6000,
-    safeZ: Number(cfg.safeZ) || 61,
-    toolChangeZ: Number(cfg.toolChangeZ) || 96,
-    homeZ: Number(cfg.homeZ) || 96,
-    spindleSpeed: cfg.spindleSpeed || 18000,
+    thickness: numOr(cfg.thickness, 18),
+    plungeFeed: numOr(cfg.plungeFeed, 3000),
+    cutFeed: numOr(cfg.cutFeed, 6000),
+    safeZ: numOr(cfg.safeZ, 61),
+    toolChangeZ: numOr(cfg.toolChangeZ, 96),
+    homeZ: numOr(cfg.homeZ, 96),
+    spindleSpeed: numOr(cfg.spindleSpeed, 18000),
   };
 }
 
@@ -608,9 +670,30 @@ export function buildNestingPlateGcode(plate, cfg, presetMap = {}) {
   // Dış Kesim / Ebatlama Parametreleri
   const doOuterCut = cfg.enableOuterCut !== false; // Varsayılan: Açık
   const cutToolNo = cfg.cutToolNo || '6';
-  const cutToolDia = Number(cfg.cutToolDia) || 6;
+  const cutToolDia = numOr(cfg.cutToolDia, 6);
   const cutToolRadius = cutToolDia / 2; // 6mm bıçak için 3mm
-  const preCutDepth = Number(cfg.preCutDepth) || 1.5; // 1.5mm ön çizme derinliği
+  const preCutDepth = numOr(cfg.preCutDepth, 1.5); // 1.5mm ön çizme derinliği
+
+  // GENERATOR-LEVEL SAFETY GATE. The UI validates too, but the generator must
+  // never be the weak link: a caller that builds a plate directly (script, API,
+  // test, a future headless pipeline) gets the same rejection. Two parts whose
+  // nominal gap is under one cutter diameter have overlapping compensated outer
+  // paths — the tool would cut into the neighbouring part.
+  if (doOuterCut && plate.parts && plate.parts.length > 1) {
+    const spacing = minPartSpacing(plate.parts);
+    if (spacing !== null && spacing < cutToolDia - 1e-6) {
+      throw new Error(
+        `Güvenli olmayan nesting: parçalar arası en küçük boşluk ${spacing.toFixed(2)}mm, `
+        + `kesim bıçağı çapı ${cutToolDia}mm. Dış kesim bıçağı ${cutToolDia}mm çapında olduğu için `
+        + `iki parçanın telafi edilmiş takım yolları çakışır. Parça aralığını en az ${cutToolDia}mm yap.`
+      );
+    }
+  }
+
+  // Pre-cut must stay above the table and below the top surface.
+  const depthErr = validateDepthAgainstThickness({ depth: preCutDepth, thickness, keepOut: 0 });
+  if (depthErr) throw new Error(`Ön çizme derinliği geçersiz: ${depthErr}`);
+
   const preCutZ = +(thickness - preCutDepth).toFixed(3);
   const finalCutZ = 0.00; // Z0 tabana kadar tam kesim
 
@@ -660,62 +743,11 @@ export function buildNestingPlateGcode(plate, cfg, presetMap = {}) {
 }
 
 /**
- * Parses a pasted/imported parts list in either CSV form or legacy TXT form.
- * @returns {{parts: Array<{name,width,height,qty}>, errors: number[]}}
+ * (Re-exported from shared/nest/csvImport.js — the parsing rules live there so
+ * the client, the server and the tests all share one definition. The old
+ * `split(/[,;]/)` implementation could not tell a Turkish decimal comma from a
+ * column separator and mis-assigned every column of "Kapak;500,5;454,2;2".)
  */
-export function parseNestImportText(text) {
-  const lines = text.split(/\r?\n/);
-  const parts = [];
-  const errors = [];
-
-  lines.forEach((raw, index) => {
-    const line = raw.trim();
-    if (!line || line.startsWith('#')) return;
-
-    if (line.includes(',') || line.includes(';')) {
-      const cells = line.split(/[,;]/).map((c) => c.trim()).filter((c) => c.length > 0);
-      const nums = cells.map((c) => parseFloat(c.replace(',', '.')));
-      const numericCells = cells.filter((c, i) => Number.isFinite(nums[i]));
-
-      if (numericCells.length < 2) {
-        if (index > 0 || !/genişlik|width|yükseklik|height|isim|ad/i.test(line)) errors.push(index + 1);
-        return;
-      }
-
-      let name, width, height, qty = 1;
-      if (cells.length >= 4 && !Number.isFinite(nums[0])) {
-        name = cells[0];
-        width = nums[1];
-        height = nums[2];
-        qty = parseInt(cells[3], 10) || 1;
-      } else {
-        width = nums[0];
-        height = nums[1];
-        qty = cells.length >= 3 ? (parseInt(cells[2], 10) || 1) : 1;
-        name = `${width}×${height}`;
-      }
-
-      if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0 || qty <= 0) {
-        errors.push(index + 1);
-        return;
-      }
-      parts.push({ name, width, height, qty });
-      return;
-    }
-
-    // Legacy TXT: 500-454-2 => 500mm x 454mm, qty 2
-    const match = line.match(/^(\d+(?:[.,]\d+)?)\s*-\s*(\d+(?:[.,]\d+)?)\s*-\s*(\d+)$/);
-    if (!match) { errors.push(index + 1); return; }
-
-    const width = parseFloat(match[1].replace(',', '.'));
-    const height = parseFloat(match[2].replace(',', '.'));
-    const qty = parseInt(match[3], 10);
-    if (width <= 0 || height <= 0 || qty <= 0) { errors.push(index + 1); return; }
-    parts.push({ name: `${width}×${height}`, width, height, qty });
-  });
-
-  return { parts, errors };
-}
 
 const ASSUMED_RAPID_MM_MIN = 15000;
 const TOOLCHANGE_SECONDS = 6;
@@ -742,7 +774,7 @@ export function estimateNestingTime(result, cfg, presetMap = {}) {
       const estOffsetRows = (group.cfg.rows || []).filter((r) => (r.operation || 'offset') !== 'derz' && r.operation !== 'carving');
       estOffsetRows.forEach((r, rowIdx) => {
         let usedInGroup = false;
-        const rowDepth = Number(r.depth) || 2;
+        const rowDepth = numOr(r.depth, 2);
         const validCoords = getAdaptiveRowPartCoords(
           group.parts,
           estOffsetRows,
@@ -771,7 +803,7 @@ export function estimateNestingTime(result, cfg, presetMap = {}) {
       (s, plate) =>
         s +
         plate.parts.reduce((s2, part) => {
-          const cutToolRadius = (Number(cfg.cutToolDia) || 6) / 2;
+          const cutToolRadius = numOr(cfg.cutToolDia, 6) / 2;
           const w = part.placedWidth + 2 * cutToolRadius;
           const h = part.placedHeight + 2 * cutToolRadius;
           return s2 + 2 * (w + h);
@@ -798,9 +830,9 @@ export function estimateNestingTime(result, cfg, presetMap = {}) {
  * - 4_ISLEME_T{toolNo}: Bıçak bazında motif/profil takım yolları (Milling/profile toolpaths)
  */
 export function buildNestingPlateDxf(plate, cfg = {}, presetMap = {}) {
-  const plateW = Number(plate.width) || Number(cfg.plateWidth) || 2440;
-  const plateH = Number(plate.height) || Number(cfg.plateHeight) || 1220;
-  const cutToolDia = Number(cfg.cutToolDia) || 6;
+  const plateW = numOr(plate.width, null) ?? numOr(cfg.plateWidth, 2440);
+  const plateH = numOr(plate.height, null) ?? numOr(cfg.plateHeight, 1220);
+  const cutToolDia = numOr(cfg.cutToolDia, 6);
   const cutToolRadius = cutToolDia / 2;
   const doOuterCut = cfg.enableOuterCut !== false;
   const profileGroups = groupNestingPartsByPreset(plate.parts, cfg, presetMap);

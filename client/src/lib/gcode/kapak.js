@@ -1,6 +1,7 @@
 // kapak.js
 // Rectangular multi-tool pocket cutting (cabinet doors / "tabla")
 import { fmt, computeCumOffsets } from './common.js';
+import { numOr, toFiniteNumber, validateDepthAgainstThickness } from '../../../../shared/gcode/validation.js';
 import { computeDerzPositions } from './derz.js';
 
 export const DEG2RAD = Math.PI / 180;
@@ -626,12 +627,14 @@ function buildDerzOptions(row, d, previousOffset, width, height) {
     width,
     height,
     yon: d.yon || 'dikey',
-    margin: previousOffset + (Number(d.margin) || 0),
-    spacing: Number(d.spacing) || Number(row.stepOffset) || 60,
+    margin: previousOffset + numOr(d.margin, 0),
+    spacing: numOr(d.spacing, null) ?? numOr(row.stepOffset, 60),
     autoFit: d.autoFit !== false,
-    overshootX: Number(d.overshootX ?? d.overshoot) || 1,
-    overshootY: Number(d.overshootY ?? d.overshoot) || 1,
-    edgeExtra: Number(d.edgeExtra) || 0,
+    // 0 overshoot is a real setting (stop exactly on the frame edge) — it must
+    // not be raised to 1mm by an `|| 1` fallback.
+    overshootX: numOr(d.overshootX ?? d.overshoot, 1),
+    overshootY: numOr(d.overshootY ?? d.overshoot, 1),
+    edgeExtra: numOr(d.edgeExtra, 0),
   };
 }
 
@@ -1333,10 +1336,13 @@ export function buildKapakPresetDxf(width, height, cfg = {}) {
       const derz = row.derz || {};
       const base = offsetRows;
       const yon = derz.yon || 'dikey';
-      const margin = (derz.respectPreviousOffset === false ? 0 : base) + (Number(derz.margin) || 0);
-      const overshootX = Number(derz.overshootX ?? derz.overshoot) || 1;
-      const overshootY = Number(derz.overshootY ?? derz.overshoot) || 1;
-      const spacing = Number(derz.spacing) || Number(row.stepOffset) || 60;
+      const margin = (derz.respectPreviousOffset === false ? 0 : base) + numOr(derz.margin, 0);
+      // A derz X/Y overshoot of 0 is a valid, meaningful setting ("do not run past
+      // the frame"); `Number(x) || 1` silently forced 1mm. Only a genuinely
+      // absent value falls back to the historical 1mm default.
+      const overshootX = numOr(derz.overshootX ?? derz.overshoot, 1);
+      const overshootY = numOr(derz.overshootY ?? derz.overshoot, 1);
+      const spacing = numOr(derz.spacing, null) ?? numOr(row.stepOffset, 60);
       const available = (yon === 'dikey' ? width : height) - margin * 2;
       const count = derz.autoFit === false ? Math.max(0, Math.floor(available / spacing) + 1) : Math.max(0, Math.round(available / spacing) + 1);
       const exact = count > 1 ? available / (count - 1) : spacing;

@@ -8,6 +8,7 @@
 //     part stays anchored to the surrounding stock while the hole is cut
 //     (cutting the outer perimeter first frees the part and lets it shift).
 import { fmt } from './common.js';
+import { toFiniteNumber, validateCircleGeometry } from '../../../../shared/gcode/validation.js';
 
 /**
  * @param {object} p - { mode:'solid'|'ring', outerDia, innerDia, left, bottom, toolDia, toolNo, depth }
@@ -24,6 +25,18 @@ export function resolveCircleParams(p) {
 }
 
 export function buildCircleGcode(p, cfg) {
+  // Refuse to emit a toolpath for a hole the cutter cannot physically enter.
+  // The user's dimensions are NOT adjusted — the operation is rejected so the
+  // drawing gets fixed. (innerDia <= toolDia previously produced innerR <= 0
+  // and a degenerate G2 arc.)
+  const geomErr = validateCircleGeometry({
+    mode: p.mode || 'solid',
+    outerDia: toFiniteNumber(p.outerDia),
+    innerDia: toFiniteNumber(p.innerDia),
+    toolDia: toFiniteNumber(p.toolDia),
+  });
+  if (geomErr) throw new Error(geomErr);
+
   const { centerX, centerY, outerR, innerR } = resolveCircleParams(p);
   const z = +(cfg.thickness - p.depth).toFixed(3);
   const lines = ['makro'];

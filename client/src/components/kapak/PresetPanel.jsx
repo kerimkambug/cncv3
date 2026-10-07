@@ -9,7 +9,7 @@ function createDefaultPresetImage(name) {
 }
 
 export default function PresetPanel({ cfg, setCfg, rows, setRows }) {
-  const { presets, loading, error, savePreset, deletePreset } = usePresets('kapak');
+  const { presets, loading, error, storage, savePreset, deletePreset } = usePresets('kapak');
   const [category, setCategory] = useState('kapak');
   const [name, setName] = useState('');
   const [imageDataUrl, setImageDataUrl] = useState('');
@@ -204,7 +204,25 @@ export default function PresetPanel({ cfg, setCfg, rows, setRows }) {
         <button type="button" className={`tab${category === 'kapi' ? ' active' : ''}`} onClick={() => setCategory('kapi')}>Kapı Modelleri</button>
       </div>
       {loading && <div className="hint">Yükleniyor...</div>}
-      {error && <div className="err" style={{ display: 'block' }}>{error} (sunucu çalışıyor mu?)</div>}
+      {/*
+       * The three states are deliberately distinct:
+       *  - storage === 'server': the normal case, list came from the API.
+       *  - storage === 'local' + error: the API was UNREACHABLE and this is a
+       *    stale offline copy — the operator must know it is not the server's
+       *    list before saving on top of it.
+       *  - error without 'local': the server ANSWERED with an error. No local
+       *    data is substituted; the backend must be fixed.
+       */}
+      {error && (
+        <div className="err" style={{ display: 'block' }}>
+          {storage === 'local'
+            ? `${error.message} Şu an görünen liste bu tarayıcıdaki yerel kopyadır.`
+            : `${error.message}`}
+        </div>
+      )}
+      {!error && storage === 'server' && (
+        <div className="hint">Presetler sunucudan yüklendi.</div>
+      )}
       <div className="preset-list">
         {visiblePresets.length === 0 && !loading && (
           <span className="hint">Bu kategoride preset yok. Ayarları yapıp model görseliyle kaydet.</span>

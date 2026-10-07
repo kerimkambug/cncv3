@@ -11,6 +11,7 @@ import {
   getAdaptiveRowPartCoords,
   buildPartDerzGeometry,
 } from '../../lib/gcode/nesting.js';
+import { validateNestingGap } from '../../../../shared/gcode/validation.js';
 import { validateCarvingWarnings, computeTopCurve } from '../../lib/gcode/kapak.js';
 import { computeCumOffsets } from '../../lib/gcode/common.js';
 import { useCtrlEnter } from '../../hooks/useCtrlEnter.js';
@@ -29,7 +30,9 @@ export default function NestingPanel({ cfg, plateCfg }) {
   const [plateWidth, setPlateWidth] = useState(plateCfg?.width || 2100);
   const [plateHeight, setPlateHeight] = useState(plateCfg?.height || 2800);
   const [edgeMargin, setEdgeMargin] = useState(10);
-  const [partGap, setPartGap] = useState(5);
+  // Default matching the 6mm outer cutter shipped in cutToolDia: a smaller gap
+  // would put two compensated outer paths on top of each other.
+  const [partGap, setPartGap] = useState(6);
   const [allowRotate, setAllowRotate] = useState(true);
 
   // Dış Kesim / Ebatlama Ayarları
@@ -153,6 +156,16 @@ export default function NestingPanel({ cfg, plateCfg }) {
     };
   }
 
+  // Live feedback for the parts-gap field. The same rule is enforced again in
+  // calculateNesting (before packing) and in buildNestingPlateGcode (before any
+  // G-code is emitted), so this is purely the explanation the operator needs to
+  // understand WHY the value is rejected instead of getting a silent redraw.
+  const gapWarning = validateNestingGap({
+    partGap: parseFloat(partGap),
+    cutToolDia: parseFloat(cutToolDia),
+    outerCutEnabled: enableOuterCut,
+  });
+
   function calculate() {
     setMessage(null);
     try {
@@ -167,6 +180,13 @@ export default function NestingPanel({ cfg, plateCfg }) {
         gap: parseFloat(partGap) || 0,
         rotate: allowRotate,
         parts: expanded,
+        // Safety gate input: the outer cutter's diameter. Without it the parts
+        // could be packed closer than one tool diameter and their compensated
+        // outer paths would overlap (tool cuts into the neighbouring part).
+        gapSafety: {
+          cutToolDia: parseFloat(cutToolDia),
+          outerCutEnabled: enableOuterCut,
+        },
       });
 
       const presetMap = buildPresetMap(expanded);
@@ -532,6 +552,11 @@ export default function NestingPanel({ cfg, plateCfg }) {
                   step="0.1"
                   onChange={(e) => setPartGap(parseFloat(e.target.value) || 0)}
                 />
+                {gapWarning && (
+                  <div className="err" style={{ display: 'block', marginTop: 6, fontSize: 11.5 }}>
+                    {gapWarning}
+                  </div>
+                )}
               </div>
             </div>
             <label className="checkbox-row" style={{ marginTop: 10 }}>

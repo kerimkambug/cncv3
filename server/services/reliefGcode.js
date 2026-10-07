@@ -1,6 +1,7 @@
 // reliefGcode.js
 // Empire CNC — Server-side Relief G-Code Processing Service
 import { emitRectCutPath } from '../../shared/gcode/common.js';
+import { reliefMachineZ } from '../../shared/gcode/reliefConvention.js';
 
 function fmt(n) {
   return Number(n).toFixed(2);
@@ -116,7 +117,9 @@ function appendRasterToolpath(lines, depthGrid, options) {
       const x = (colIdx / Math.max(1, numCols - 1)) * options.width;
       const y = (rowIdx / Math.max(1, numRows - 1)) * options.height;
       const depthRatio = Math.max(0, Math.min(1, depthGrid[rowIdx][colIdx]));
-      const z = +(options.thickness - depthRatio * options.maxDepth).toFixed(3);
+      // Same Z convention as the client generator — see
+      // shared/gcode/reliefConvention.js (Z0 = table, thickness = material top).
+      const z = +reliefMachineZ(depthRatio, options.thickness, options.maxDepth).toFixed(3);
       if (!isToolDown) {
         lines.push(`G0 X${fmt(x)} Y${fmt(y)} Z${fmt(options.safeZ)}`);
         lines.push(`G1 Z${fmt3(z)} F${options.plungeFeed.toFixed(1)}`);

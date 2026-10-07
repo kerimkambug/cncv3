@@ -3,6 +3,18 @@ import { useCallback, useEffect, useState } from 'react';
 const API_BASE = import.meta.env.VITE_API_BASE || '/api/presets';
 const STORAGE_KEY = 'empire-cnc-presets';
 
+/**
+ * True only when the request never reached the server (offline, DNS failure,
+ * server not started). An HTTP error RESPONSE is a live server answering — it
+ * must not be treated as "unavailable" or a broken backend stays invisible.
+ */
+function isNetworkFailure(err) {
+  if (err && typeof err.status === 'number') return false;
+  const msg = String(err && err.message ? err.message : err);
+  return err instanceof TypeError
+    || /Failed to fetch|NetworkError|ERR_CONNECTION|fetch failed|Load failed/i.test(msg);
+}
+
 function readLocalPresets() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -105,22 +117,47 @@ export function usePresets(moduleName) {
   const [presets, setPresets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  // Which store the current list actually came from: 'server', 'local', or null
+  // while the first load is in flight. The UI shows it so an operator can tell
+  // "these are my saved presets" from "this is a stale offline copy".
+  const [storage, setStorage] = useState(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}?module=${moduleName}`);
-      if (!res.ok) throw new Error('Presetler yüklenemedi.');
+      // A server that ANSWERED with an error must never be papered over by the
+      // localStorage copy: a 500/400/401 means the backend is broken or the
+      // request was rejected, and showing stale local data would hide that.
+      if (!res.ok) {
+        const err = new Error(
+          res.status >= 500
+            ? `Preset sunucusu hata verdi (HTTP ${res.status}). Yerel kopya GÖSTERİLMİYOR — sunucu düzeltilmeli.`
+            : `Preset isteği reddedildi (HTTP ${res.status}).`,
+        );
+        err.status = res.status;
+        throw err;
+      }
       const data = await res.json();
       const list = Array.isArray(data) ? data : [];
       validateOffsetRows(list);
       setPresets(list.map(normalizePresetRows));
       setError(null);
-    } catch {
+      setStorage('server');
+    } catch (err) {
+      // Fall back to localStorage ONLY when the API was genuinely unreachable
+      // (offline / server not running) — never for an HTTP error status, which
+      // is a real answer from a live backend.
+      if (!isNetworkFailure(err)) {
+        setError(err);
+        setPresets([]);
+        return;
+      }
       const localData = readLocalPresets().filter((item) => item.module === moduleName).map(normalizePreset);
       validateOffsetRows(localData);
       setPresets(localData.map(normalizePresetRows));
-      setError(null);
+      setStorage('local');
+      setError(new Error('Preset sunucusuna ulaşılamadı; bu oturumda yerel kopya kullanılıyor.'));
     } finally {
       setLoading(false);
     }
@@ -141,18 +178,22 @@ export function usePresets(moduleName) {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || (id ? 'Preset güncellenemedi.' : 'Preset oluşturulamadı.'));
+        const err = new Error(body.error || (id ? 'Preset güncellenemedi.' : 'Preset oluşturulamadı.'));
+        err.status = res.status;
+        throw err;
       }
       await refresh();
       return;
     } catch (error) {
-      // Only use localStorage as a fallback when the API is unavailable. Do not
-      // hide real API errors such as duplicate names or failed updates.
-      if (error.message !== 'Failed to fetch' && !error.message.includes('NetworkError')) throw error;
+      // Only use localStorage as a fallback when the API is unreachable. A real
+      // API error (duplicate name, validation, 500) is re-thrown so the caller
+      // can show it — it must not look like a successful local save.
+      if (!isNetworkFailure(error)) throw error;
       const existing = readLocalPresets();
       const nextItem = normalizePreset({ ...payload, _id: id || crypto.randomUUID?.() || Date.now().toString() });
       const filtered = existing.filter((item) => id ? item.id !== id && item._id !== id : !(item.module === moduleName && item.name === name));
       writeLocalPresets([...filtered, nextItem]);
+      setStorage('local');
       await refresh();
     }
   }, [moduleName, refresh]);
@@ -162,17 +203,20 @@ export function usePresets(moduleName) {
       const res = await fetch(`${API_BASE}/${id}`, { method: 'DELETE' });
       if (!res.ok && res.status !== 204) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || 'Preset silinemedi.');
+        const err = new Error(body.error || 'Preset silinemedi.');
+        err.status = res.status;
+        throw err;
       }
       await refresh();
       return;
     } catch (error) {
-      if (error.message !== 'Failed to fetch' && !error.message.includes('NetworkError')) throw error;
+      if (!isNetworkFailure(error)) throw error;
       const existing = readLocalPresets().filter((item) => item.id !== id && item._id !== id);
       writeLocalPresets(existing);
+      setStorage('local');
       await refresh();
     }
   }, [refresh]);
 
-  return { presets, loading, error, refresh, savePreset, deletePreset };
+  return { presets, loading, error, storage, refresh, savePreset, deletePreset };
 }

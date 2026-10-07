@@ -2,6 +2,8 @@
 // Empire CNC — Profesyonel 3D Bas-Rölyef (3D Relief) G-Code Üretim Motoru
 // Küre uçlu (Ballnose) takım telafisi, çift yönlü pürüzsüzleştirme ve çok açılı işleme.
 import { fmt, fmt3 } from './common.js';
+import { numOr, validateDepthAgainstThickness } from '../../../../shared/gcode/validation.js';
+import { reliefMachineZ } from '../../../../shared/gcode/reliefConvention.js';
 
 export const CNC_RELIEF_PRESETS = {
   wood_mdf: {
@@ -115,7 +117,6 @@ export const DEFAULT_RELIEF_CONFIG = {
 export function sampleDepthGridUV(depthGrid, cols, rows, u, v) {
   const x = Math.max(0, Math.min(cols - 1, u * (cols - 1)));
   const y = Math.max(0, Math.min(rows - 1, (1 - v) * (rows - 1))); // CNC: Alt-sol = (0,0)
-
   const x0 = Math.floor(x);
   const x1 = Math.min(cols - 1, x0 + 1);
   const y0 = Math.floor(y);
@@ -145,14 +146,18 @@ export function sampleDepthGridUV(depthGrid, cols, rows, u, v) {
  * Fiziksel mm bazlı eğim kullanır, aşırı derin dalmaları ve titreşimi sınırlar.
  */
 export function calculateCompensatedZ(depthRatio, gradX, gradY, cfg, cellW_mm = 1.0, cellH_mm = 1.0) {
-  const thickness = Number(cfg.thickness) || 18;
-  const maxDepth = Number(cfg.maxDepth) || 5;
+  // numOr keeps a legitimate 0: `maxDepth: 0` means "do not cut into the
+  // material at all" (a valid flat pass) and must not become 5mm.
+  const thickness = numOr(cfg.thickness, 18);
+  const maxDepth = numOr(cfg.maxDepth, 5);
   const toolType = cfg.toolType || 'ballnose';
-  const toolRadius = (Number(cfg.toolDia) || 4.0) / 2;
+  const toolRadius = numOr(cfg.toolDia, 4.0) / 2;
 
   // Fiziksel yüzey Z kotu: Yüzey = thickness, Taban = thickness - maxDepth
   const clampedDepth = Math.max(0, Math.min(1, depthRatio));
-  const surfaceZ = thickness - (1.0 - clampedDepth) * maxDepth;
+  // Z0 = table, thickness = material top. Shared convention (see
+  // shared/gcode/reliefConvention.js) so client and server agree.
+  const surfaceZ = reliefMachineZ(clampedDepth, thickness, maxDepth);
 
   if (toolType !== 'ballnose' || toolRadius <= 0) {
     return surfaceZ;
@@ -223,6 +228,40 @@ export function simplifyPathPoints(points, tolerance = 0.01) {
 }
 
 /**
+ * Verifies a depth grid is a flat, finite, correctly-sized numeric buffer.
+ *
+ * Accepts a Float32Array/Float64Array directly, or a plain (flat) Array of
+ * numbers. An array of ROWS is rejected explicitly with a message that says
+ * what to pass instead, because accepting it silently is what produced "ZNaN".
+ */
+export function assertFlatDepthGrid(depthGrid, gridCols, gridRows) {
+  if (!depthGrid || typeof depthGrid.length !== 'number') {
+    throw new TypeError('Derinlik ızgarası (depthGrid) düz sayısal bir dizi olmalı.');
+  }
+  if (Array.isArray(depthGrid) && Array.isArray(depthGrid[0])) {
+    throw new TypeError(
+      'Derinlik ızgarası SATIR DİZİSİ değil, düz (satır-major) sayısal dizi olmalı '
+      + `(${gridCols}×${gridRows} = ${gridCols * gridRows} eleman). Satır dizisini göndermek G-code'a ZNaN yazar.`
+    );
+  }
+  const expected = Number(gridCols) * Number(gridRows);
+  if (!Number.isFinite(expected) || expected <= 0) {
+    throw new TypeError('Derinlik ızgarası boyutları (gridCols × gridRows) geçersiz.');
+  }
+  if (depthGrid.length !== expected) {
+    throw new TypeError(
+      `Derinlik ızgarası boyutu uyuşmuyor: ${depthGrid.length} eleman var, ${gridCols}×${gridRows} = ${expected} bekleniyor.`
+    );
+  }
+  for (let i = 0; i < depthGrid.length; i++) {
+    const v = depthGrid[i];
+    if (typeof v !== 'number' || !Number.isFinite(v)) {
+      throw new TypeError(`Derinlik ızgarasında geçersiz değer: index ${i} => ${v}.`);
+    }
+  }
+}
+
+/**
  * İşlenmiş Derinlik Matrisinden (Float32Array) Profesyonel CNC Rölyef G-Code Üretir.
  * @param {Float32Array} depthGrid - 0.0 (Taban / En Derin) - 1.0 (Üst Yüzey)
  * @param {number} gridCols - Matris sütun sayısı
@@ -231,21 +270,33 @@ export function simplifyPathPoints(points, tolerance = 0.01) {
  * @returns {{ gcode: string, pointCount: number, lineCount: number }}
  */
 export function buildReliefGcodeFromDepthGrid(depthGrid, gridCols, gridRows, cfg) {
-  const width = Math.max(1, Number(cfg.width) || 200);
-  const height = Math.max(1, Number(cfg.height) || 200);
-  const thickness = Number(cfg.thickness) || 18;
-  const maxDepth = Number(cfg.maxDepth) || 5;
-  const stepover = Math.max(0.1, Number(cfg.stepover) || 0.6);
-  const resolution = Math.max(0.1, Number(cfg.resolution) || 0.5);
-  const plungeFeed = Number(cfg.plungeFeed) || 1200;
-  const cutFeed = Number(cfg.cutFeed) || 4000;
-  const safeZ = Number(cfg.safeZ) || 25;
-  const homeZ = Number(cfg.homeZ) || 60;
+  // GATE: the grid must be a FLAT (row-major) numeric buffer of exactly
+  // gridCols*gridRows samples — that is the contract sampleDepthGridUV indexes
+  // with (y*cols + x). An array-of-rows (a natural thing for a caller to pass)
+  // silently produced `undefined` depths and the generator emitted "ZNaN" into
+  // the G-code, which the controller can interpret as an un-commanded plunge.
+  assertFlatDepthGrid(depthGrid, gridCols, gridRows);
+
+  // numOr, not `|| default`: maxDepth 0 is a valid request (surface pass).
+  const width = Math.max(1, numOr(cfg.width, 200));
+  const height = Math.max(1, numOr(cfg.height, 200));
+  const thickness = numOr(cfg.thickness, 18);
+  const maxDepth = numOr(cfg.maxDepth, 5);
+  const stepover = Math.max(0.1, numOr(cfg.stepover, 0.6));
+  const resolution = Math.max(0.1, numOr(cfg.resolution, 0.5));
+  const plungeFeed = numOr(cfg.plungeFeed, 1200);
+  const cutFeed = numOr(cfg.cutFeed, 4000);  const safeZ = numOr(cfg.safeZ, 25);
+  const homeZ = numOr(cfg.homeZ, 60);
   const toolNo = cfg.toolNo || '1';
   const toolType = cfg.toolType || 'ballnose';
-  const toolDia = Number(cfg.toolDia) || 4;
-  const spindleSpeed = Number(cfg.spindleSpeed) || 18000;
+  const toolDia = numOr(cfg.toolDia, 4);
+  const spindleSpeed = numOr(cfg.spindleSpeed, 18000);
   const direction = cfg.direction || 'x';
+
+  // The relief cuts DOWN from the top surface by maxDepth; the tool must not
+  // reach the table (Z0) or it cuts the vacuum bed / spoilboard.
+  const reliefDepthErr = validateDepthAgainstThickness({ depth: maxDepth, thickness, keepOut: 1 });
+  if (reliefDepthErr) throw new Error(`Rölyef derinliği geçersiz: ${reliefDepthErr}`);
 
   const lines = ['makro'];
   lines.push(`(========================================)`);
@@ -348,7 +399,7 @@ export function buildReliefGcodeFromDepthGrid(depthGrid, gridCols, gridRows, cfg
   // Dış Kontur Kesimi (Ebatlama)
   if (cfg.enableOuterCut) {
     const cutTool = cfg.outerCutToolNo || '6';
-    const cutDia = Number(cfg.outerCutDia) || 6;
+    const cutDia = numOr(cfg.outerCutDia, 6);
     const cutRadius = cutDia / 2;
     const toolChangeZ = safeZ + 30;
 
@@ -409,12 +460,12 @@ export function buildReliefGcodeFromImageData(imgData, cfg) {
 export function estimateReliefTime(result, cfg) {
   if (!result || !result.gcode) return 0;
   const lines = result.gcode.split('\n');
-  const cutFeed = Number(cfg.cutFeed) || 4500;
-  const plungeFeed = Number(cfg.plungeFeed) || 1500;
+  const cutFeed = numOr(cfg.cutFeed, 4500);
+  const plungeFeed = numOr(cfg.plungeFeed, 1500);
   const rapidFeed = 15000;
 
   let totalMinutes = 0;
-  let cx = 0, cy = 0, cz = Number(cfg.safeZ) || 25;
+  let cx = 0, cy = 0, cz = numOr(cfg.safeZ, 25);
 
   lines.forEach((l) => {
     const line = l.trim();
