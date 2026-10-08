@@ -25,7 +25,7 @@ function cloneRows(rows) {
   return (rows || []).map((r) => ({ ...r, ...(r.derz ? { derz: { ...r.derz } } : {}) }));
 }
 
-export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relative', setOffsetMode, setCfg }) {
+export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relative', setOffsetMode, setCfg, restoreFromPreset = true }) {
   // ⚙ ile seçilen satırın ayarları tablonun altındaki panelde gösterilir.
   const [selected, setSelected] = useState(null);
   const { presets, loading } = usePresets('kapak');
@@ -61,25 +61,36 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
     if (preset) applyPreset(preset);
   }
 
-  // Sayfa ilk açıldığında daha önce seçilmiş preseti varsayılan olarak getir.
-  // Presetler asenkron yüklendiği için liste gelince bir kez uygulanır.
-  const [restored, setRestored] = useState(false);
+  // A model loaded from the Ayarlar preset panel becomes the selection here too.
   useEffect(() => {
-    if (restored || loading || !activePresetId || presets.length === 0) return;
+    const onSelected = (e) => {
+      if (!e.detail) return;
+      setActivePresetId(e.detail);
+      try { localStorage.setItem(ACTIVE_PRESET_KEY, e.detail); } catch { /* yoksay */ }
+    };
+    window.addEventListener('empire-cnc-preset-selected', onSelected);
+    return () => window.removeEventListener('empire-cnc-preset-selected', onSelected);
+  }, []);
+
+  // The rows and settings themselves are saved by KapakModule, so normally there
+  // is nothing to restore here — re-applying the preset on every open would wipe
+  // the user's own edits and settings. Only a first start without saved rows
+  // falls back to the last chosen preset.
+  const [restored, setRestored] = useState(!restoreFromPreset);
+  useEffect(() => {
+    if (restored || loading || !activePresetId || activePresetId === '__custom__' || presets.length === 0) return;
     const preset = presets.find((p) => (p._id || p.id) === activePresetId);
     if (preset) applyPreset(preset);
     setRestored(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presets, loading, activePresetId, restored]);
 
-  // Tablo elle değiştirilince seçili preset artık bu satırları tanımlamaz.
+  // Tablo elle değiştirilince seçili preset artık bu satırları tanımlamaz; ama
+  // düzenlenmiş liste kalıcıdır (KapakModule kaydeder) ve "özelleştirilmiş"
+  // durumu da bir sonraki açılışta görünür.
   function markCustom() {
-    setActivePresetId((current) => {
-      if (current !== '__custom__') {
-        try { localStorage.removeItem(ACTIVE_PRESET_KEY); } catch { /* yoksay */ }
-      }
-      return '__custom__';
-    });
+    setActivePresetId('__custom__');
+    try { localStorage.setItem(ACTIVE_PRESET_KEY, '__custom__'); } catch { /* yoksay */ }
   }
 
   function updateRow(idx, field, value) {

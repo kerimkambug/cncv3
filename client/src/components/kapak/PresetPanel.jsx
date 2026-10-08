@@ -56,6 +56,8 @@ export default function PresetPanel({ cfg, setCfg, rows, setRows }) {
     const { name: _n, module: _m, category: _c, imageDataUrl: _i, description: _d, previewWidth: _pw, previewHeight: _ph, dxfFileName: _df, dxfText: _dt, dxfBounds: _db, _id, id: _id2, rows: presetRows, ...rest } = preset;
     setCfg((prev) => ({ ...prev, ...rest, refWidth: preset.previewWidth || null, refHeight: preset.previewHeight || null }));
     setRows(presetRows || []);
+    // keep the Bıçaklar preset picker on the same model
+    try { window.dispatchEvent(new CustomEvent('empire-cnc-preset-selected', { detail: presetId })); } catch { /* yoksay */ }
     setCategory(preset.category || 'kapak');
     setPreviewWidth(preset.previewWidth || 600);
     setPreviewHeight(preset.previewHeight || 600);

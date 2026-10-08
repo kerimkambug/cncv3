@@ -8,6 +8,7 @@ import NestingPanel from './NestingPanel.jsx';
 import DaireKesimi from './DaireKesimi.jsx';
 import DerzBolme from './DerzBolme.jsx';
 import { DEFAULT_MACHINE_CONFIG, DEFAULT_PLATE_CONFIG } from '../../lib/gcode/common.js';
+import { usePersistentState } from '../../hooks/usePersistentState.js';
 
 const TABS = [
   { key: 'single', label: 'Tek Kapak' },
@@ -21,9 +22,13 @@ export default function KapakModule({ activeOp = 'single', onBackToMenu }) {
   const [currentTab, setCurrentTab] = useState(activeOp);
   const [activeModal, setActiveModal] = useState(null); // 'settings' | 'tools' | null
 
-  const [machineCfg, setMachineCfg] = useState({ ...DEFAULT_MACHINE_CONFIG, offsetMode: 'relative', topStyle: 'flat', riseRatio: 0.125 });
-  const [plateCfg, setPlateCfg] = useState({ ...DEFAULT_PLATE_CONFIG });
-  const [rows, setRows] = useState([
+  // The working set (machine settings, plate, tool rows) is whatever the user
+  // last chose: a preset picked in Bıçaklar, or their own edits. It is kept in
+  // localStorage, so a reload or a trip to another module never brings back the
+  // built-in starting rows.
+  const [machineCfg, setMachineCfg] = usePersistentState('empire-cnc-kapak-machine', { ...DEFAULT_MACHINE_CONFIG, offsetMode: 'relative', topStyle: 'flat', riseRatio: 0.125 });
+  const [plateCfg, setPlateCfg] = usePersistentState('empire-cnc-kapak-plate', { ...DEFAULT_PLATE_CONFIG });
+  const [rows, setRows, hasSavedRows] = usePersistentState('empire-cnc-kapak-rows', [
     { name: '30mm yuvarlama', toolNo: '7', depth: 2.5, stepOffset: 52 },
     { name: '10mm balmumu', toolNo: '2', depth: 2, stepOffset: 16 },
     { name: '20mm tabla bıçağı', toolNo: '9', depth: 5.5, stepOffset: 9 },
@@ -146,6 +151,7 @@ export default function KapakModule({ activeOp = 'single', onBackToMenu }) {
             offsetMode={machineCfg.offsetMode}
             setOffsetMode={(mode) => setMachineCfg((c) => ({ ...c, offsetMode: mode }))}
             setCfg={setMachineCfg}
+            restoreFromPreset={!hasSavedRows}
           />
         </div>
       </div>
