@@ -10,8 +10,11 @@ import { fmt, computeCumOffsets, emitRectCutPath } from './common.js';
 import { numOr, toFiniteNumber, validateNestingGap, validateDepthAgainstThickness } from '../../../../shared/gcode/validation.js';
 import { parseNestImportText } from '../../../../shared/nest/csvImport.js';
 export { parseNestImportText };
-import { computeDerzPositions } from './derz.js';
-import { validateKapakSize, calculateAdaptiveOffsets, buildCarvingProfile, clampCarvingExit, solveCarveGeometry, computeTopCurve, emitTopCurveGcode } from './kapak.js';
+import { computeDerzPositions, trimDerzLine, derzBoxLine } from './derz.js';
+import { parseGcode } from './gcodeToDxf.js';
+import { buildCamPartProgram } from './camTarama.js';
+import { rowNeedsOffset } from './features.js';
+import { calculateAdaptiveOffsets, computeTopCurve, buildKapakGcode } from './kapak.js';
 
 function rectsIntersect(a, b) {
   return a.x < b.x + b.w - 1e-9 && a.x + a.w > b.x + 1e-9 && a.y < b.y + b.h - 1e-9 && a.y + a.h > b.y + 1e-9;
@@ -36,31 +39,44 @@ function pruneContainedRects(rects) {
   return out;
 }
 
-function tryPackPlateMaxRects(plate, part, gap, rotate) {
-  if (!plate || !Array.isArray(plate.freeRects) || plate.freeRects.length === 0) return false;
+// --- MaxRects packing -------------------------------------------------------
+// A placement is scored by a heuristic (lower = better):
+//   bssf : best short side fit   bl  : bottom-left (lowest y, then x)
+//   blsf : best long side fit    baf : best area fit
+const HEURISTICS = ['bssf', 'blsf', 'baf', 'bl'];
 
+function placementScore(fr, pw, ph, heuristic) {
+  const lw = fr.w - pw; const lh = fr.h - ph;
+  const short = Math.min(lw, lh); const long = Math.max(lw, lh);
+  switch (heuristic) {
+    case 'blsf': return [long, short];
+    case 'baf': return [fr.w * fr.h - pw * ph, short];
+    case 'bl': return [fr.y + ph, fr.x];
+    default: return [short, long];
+  }
+}
+const better = (a, b) => !b || a[0] < b[0] - 1e-9 || (Math.abs(a[0] - b[0]) <= 1e-9 && a[1] < b[1] - 1e-9);
+
+/** Best spot for `part` on `plate` (or null). The footprint carries the gap on its right/top side. */
+function findPlacement(plate, part, gap, rotate, heuristic) {
   const orientations = [{ w: part.width, h: part.height, rotated: false }];
   if (rotate && !part.lockRotation && part.width !== part.height) {
     orientations.push({ w: part.height, h: part.width, rotated: true });
   }
-
   let best = null;
-  plate.freeRects.forEach((fr) => {
-    orientations.forEach((o) => {
-      const pw = o.w + gap, ph = o.h + gap;
-      if (pw <= fr.w + 1e-9 && ph <= fr.h + 1e-9) {
-        const leftoverW = fr.w - pw, leftoverH = fr.h - ph;
-        const shortSideFit = Math.min(leftoverW, leftoverH);
-        const areaFit = fr.w * fr.h - pw * ph;
-        if (!best || areaFit < best.areaFit - 1e-9 || (Math.abs(areaFit - best.areaFit) < 1e-9 && shortSideFit < best.shortSideFit)) {
-          best = { x: fr.x, y: fr.y, w: o.w, h: o.h, rotated: o.rotated, areaFit, shortSideFit };
-        }
-      }
-    });
-  });
-  if (!best) return false;
+  for (const fr of plate.freeRects) {
+    for (const o of orientations) {
+      const pw = o.w + gap; const ph = o.h + gap;
+      if (pw > fr.w + 1e-9 || ph > fr.h + 1e-9) continue;
+      const score = placementScore(fr, pw, ph, heuristic);
+      if (better(score, best && best.score)) best = { x: fr.x, y: fr.y, w: o.w, h: o.h, rotated: o.rotated, score };
+    }
+  }
+  return best;
+}
 
-  const footprint = { x: best.x, y: best.y, w: best.w + gap, h: best.h + gap };
+function commitPlacement(plate, part, place, gap) {
+  const footprint = { x: place.x, y: place.y, w: place.w + gap, h: place.h + gap };
   const newFree = [];
   plate.freeRects.forEach((fr) => {
     if (!rectsIntersect(fr, footprint)) { newFree.push(fr); return; }
@@ -70,9 +86,83 @@ function tryPackPlateMaxRects(plate, part, gap, rotate) {
     if (footprint.y + footprint.h < fr.y + fr.h) newFree.push({ x: fr.x, y: footprint.y + footprint.h, w: fr.w, h: (fr.y + fr.h) - (footprint.y + footprint.h) });
   });
   plate.freeRects = pruneContainedRects(newFree);
+  plate.parts.push({ ...part, x: place.x, y: place.y, placedWidth: place.w, placedHeight: place.h, rotated: place.rotated });
+}
 
-  plate.parts.push({ ...part, x: best.x, y: best.y, placedWidth: best.w, placedHeight: best.h, rotated: best.rotated });
-  return true;
+/**
+ * Packs every part in `order` onto as many plates as needed.
+ * strategy 'firstFit': each part, in order, goes to the first plate it fits on.
+ * strategy 'global'  : plates are filled one at a time; at every step the
+ *   remaining part with the best-scoring spot is placed (the order only breaks ties).
+ */
+function packAll(order, makePlate, gap, rotate, heuristic, strategy) {
+  const plates = [];
+  if (strategy === 'global') {
+    let remaining = order.slice();
+    while (remaining.length) {
+      const plate = makePlate(plates.length + 1);
+      for (;;) {
+        let best = null; let bestIdx = -1;
+        remaining.forEach((part, i) => {
+          const pl = findPlacement(plate, part, gap, rotate, heuristic);
+          if (pl && better(pl.score, best && best.score)) { best = pl; bestIdx = i; }
+        });
+        if (!best) break;
+        commitPlacement(plate, remaining[bestIdx], best, gap);
+        remaining.splice(bestIdx, 1);
+      }
+      if (!plate.parts.length) return null; // a part fits on no empty plate
+      plates.push(plate);
+    }
+    return plates;
+  }
+  for (const part of order) {
+    let done = false;
+    for (const plate of plates) {
+      const pl = findPlacement(plate, part, gap, rotate, heuristic);
+      if (pl) { commitPlacement(plate, part, pl, gap); done = true; break; }
+    }
+    if (!done) {
+      const plate = makePlate(plates.length + 1);
+      const pl = findPlacement(plate, part, gap, rotate, heuristic);
+      if (!pl) return null;
+      commitPlacement(plate, part, pl, gap);
+      plates.push(plate);
+    }
+  }
+  return plates;
+}
+
+/**
+ * Quality of a packing, lower = better: fewest plates first; then the last
+ * plate packed into the smallest corner (its bounding area — what is left is
+ * one big reusable offcut); then the same over all plates.
+ */
+function packingCost(plates) {
+  const bbox = (pl) => {
+    let w = 0; let h = 0;
+    pl.parts.forEach((p) => { w = Math.max(w, p.x + p.placedWidth); h = Math.max(h, p.y + p.placedHeight); });
+    return w * h;
+  };
+  return [plates.length, bbox(plates[plates.length - 1]), plates.reduce((s, pl) => s + bbox(pl), 0)];
+}
+const cheaper = (a, b) => {
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] < b[i] - 1e-6) return true;
+    if (a[i] > b[i] + 1e-6) return false;
+  }
+  return false;
+};
+
+/** Small seeded PRNG (mulberry32), so the same input always gives the same nest. */
+function seededRandom(seed) {
+  let t = seed >>> 0;
+  return () => {
+    t = (t + 0x6D2B79F5) >>> 0;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 /**
@@ -135,91 +225,33 @@ function orderPartsByProximity(parts) {
 }
 
 /**
- * Final Z0 Kesim & Ebatlama Sıralaması (Vakum Güvenliği & Top-Right Başlangıç):
- * 1. Kesim kesinlikle plakanın en sağ üst köşesindeki parçadan başlar (en yüksek Y, ardından en yüksek X).
- * 2. Aktif üst banttaki parçalar sağdan sola doğru taranır (vakum tabanının stabilitesi korunur).
- * 3. Her parçanın kesilmesinden sonra kalan parçalar dinamik olarak yeniden değerlendirilir;
- *    kesilen parçaların serbest kalıp uçması veya boşta kalan parçaların yerinden oynaması önlenir.
+ * Final Z0 kesim (ve ön çizme) sıralaması — satır satır, sağdan sola:
+ *   1. En üstteki satır: en sağ üstteki parçadan başlanır, satır sağdan sola
+ *      bitirilir.
+ *   2. Sonra bir alt satıra inilir, yine en sağdan başlanır.
+ *   3. En son sol alttaki parça kesilir.
+ * Bir "satır": kalan parçalar içinde üst kenarı en yüksek olan parça ile, üst
+ * kenarı o parçanın alt kenarından yukarıda kalan (yani onun yüksekliğinde
+ * başlayan) bütün parçalar. Satır içinde sağ kenarı büyük olan önce; aynı
+ * sütunda üst üste duranlarda üstteki önce.
  */
-export function orderPartsVacuumSafeFinalCut(parts, plateW = 2440, plateH = 1220) {
+export function orderPartsVacuumSafeFinalCut(parts) {
   if (!parts || parts.length <= 1) return parts ? parts.slice() : [];
-
-  const remaining = parts.slice();
+  const top = (p) => p.y + p.placedHeight;
+  const right = (p) => p.x + p.placedWidth;
+  const EPS = 0.5;
+  let remaining = parts.slice();
   const ordered = [];
-
-  // 1. Aşama: Kesinlikle plakanın en sağ üst köşesindeki parça ile başla
-  let firstIdx = 0;
-  let bestStartScore = -Infinity;
-  for (let i = 0; i < remaining.length; i++) {
-    const p = remaining[i];
-    const topY = p.y + p.placedHeight;
-    const rightX = p.x + p.placedWidth;
-    // Y ekseni yüksekliği en öncelikli, ardından en sağdaki X
-    const score = topY * 100000 + rightX;
-    if (score > bestStartScore) {
-      bestStartScore = score;
-      firstIdx = i;
-    }
+  while (remaining.length) {
+    // the row is led by the highest part (rightmost on a tie)
+    const lead = remaining.reduce((best, p) => (
+      top(p) > top(best) + EPS || (Math.abs(top(p) - top(best)) <= EPS && right(p) > right(best)) ? p : best
+    ));
+    const row = remaining.filter((p) => top(p) > lead.y + EPS);
+    row.sort((a, b) => (Math.abs(right(b) - right(a)) > EPS ? right(b) - right(a) : top(b) - top(a)));
+    ordered.push(...row);
+    remaining = remaining.filter((p) => !row.includes(p));
   }
-
-  const firstPart = remaining.splice(firstIdx, 1)[0];
-  ordered.push(firstPart);
-
-  // 2. Aşama: Kalan parçaları vakum stabilitesi ve sağ-üstten-sola dalga mantığıyla dinamik seç
-  while (remaining.length > 0) {
-    const lastPart = ordered[ordered.length - 1];
-    const lastRightX = lastPart.x + lastPart.placedWidth;
-    const lastCenterX = lastPart.x + lastPart.placedWidth / 2;
-    const lastCenterY = lastPart.y + lastPart.placedHeight / 2;
-
-    const maxRemainingTopY = Math.max(...remaining.map((p) => p.y + p.placedHeight));
-    const avgPartH = remaining.reduce((sum, p) => sum + p.placedHeight, 0) / remaining.length;
-    const bandTolerance = Math.max(30, avgPartH * 0.55);
-
-    let bestIdx = 0;
-    let bestScore = -Infinity;
-
-    for (let i = 0; i < remaining.length; i++) {
-      const p = remaining[i];
-      const pTopY = p.y + p.placedHeight;
-      const pRightX = p.x + p.placedWidth;
-      const pCenterX = p.x + p.placedWidth / 2;
-      const pCenterY = p.y + p.placedHeight / 2;
-
-      let score = 0;
-
-      // Parça mevcut en üst aktif bantta mı?
-      const inActiveBand = (maxRemainingTopY - pTopY) <= bandTolerance;
-
-      if (inActiveBand) {
-        // Aktif bant her zaman alt bantlardan önce bitirilir (10M taban)
-        score += 10000000;
-        // Aktif bant içinde sağdan sola öncelik (yüksek X daha önce)
-        score += pRightX * 100;
-
-        // Süreklilik: Önceki kesilen parçanın solundaki komşuyu önceliklendir
-        if (pRightX <= lastRightX + 10) {
-          score += 5000;
-        }
-      } else {
-        // Alt bantlar: Önce daha yukarıdaki bantlar, sonra sağdakiler
-        score += pTopY * 1000 + pRightX * 10;
-      }
-
-      // Gezinme mesafesi cezası (yakın parçayı tercih et)
-      const dist = Math.hypot(pCenterX - lastCenterX, pCenterY - lastCenterY);
-      score -= dist * 2;
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestIdx = i;
-      }
-    }
-
-    const nextPart = remaining.splice(bestIdx, 1)[0];
-    ordered.push(nextPart);
-  }
-
   return ordered;
 }
 
@@ -263,6 +295,9 @@ export function buildPartDerzGeometry(part, row, offsetRows = [], ctx = {}) {
     margin,
     spacing: numOr(derz.spacing, null) ?? numOr(row.stepOffset, 60),
     autoFit: derz.autoFit !== false,
+    insideFrame: derz.insideFrame === true,
+    stagger: derz.stagger === true,
+    count: numOr(derz.count, null),
     edgeExtra: numOr(derz.edgeExtra, 0),
   };
   const positions = computeDerzPositions(opts).positions;
@@ -290,18 +325,25 @@ export function buildPartDerzGeometry(part, row, offsetRows = [], ctx = {}) {
     ? computeTopCurve(shapeXl, shapeXr, shapeYt, ctx.topStyle, ctx.riseRatio)
     : null;
 
+  const W = part.placedWidth;
+  const H = part.placedHeight;
   const segments = positions.map((pos) => {
     if (!vertical) {
       const y = part.y + pos;
-      return { x1: part.x + margin - overshootX, y1: y, x2: part.x + part.placedWidth - margin + overshootX, y2: y };
+      const [s, e] = trimDerzLine(derz, false, pos, margin - overshootX, W - margin + overshootX, W, H, positions.indexOf(pos), positions.length);
+      return { x1: part.x + s, y1: y, x2: part.x + e, y2: y };
     }
     const x = part.x + pos;
     const posAbs = part.x + pos;
+    // Same top end as kapak.js: arch, else startY mirrored, else margin + overshoot.
     const y2 = (curve && posAbs > shapeXl && posAbs < shapeXr)
       ? curve.yEnd(posAbs)
-      : part.y + part.placedHeight - margin + overshootY;
-    return { x1: x, y1: part.y + frameY, x2: x, y2 };
+      : part.y + (startYOverride != null ? H - startYOverride : H - margin + overshootY);
+    const [s, e] = trimDerzLine(derz, true, pos, frameY, y2 - part.y, W, H, positions.indexOf(pos), positions.length);
+    return { x1: x, y1: part.y + s, x2: x, y2: part.y + e };
   });
+  const box = derzBoxLine(derz, positions, H);
+  if (box) segments.push({ x1: part.x + box.x1, y1: part.y + box.y, x2: part.x + box.x2, y2: part.y + box.y });
 
   return { vertical, positions, segments, margin };
 }
@@ -340,35 +382,68 @@ export function calculateNesting(opts) {
     .flatMap((p) => {
       const qty = Number.isFinite(Number(p.qty)) && Number(p.qty) > 0 ? Math.floor(Number(p.qty)) : 1;
       return Array.from({ length: qty }, (_, i) => ({ ...p, qty, copyIndex: i }));
-    })
-    .sort((a, b) => (b.width * b.height) - (a.width * a.height));
+    });
   const usableW = plateW - edge * 2;
   const usableH = plateH - edge * 2;
-  const plates = [];
 
-  function newPlate() {
-    return {
-      number: plates.length + 1,
-      width: plateW,
-      height: plateH,
-      parts: [],
-      freeRects: [{ x: edge, y: edge, w: usableW, h: usableH }],
-    };
-  }
+  // The usable area is extended by one gap on the right/top: every footprint
+  // carries its gap on those sides, and the last part's gap may run into the
+  // edge margin — so the margin is `edge` on all four sides, not edge + gap.
+  const makePlate = (number) => ({
+    number, width: plateW, height: plateH, parts: [],
+    freeRects: [{ x: edge, y: edge, w: usableW + gap, h: usableH + gap }],
+  });
 
+  // A part that fits on no empty plate is an input error, whatever the order.
   for (const part of parts) {
-    let placed = false;
-    for (const plate of plates) {
-      if (tryPackPlateMaxRects(plate, part, gap, rotate)) { placed = true; break; }
-    }
-    if (!placed) {
-      const plate = newPlate();
-      if (!tryPackPlateMaxRects(plate, part, gap, rotate)) {
-        throw new Error(`${part.name} (${part.width}×${part.height}) tek başına bile plakanın kullanılabilir alanına sığmıyor.`);
-      }
-      plates.push(plate);
+    if (!findPlacement(makePlate(1), part, gap, rotate, 'bssf')) {
+      throw new Error(`${part.name} (${part.width}×${part.height}) tek başına bile plakanın kullanılabilir alanına sığmıyor.`);
     }
   }
+
+  // Like a CAM nester: try many layouts and keep the one with the fewest plates
+  // and the most compact last plate. Orders x placement rules x fill strategies,
+  // then random reorderings until the variant/time budget runs out.
+  const by = (key) => parts.slice().sort((a, b) => key(b) - key(a));
+  const orders = [
+    by((p) => p.width * p.height),
+    by((p) => Math.max(p.width, p.height)),
+    by((p) => p.height),
+    by((p) => p.width),
+    by((p) => p.width + p.height),
+    by((p) => Math.min(p.width, p.height)),
+  ];
+  const maxVariants = Math.max(1, Number(opts.maxVariants) || 2000);
+  const timeBudgetMs = Number(opts.timeBudgetMs) || 1500;
+  const started = Date.now();
+  const rand = seededRandom(parts.length * 7919 + Math.round(usableW + usableH));
+  let best = null; let bestCost = null; let tried = 0; let bestLabel = '';
+  const attempt = (order, heuristic, strategy, label) => {
+    tried++;
+    const plates = packAll(order, makePlate, gap, rotate, heuristic, strategy);
+    if (!plates) return;
+    const cost = packingCost(plates);
+    if (!best || cheaper(cost, bestCost)) { best = plates; bestCost = cost; bestLabel = `${label} / ${heuristic} / ${strategy}`; }
+  };
+  outer: for (const strategy of ['firstFit', 'global']) {
+    for (const heuristic of HEURISTICS) {
+      for (let i = 0; i < orders.length; i++) {
+        if (tried >= maxVariants || (best && Date.now() - started > timeBudgetMs)) break outer;
+        attempt(orders[i], heuristic, strategy, `sıra${i + 1}`);
+      }
+    }
+  }
+  // random perturbations of the best-known orders (swap neighbours, shuffle blocks)
+  while (tried < maxVariants && Date.now() - started <= timeBudgetMs) {
+    const base = orders[Math.floor(rand() * orders.length)].slice();
+    const swaps = 1 + Math.floor(rand() * Math.max(1, base.length / 3));
+    for (let k = 0; k < swaps; k++) {
+      const i = Math.floor(rand() * base.length); const j = Math.min(base.length - 1, i + 1 + Math.floor(rand() * 3));
+      [base[i], base[j]] = [base[j], base[i]];
+    }
+    attempt(base, HEURISTICS[Math.floor(rand() * HEURISTICS.length)], rand() < 0.5 ? 'firstFit' : 'global', 'karışık');
+  }
+  const plates = best;
 
   plates.forEach((p) => {
     // Profil / işleme aşaması için standart yakınlık optimizasyonu
@@ -376,7 +451,15 @@ export function calculateNesting(opts) {
     delete p.freeRects;
   });
 
-  return { plateW, plateH, edge, gap, plates };
+  const partArea = parts.reduce((s, p) => s + p.width * p.height, 0);
+  const search = {
+    variants: tried,
+    ms: Date.now() - started,
+    best: bestLabel,
+    // share of the used plates covered by parts (the rest is fire / offcut)
+    utilization: partArea / (plates.length * plateW * plateH),
+  };
+  return { plateW, plateH, edge, gap, plates, search };
 }
 
 /** Returns an error string if any tool row is missing required fields, else null. */
@@ -386,7 +469,7 @@ function validateRows(rows, label) {
     const r = rows[i];
     if (r.toolNo === '' || r.toolNo === undefined || r.toolNo === null) return `${label}: bir satırda Tool No eksik.`;
     if (!Number.isFinite(r.depth)) return `${label}: ${r.name || 'bir bıçak'} için derinlik eksik.`;
-    if (!Number.isFinite(r.stepOffset)) return `${label}: ${r.name || 'bir bıçak'} için adım offset eksik.`;
+    if (rowNeedsOffset(r) && !Number.isFinite(r.stepOffset)) return `${label}: ${r.name || 'bir bıçak'} için adım offset eksik.`;
   }
   return null;
 }
@@ -402,8 +485,21 @@ export function validateNestingResult(nestingResult, defaultCfg, presetMap = {})
   if (defaultErr) return defaultErr;
   for (const key of Object.keys(presetMap || {})) {
     const preset = presetMap[key];
+    if (preset?.cam) continue; // checked per part below
     const err = validateRows(preset?.rows, preset?.name ? `"${preset.name}" modeli` : 'Seçili model');
     if (err) return err;
+  }
+  // A glass door must fit ITS size: try each cam part's program.
+  for (const plate of nestingResult?.plates || []) {
+    for (const part of plate.parts || []) {
+      const pc = presetMap && part.presetId ? presetMap[part.presetId] : null;
+      if (!pc || !pc.cam) continue;
+      try {
+        partProgram(part, { ...defaultCfg, ...pc });
+      } catch (e) {
+        return `Cam kapak "${part.name}" (${part.width}x${part.height}): ${e.message}`;
+      }
+    }
   }
   return null;
 }
@@ -522,138 +618,141 @@ function emitOuterCutPass(lines, parts, cutToolRadius, targetZ, feed, plunge, sa
 }
 
 /**
- * Emits adaptive profile milling passes for all defined tool rows.
+ * Splits a combined (isCombined) kapak program into its tool blocks.
+ * @returns {Array<{tool:string, head:string[], body:string[]}>}
  */
-function emitAdaptiveProfilePasses(lines, plate, cfg, { thickness, plungeFeed, cutFeed, safeZ, toolChangeZ, spindleSpeed }) {
-  if (!cfg.rows || cfg.rows.length === 0) return;
-  let lastEmittedToolNo = null;
-  const topStyle = cfg.topStyle || 'flat';
-
-  // Only plain offset rows participate in the (cumulative) offset chain; derz and
-  // carving rows are handled separately and must not shift the offset sequence.
-  const offsetRows = cfg.rows.filter((r) => (r.operation || 'offset') !== 'derz' && r.operation !== 'carving');
-  // Cumulative offset per offset row — the derz "respectPreviousOffset" margin
-  // sits on top of the deepest offset row's cumulative value.
-  const offsetCums = offsetRows.length ? computeCumOffsets(offsetRows, cfg.offsetMode || 'relative') : [];
-
-  offsetRows.forEach((r, rowIdx) => {
-    const z = +(thickness - r.depth).toFixed(3);
-    const validPartCoords = getAdaptiveRowPartCoords(
-      plate.parts,
-      offsetRows,
-      rowIdx,
-      cfg.offsetMode || 'relative'
-    );
-
-    if (validPartCoords.length > 0) {
-      const toolChanged = String(r.toolNo) !== String(lastEmittedToolNo);
-
-      if (toolChanged) {
-        if (lastEmittedToolNo !== null) {
-          lines.push(`G0Z${fmt(toolChangeZ)}`);
-          lines.push('M5');
-        }
-        lines.push(`M6T${r.toolNo}`);
-        lines.push(`M3 S${spindleSpeed}`);
-        lastEmittedToolNo = r.toolNo;
-      }
-
-      validPartCoords.forEach((coords) => {
-        const curve = topStyle === 'flat' ? null : computeTopCurve(coords.x1, coords.x2, coords.y2, topStyle, cfg.riseRatio);
-        lines.push(`G0 X${fmt(coords.x1)} Y${fmt(coords.y1)} Z${fmt(safeZ)}`);
-        lines.push(`G1   Z${fmt(z)} F${plungeFeed.toFixed(1)}`);
-        lines.push(`G1 X${fmt(coords.x2)}   F${cutFeed.toFixed(1)}`);
-        if (curve) {
-          emitTopCurveGcode(lines, curve, z, cutFeed);
-          lines.push(`G1 X${fmt(coords.x1)} Y${fmt(coords.y1)} F${cutFeed.toFixed(1)}`);
-        } else {
-          lines.push(` Y${fmt(coords.y2)} `);
-          lines.push(`X${fmt(coords.x1)}  `);
-          lines.push(` Y${fmt(coords.y1)} `);
-        }
-        lines.push(`G0   Z${fmt(safeZ)}`);
-      });
-    }
+function splitToolBlocks(programLines) {
+  const blocks = [];
+  let cur = null;
+  programLines.forEach((l, i) => {
+    const m = /^M6T(\S+)/.exec(l);
+    if (m) { cur = { tool: m[1], head: [l], body: [] }; blocks.push(cur); return; }
+    // The M5 that closes a block right before the next tool change belongs to the change.
+    if (l === 'M5' && /^M6T/.test(programLines[i + 1] || '')) return;
+    if (!cur) return;
+    if (!cur.body.length && (/^M3 S/.test(l) || /^G0Z/.test(l))) cur.head.push(l);
+    else cur.body.push(l);
   });
+  return blocks;
+}
 
-  // Carving rows: single closed profile line (V-bit) at a fixed offset, with an
-  // outward diagonal corner ramp back to the surface — per part.
-  cfg.rows.filter((r) => r.operation === 'carving').forEach((r) => {
-    // Carving = closed V-bit profile with mandatory corner sharpening. The row gives
-    // where (stepOffset) and how deep (depth); the bit angle derives the corner ramp.
-    const geo = solveCarveGeometry(r);
-    const depth = Number(r.depth) || 0;
-    const offset = Number(r.stepOffset) || 0;
-    // Clamp so the corner ramp can never step past the profile edge (no off-plate negatives).
-    const exit = clampCarvingExit(geo.ramp, offset);
-    const toolChanged = String(r.toolNo) !== String(lastEmittedToolNo);
-    if (toolChanged) {
-      if (lastEmittedToolNo !== null) {
-        lines.push(`G0Z${fmt(toolChangeZ)}`);
-        lines.push('M5');
-      }
-      lines.push(`M6T${r.toolNo}`);
-      lines.push(`M3 S${spindleSpeed}`);
-      lastEmittedToolNo = r.toolNo;
-    }
-    plate.parts.forEach((part) => {
-      lines.push(`G0 X${fmt(part.x + part.placedWidth - offset)} Y${fmt(part.y + part.placedHeight - offset)} Z${fmt(safeZ)}`);
-      buildCarvingProfile(part.placedWidth, part.placedHeight, offset, depth, thickness, geo.angle).forEach((line) => {
-        const fed = /^G1 Z/.test(line) ? `${line} F${plungeFeed.toFixed(1)}` : `${line} F${cutFeed.toFixed(1)}`;
-        lines.push(fed.replace(/X(-?[\d.]+)/g, (m, n) => `X${fmt(Number(n) + part.x)}`).replace(/Y(-?[\d.]+)/g, (m, n) => `Y${fmt(Number(n) + part.y)}`));
-      });
-      lines.push(`G0 Z${fmt(safeZ)}`);
+/**
+ * Stage 2 of a plate: every part is cut by EXACTLY the program Tek Ölçü would
+ * give it (buildKapakGcode on the part's placed size, shifted to its plate
+ * position) — offsets, absolute/pinned offsets, rounded corners, roughing,
+ * carving, derz, tarama, şablon... nothing is re-implemented here. The
+ * per-part programs are then merged tool block by tool block, so the whole plate
+ * still needs one tool change per block instead of one per part: block k of
+ * every part is cut before block k+1 of any part. Each part's block starts with
+ * a full X/Y/Z approach, so no move depends on where the previous part ended.
+ */
+function emitPartProgramsByTool(lines, parts, cfg) {
+  if (!hasToolpaths(cfg) || !parts.length) return;
+  const perPart = parts.map((part) => splitToolBlocks(partProgram(part, cfg).split('\n')));
+  // Key = tool + its occurrence index, so a tool used twice (T6 ... T1 ... T6)
+  // keeps two separate blocks. Order = first appearance over all parts.
+  const order = [];
+  const byKey = new Map();
+  perPart.forEach((blocks, partIdx) => {
+    const seen = {};
+    blocks.forEach((b) => {
+      seen[b.tool] = (seen[b.tool] || 0) + 1;
+      const key = `${b.tool}#${seen[b.tool]}`;
+      if (!byKey.has(key)) { byKey.set(key, { head: b.head, bodies: [] }); order.push(key); }
+      byKey.get(key).bodies.push({ partIdx, body: b.body });
     });
   });
-
-  const offsetRowsForDerz = offsetRows;
-  // Derz rows: evenly spaced divider lines INSIDE each part, driven by the row's
-  // own derz options (yon/margin/spacing/autoFit/overshoot/edgeExtra) — the
-  // nesting counterpart of kapak.js's derz block. Each part's lines are computed
-  // on the part's own placed size and offset by the part's plate position.
-  cfg.rows.filter((r) => r.operation === 'derz').forEach((r) => {
-    const derz = r.derz || {};
-    const toolChanged = String(r.toolNo) !== String(lastEmittedToolNo);
-    if (toolChanged) {
-      if (lastEmittedToolNo !== null) {
-        lines.push(`G0Z${fmt(toolChangeZ)}`);
-        lines.push('M5');
-      }
-      lines.push(`M6T${r.toolNo}`);
-      lines.push(`M3 S${spindleSpeed}`);
-      lastEmittedToolNo = r.toolNo;
+  const { toolChangeZ } = getMachineParams(cfg);
+  let current = null;
+  order.forEach((key) => {
+    const blk = byKey.get(key);
+    const tool = key.split('#')[0];
+    // Two blocks in a row on the same tool (cam: tarama then iç kesim, both T6)
+    // stay separate phases but need no tool change between them.
+    if (tool !== current) {
+      if (current !== null) lines.push('M5');
+      blk.head.forEach((l) => lines.push(l));
+      current = tool;
     }
-    const z = +(thickness - (Number(r.depth) || 0)).toFixed(3);
-    const rowFeedVal = Number(r.feed);
-    const feed = Number.isFinite(rowFeedVal) && rowFeedVal > 0 ? rowFeedVal : cutFeed;
-    // "Önceki offset sınırlarına uy": derz margin sits on top of the deepest
-    // offset row's cumulative offset (same rule as kapak.js).
-    const prevOffset = derz.respectPreviousOffset === false ? 0 : (offsetCums[offsetCums.length - 1] || 0);
-    // Derz geometry is NOT recomputed here: buildPartDerzGeometry is the single
-    // source of truth shared by the G-code, the DXF and the on-screen preview, so
-    // all three place every divider identically (kapak.js uses the same helper
-    // rules: vertical lines start on the bottom frame edge cut by the FIRST
-    // offset row — never with a bottom overshoot, which in a nest would run into
-    // the neighbouring part — and end on the arch when the top is curved).
-    plate.parts.forEach((part) => {
-      const geo = buildPartDerzGeometry(part, r, offsetRowsForDerz, {
-        prevOffset,
-        topStyle: cfg.topStyle,
-        riseRatio: cfg.riseRatio,
-      });
-      geo.segments.forEach((s) => {
-        lines.push(`G0 X${fmt(s.x1)} Y${fmt(s.y1)} Z${fmt(safeZ)}`);
-        lines.push(`G1   Z${fmt(z)} F${plungeFeed.toFixed(1)}`);
-        lines.push(`G1 X${fmt(s.x2)} Y${fmt(s.y2)}   F${feed.toFixed(1)}`);
-        lines.push(`G0   Z${fmt(safeZ)}`);
-      });
-    });
+    blk.bodies.forEach(({ body }) => body.forEach((l) => lines.push(l)));
   });
+  lines.push(`G0Z${fmt(toolChangeZ)}`);
+  lines.push('M5');
+}
 
-  if (lastEmittedToolNo !== null) {
-    lines.push(`G0Z${fmt(toolChangeZ)}`);
-    lines.push('M5');
+/**
+ * Rotates one G-code line of a part program by 90° clockwise inside a part of
+ * original width `w`, then shifts it to (ox, oy): (x, y) -> (ox + y, oy + w - x),
+ * arc offsets (i, j) -> (j, -i). A quarter turn sends each axis to exactly one
+ * axis, so even a modal line naming only X (or only Y) stays correct, and a
+ * rotation keeps G2/G3 directions.
+ */
+function rotatePartLine(line, w, ox, oy) {
+  const words = {};
+  const re = /([XYIJ])(-?\d+(?:\.\d+)?)/g;
+  let m;
+  while ((m = re.exec(line))) words[m[1]] = Number(m[2]);
+  if (!Object.keys(words).length) return line;
+  const head = (/^\s*(G\d+)/.exec(line) || [])[1];
+  const z = /Z-?\d+(?:\.\d+)?/.exec(line);
+  const f = /F-?\d+(?:\.\d+)?/.exec(line);
+  const out = [];
+  if (head) out.push(head);
+  if (words.Y !== undefined) out.push(`X${fmt(ox + words.Y)}`);
+  if (words.X !== undefined) out.push(`Y${fmt(oy + w - words.X)}`);
+  if (z) out.push(z[0]);
+  if (words.J !== undefined) out.push(`I${fmt(words.J)}`);
+  if (words.I !== undefined) out.push(`J${fmt(words.I === 0 ? 0 : -words.I)}`);
+  if (f) out.push(f[0]);
+  return out.join(' ');
+}
+
+/**
+ * The combined (no header / no tail) program of one placed part in plate
+ * coordinates. A part the packer turned by 90° is cut as ITSELF, turned: its
+ * program is built on the part's own width x height and rotated, so an arched
+ * top, the derz direction and corner ornaments stay where the model puts them
+ * instead of being re-laid-out on the swapped size.
+ */
+export function partProgram(part, cfg) {
+  const fullCfg = { ...cfg, ...getMachineParams(cfg) };
+  const w = part.rotated ? numOr(part.width, part.placedHeight) : part.placedWidth;
+  const h = part.rotated ? numOr(part.height, part.placedWidth) : part.placedHeight;
+  if (cfg.cam) {
+    // Glass door: tarama + iç kesim, built locally and then placed.
+    const local = buildCamPartProgram(w, h, { ...fullCfg, ...cfg.cam });
+    return local.split('\n').map((l) => (part.rotated
+      ? rotatePartLine(l, w, part.x, part.y)
+      : shiftPartLine(l, part.x, part.y))).join('\n');
   }
+  if (!part.rotated) return buildKapakGcode(w, h, fullCfg, part.x, part.y, true);
+  return buildKapakGcode(w, h, fullCfg, 0, 0, true)
+    .split('\n')
+    .map((l) => rotatePartLine(l, w, part.x, part.y))
+    .join('\n');
+}
+
+/** Moves one G-code line by (ox, oy) (arc offsets are relative and stay). */
+function shiftPartLine(line, ox, oy) {
+  return line
+    .replace(/X(-?\d+(?:\.\d+)?)/g, (_, v) => `X${fmt(Number(v) + ox)}`)
+    .replace(/Y(-?\d+(?:\.\d+)?)/g, (_, v) => `Y${fmt(Number(v) + oy)}`);
+}
+
+/** Whether a cfg cuts anything inside the part (kapak rows or a glass door). */
+function hasToolpaths(cfg) {
+  return !!(cfg && (cfg.cam || (cfg.rows && cfg.rows.length)));
+}
+
+/**
+ * The cutting moves (no rapids) of one placed part, in plate coordinates, read
+ * back from the part's real program (partProgram). The plate DXF and the
+ * on-screen preview both draw from this, so they show exactly what is cut.
+ * @returns {Array<{from:{x,y,z}, to:{x,y,z}, type:string, tool:string|null}>}
+ */
+export function partToolpathSegments(part, cfg) {
+  if (!hasToolpaths(cfg)) return [];
+  return parseGcode(partProgram(part, cfg)).segments.filter((sgm) => sgm.type !== 'G0');
 }
 
 /**
@@ -698,11 +797,7 @@ export function buildNestingPlateGcode(plate, cfg, presetMap = {}) {
   const finalCutZ = 0.00; // Z0 tabana kadar tam kesim
 
   // Final Kesim Parçaları: Vakum güvenliği & Sağ-Üstten-Sola sıralı
-  const finalCutParts = orderPartsVacuumSafeFinalCut(
-    plate.parts,
-    plate.width || cfg.plateWidth || 2440,
-    plate.height || cfg.plateHeight || 1220
-  );
+  const finalCutParts = orderPartsVacuumSafeFinalCut(plate.parts);
 
   // 1. AŞAMA: İŞLEME ÖNCESİ ÖN ÇİZME / ÖN KESİM (1.5 mm)
   if (doOuterCut) {
@@ -718,9 +813,12 @@ export function buildNestingPlateGcode(plate, cfg, presetMap = {}) {
   // özel bir model seçilmemişse "Ayarlar"daki aktif cfg (yukarıdaki thickness/feeds/...)
   // kullanılır. Aynı plakada farklı modeller (farklı offset/derz/carving zincirleri)
   // birbirini etkilemeden art arda işlenir.
+  // Glass doors come after the kapak models: their through-cut openings free
+  // loose scraps, so every other part is machined before that happens.
   const profileGroups = groupNestingPartsByPreset(plate.parts, cfg, presetMap);
-  profileGroups.forEach((group) => {
-    emitAdaptiveProfilePasses(lines, { parts: group.parts }, group.cfg, getMachineParams(group.cfg));
+  const ordered = [...profileGroups.filter((g) => !g.cfg.cam), ...profileGroups.filter((g) => g.cfg.cam)];
+  ordered.forEach((group) => {
+    emitPartProgramsByTool(lines, group.parts, { ...group.cfg, ...getMachineParams(group.cfg) });
   });
 
   // 3. AŞAMA: İŞLEME SONRASI FİNAL KESİM / EBATLAMA (Z0'A KADAR)
@@ -754,70 +852,39 @@ const TOOLCHANGE_SECONDS = 6;
 
 export function estimateNestingTime(result, cfg, presetMap = {}) {
   if (!result || !cfg) return 0;
-  let rapidMm = 0;
-  let toolChanges = 0;
-  let cutMinTotal = 0;
-  let plungeMinTotal = 0;
+  // Read off the plates' real programs, so every operation (carving, derz,
+  // tarama, şablon, glass doors, outer cuts) and every feed is counted.
+  return result.plates.reduce((sum, plate) => {
+    try {
+      return sum + estimateGcodeMinutes(buildNestingPlateGcode(plate, cfg, presetMap));
+    } catch {
+      return sum; // an unsafe plate is reported elsewhere; it has no runtime
+    }
+  }, 0);
+}
 
-  // Süre, her parçanın KENDİ modelinin bıçak sırası + kendi feed'leriyle hesaplanır
-  // (buildNestingPlateGcode'un ürettiği gerçek sıralamayla tutarlı olması için).
-  result.plates.forEach((plate) => {
-    const groups = groupNestingPartsByPreset(plate.parts, cfg, presetMap);
-    groups.forEach((group) => {
-      const groupCutFeed = Math.max(1, group.cfg.cutFeed || 6000);
-      const groupPlungeFeed = Math.max(1, group.cfg.plungeFeed || 3000);
-      let cx = 0;
-      let cy = 0;
-
-      // Yalnızca offset satırları işlenir ve SATIR DİZİSİ offset'e göre verilir
-      // (derz/carving satırları hem profil çizmez hem indeksi kaydırırdı).
-      const estOffsetRows = (group.cfg.rows || []).filter((r) => (r.operation || 'offset') !== 'derz' && r.operation !== 'carving');
-      estOffsetRows.forEach((r, rowIdx) => {
-        let usedInGroup = false;
-        const rowDepth = numOr(r.depth, 2);
-        const validCoords = getAdaptiveRowPartCoords(
-          group.parts,
-          estOffsetRows,
-          rowIdx,
-          group.cfg.offsetMode || 'relative'
-        );
-
-        validCoords.forEach(({ x1, y1, w, h }) => {
-          usedInGroup = true;
-          plungeMinTotal += rowDepth / groupPlungeFeed;
-          cutMinTotal += (2 * (w + h)) / groupCutFeed;
-          rapidMm += Math.hypot(x1 - cx, y1 - cy);
-          cx = x1;
-          cy = y1;
-        });
-
-        if (usedInGroup) toolChanges++;
-      });
-    });
+/**
+ * Machining time of a G-code program in minutes: feed moves at their modal F
+ * (3D length, so plunges and ramps count), rapids at ASSUMED_RAPID_MM_MIN, and
+ * TOOLCHANGE_SECONDS per M6.
+ */
+export function estimateGcodeMinutes(text) {
+  let x = 0; let y = 0; let z = 0; let mode = 0; let f = 6000; let min = 0;
+  const AXIS = { X: /X(-?\d+(?:\.\d+)?)/, Y: /Y(-?\d+(?:\.\d+)?)/, Z: /Z(-?\d+(?:\.\d+)?)/ };
+  String(text || '').split(/\r?\n/).forEach((raw) => {
+    const l = raw.toUpperCase();
+    if (/M0*6/.test(l)) min += TOOLCHANGE_SECONDS / 60;
+    const g = /(?:^|[^A-Z])G0*([0-3])(?![0-9])/.exec(l);
+    if (g) mode = Number(g[1]);
+    const fm = /F(\d+(?:\.\d+)?)/.exec(l);
+    if (fm) f = Math.max(1, Number(fm[1]));
+    const v = (k, cur) => { const m = AXIS[k].exec(l); return m ? Number(m[1]) : cur; };
+    const nx = v('X', x); const ny = v('Y', y); const nz = v('Z', z);
+    const d = Math.hypot(nx - x, ny - y, nz - z);
+    if (d > 0) min += mode === 0 ? d / ASSUMED_RAPID_MM_MIN : d / f;
+    x = nx; y = ny; z = nz;
   });
-
-  let outerCutMin = 0;
-  if (cfg.enableOuterCut !== false) {
-    toolChanges += 2;
-    const outerPerimeterTotal = result.plates.reduce(
-      (s, plate) =>
-        s +
-        plate.parts.reduce((s2, part) => {
-          const cutToolRadius = numOr(cfg.cutToolDia, 6) / 2;
-          const w = part.placedWidth + 2 * cutToolRadius;
-          const h = part.placedHeight + 2 * cutToolRadius;
-          return s2 + 2 * (w + h);
-        }, 0),
-      0
-    );
-    outerCutMin = (2 * outerPerimeterTotal) / Math.max(1, cfg.cutFeed || 6000);
-  }
-
-  const rapidMinTotal = rapidMm / ASSUMED_RAPID_MM_MIN;
-  const toolChangeMinTotal = (toolChanges * TOOLCHANGE_SECONDS) / 60;
-
-  const totalMin = cutMinTotal + plungeMinTotal + outerCutMin + rapidMinTotal + toolChangeMinTotal;
-  return totalMin;
+  return min;
 }
 
 /**
@@ -980,55 +1047,15 @@ export function buildNestingPlateDxf(plate, cfg = {}, presetMap = {}) {
     }
   });
 
-  // 3. Motif / Profil Takım Yolları (Adaptif Offsetli) — her grup kendi modeliyle
+  // 3. Motif / profil takım yolları — DXF, parçanın GERÇEK G-code'undan çizilir
+  // (buildKapakGcode -> parseGcode): offset, mutlak offset, köşe yayları, kaba
+  // boşaltma, carving rampaları, derz, tarama, şablon... kesilen her şey
+  // birebir görünür, ayrı bir geometri kopyası yoktur. Her takım kendi katmanında.
   profileGroups.forEach((group) => {
     const label = groupLabel(group);
-    // Derz satırları burada DIŞARIDA: onlar dikdörtgen profil değil, aşağıda
-    // kendi bloklarında doğru biçimde tek tek çizgi (LINE) olarak çizilir.
-    // Carving satırları da ayrı tutulur: adaptif zincir onların dağılımına göre
-    // hesaplanır, bu yüzden indeks eşleşmesi bozulmamalıdır.
-    const rectRows = (group.cfg.rows || []).filter((r) => (r.operation || 'offset') === 'offset');
-    rectRows.forEach((r, rowIdx) => {
-      const layerName = `4_ISLEME_${label}T${r.toolNo || rowIdx + 1}`;
-      // rectRows is the OFFSET-only list, so it must be the row list handed to
-      // getAdaptiveRowPartCoords too — passing group.cfg.rows with a filtered index
-      // shifted every contour by the derz/carving rows sitting before it.
-      const validCoords = getAdaptiveRowPartCoords(
-        group.parts,
-        rectRows,
-        rowIdx,
-        group.cfg.offsetMode || 'relative'
-      );
-      validCoords.forEach(({ x1, y1, x2, y2 }) => {
-        addRectLines(layerName, x1, y1, x2, y2);
-      });
-    });
-    // Carving profilleri: sabit offset'li kapalı V-bıçak profili (dikdörtgen).
-    (group.cfg.rows || []).filter((r) => r.operation === 'carving').forEach((r, cIdx) => {
-      const layerName = `4_ISLEME_${label}T${r.toolNo || cIdx + 1}`;
-      const o = Number(r.stepOffset) || 0;
-      group.parts.forEach((part) => {
-        addRectLines(layerName, part.x + o, part.y + o, part.x + part.placedWidth - o, part.y + part.placedHeight - o);
-      });
-    });
-  });
-
-  // Derz satırları: G-code ile BİREBİR aynı geometri (buildPartDerzGeometry),
-  // böylece kontrol/ölçüm gerçek kesimi görür.
-  profileGroups.forEach((group) => {
-    const label = groupLabel(group);
-    const groupOffsetRows = (group.cfg.rows || []).filter((rr) => (rr.operation || 'offset') !== 'derz' && rr.operation !== 'carving');
-    const groupOffsetCums = groupOffsetRows.length ? computeCumOffsets(groupOffsetRows, group.cfg.offsetMode || 'relative') : [];
-    (group.cfg.rows || []).filter((rr) => rr.operation === 'derz').forEach((r, derzIdx) => {
-      const layerName = `4_ISLEME_${label}T${r.toolNo || derzIdx + 1}`;
-      const derz = r.derz || {};
-      const prevOffset = derz.respectPreviousOffset === false ? 0 : (groupOffsetCums[groupOffsetCums.length - 1] || 0);
-      group.parts.forEach((part) => {
-        buildPartDerzGeometry(part, r, groupOffsetRows, {
-          prevOffset,
-          topStyle: group.cfg.topStyle,
-          riseRatio: group.cfg.riseRatio,
-        }).segments.forEach((s) => addLine(layerName, s.x1, s.y1, s.x2, s.y2));
+    group.parts.forEach((part) => {
+      partToolpathSegments(part, group.cfg).forEach((sgm) => {
+        addLine(`4_ISLEME_${label}T${sgm.tool || '?'}`, sgm.from.x, sgm.from.y, sgm.to.x, sgm.to.y);
       });
     });
   });

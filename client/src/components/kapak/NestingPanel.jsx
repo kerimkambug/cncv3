@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from 'react';
+import { Fragment, useRef, useState, useEffect } from 'react';
 import JSZip from 'jszip';
 import {
   calculateNesting,
@@ -8,16 +8,40 @@ import {
   estimateNestingTime,
   parseNestImportText,
   groupNestingPartsByPreset,
-  getAdaptiveRowPartCoords,
-  buildPartDerzGeometry,
+  partToolpathSegments,
 } from '../../lib/gcode/nesting.js';
 import { validateNestingGap } from '../../../../shared/gcode/validation.js';
-import { validateCarvingWarnings, computeTopCurve } from '../../lib/gcode/kapak.js';
-import { computeCumOffsets } from '../../lib/gcode/common.js';
+import { validateCarvingWarnings } from '../../lib/gcode/kapak.js';
 import { useCtrlEnter } from '../../hooks/useCtrlEnter.js';
 import { usePresets } from '../../hooks/usePresets.js';
 
 function getPresetId(p) { return p._id || p.id; }
+
+// "Cam kapak" in a part row's Model list: a glass door cut by tarama + iç kesim.
+const CAM_ID = '__cam__';
+const CAM_KEY_PREFIX = 'cam:';
+const DEFAULT_CAM = {
+  gozSayisi: 6, kolonSayisi: 2, disMargin: 60, icerGap: 20, oturmaPayi: 10,
+  taramaDepth: 9, stepover: 3, toolDia: 6, taramaToolNo: '6', kesimToolNo: '6',
+};
+const CAM_FIELDS = [
+  ['gozSayisi', 'Göz sayısı', 1],
+  ['kolonSayisi', 'Sütun', 1],
+  ['icerGap', 'Çıta (mm)', 1],
+  ['disMargin', 'Dıştan (mm)', 1],
+  ['oturmaPayi', 'Oturma payı (mm)', 1],
+  ['taramaDepth', 'Tarama derinliği (mm)', 0.5],
+  ['stepover', 'Tarama adımı (mm)', 0.5],
+  ['toolDia', 'Bıçak çapı (mm)', 1],
+  ['taramaToolNo', 'Tarama T', 1],
+  ['kesimToolNo', 'Kesim T', 1],
+];
+
+/** Colour of a tool's toolpaths (same tool = same colour; models shifted apart). */
+function toolColor(toolNo, groupIdx = 0) {
+  const n = Number.parseInt(toolNo, 10) || 0;
+  return `hsl(${(n * 53 + 190 + groupIdx * 41) % 360} 85% 62%)`;
+}
 
 function hashHue(str) {
   let h = 0;
@@ -77,6 +101,15 @@ export default function NestingPanel({ cfg, plateCfg }) {
     setParts(next);
   }
 
+  // Glass-door settings of a "Cam kapak" row (kept per row; default = the Cam module's).
+  function updateCam(idx, field, value) {
+    const next = parts.slice();
+    const cam = { ...DEFAULT_CAM, ...(next[idx].cam || {}) };
+    cam[field] = field.endsWith('ToolNo') ? value : (parseFloat(value) || 0);
+    next[idx] = { ...next[idx], cam };
+    setParts(next);
+  }
+
   function addPart() {
     setParts([...parts, { name: `Parça ${parts.length + 1}`, width: 500, height: 500, qty: 1, lockRotation: false, presetId: '' }]);
   }
@@ -119,9 +152,14 @@ export default function NestingPanel({ cfg, plateCfg }) {
       const w = parseFloat(p.width) || 0;
       const h = parseFloat(p.height) || 0;
       const qty = Math.max(1, parseInt(p.qty, 10) || 1);
+      // A glass door's model key carries its settings, so two different glass
+      // configurations become two groups with their own programs.
+      const presetId = p.presetId === CAM_ID
+        ? `${CAM_KEY_PREFIX}${JSON.stringify({ ...DEFAULT_CAM, ...(p.cam || {}) })}`
+        : p.presetId || null;
       if (w > 0 && h > 0) {
         for (let q = 1; q <= qty; q++) {
-          out.push({ name, width: w, height: h, itemNo: q, lockRotation: !!p.lockRotation, presetId: p.presetId || null });
+          out.push({ name, width: w, height: h, itemNo: q, lockRotation: !!p.lockRotation, presetId });
         }
       }
     });
@@ -137,6 +175,11 @@ export default function NestingPanel({ cfg, plateCfg }) {
   function buildPresetMap(expandedParts) {
     const usedIds = new Set(expandedParts.map((p) => p.presetId).filter(Boolean));
     const map = {};
+    // Glass doors use the machine settings of "Ayarlar" (thickness, feeds, Z...).
+    usedIds.forEach((id) => {
+      if (!id.startsWith(CAM_KEY_PREFIX)) return;
+      map[id] = { ...cfg, rows: [], name: 'Cam kapak', cam: JSON.parse(id.slice(CAM_KEY_PREFIX.length)) };
+    });
     presets.forEach((preset) => {
       const id = getPresetId(preset);
       if (!usedIds.has(id)) return;
@@ -210,7 +253,7 @@ export default function NestingPanel({ cfg, plateCfg }) {
       const warnings = validateCarvingWarnings(cfg.rows);
       setMessage({
         type: 'ok',
-        text: `${nest.plates.length} plaka bulundu. Tahmini süre: ~${minutes.toFixed(1)} dk.${enableOuterCut ? ' (1.5mm Ön Çizme + İşleme + Z0 Final Kesim dahil — Sağ üstten sola)' : ''
+        text: `${nest.plates.length} plaka bulundu (${nest.search.variants} yerleşim varyasyonu denendi, en az plaka + en toplu son plaka seçildi; plaka kullanımı %${(nest.search.utilization * 100).toFixed(1)}). Tahmini süre: ~${minutes.toFixed(1)} dk.${enableOuterCut ? ' (1.5mm Ön Çizme + İşleme + Z0 Final Kesim dahil — Sağ üstten sola)' : ''
           }. Sonuçtan memnunsan "CNC Dosyalarını İndir" butonuna bas.${warnings.length ? `\n\nUyarı:\n${warnings.join('\n')}` : ''}`,
       });
     } catch (e) {
@@ -331,9 +374,13 @@ export default function NestingPanel({ cfg, plateCfg }) {
     ctx.lineWidth = 2 * dpr;
     ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
 
+    // Machine Y grows UP from the plate's bottom edge, canvas Y grows down: flip,
+    // so the preview shows the plate the way the machine (and the DXF) sees it.
+    const cy = (v) => (result.plateH - v) * s;
+
     // 1. Draw Parts
     plate.parts.forEach((part, idx) => {
-      const x = part.x * s, y = part.y * s;
+      const x = part.x * s, y = cy(part.y + part.placedHeight);
       const w = part.placedWidth * s, h = part.placedHeight * s;
 
       ctx.strokeStyle = `hsl(${hashHue(part.name)} 70% 62%)`;
@@ -360,7 +407,7 @@ export default function NestingPanel({ cfg, plateCfg }) {
         ctx.setLineDash([4 * dpr, 3 * dpr]);
         plate.parts.forEach((part) => {
           const x1 = (part.x - cutToolRadius) * s;
-          const y1 = (part.y - cutToolRadius) * s;
+          const y1 = cy(part.y + part.placedHeight + cutToolRadius);
           const w2 = (part.placedWidth + 2 * cutToolRadius) * s;
           const h2 = (part.placedHeight + 2 * cutToolRadius) * s;
           // Bıçak yarıçapı kadar dışarıdan — TAM ölçüde, yuvarlama yok.
@@ -369,93 +416,21 @@ export default function NestingPanel({ cfg, plateCfg }) {
         ctx.setLineDash([]);
       }
 
-      // Profil / Motif Bıçakları (Adaptif Offsetli) — her parça KENDİ modelinin
-      // (dropdown'da seçilenin, boşsa Ayarlar'ın) offset/carving zinciriyle çizilir.
+      // Profil / motif takım yolları — her parça, KENDİ modelinin (dropdown'da
+      // seçilenin, boşsa Ayarlar'ın) gerçek G-code'undan çizilir: ekranda görülen,
+      // makinenin keseceği yolun kendisidir (offset, köşe yayı, carving rampası,
+      // derz, tarama, şablon...). Renk = takım.
       const drawGroups = groupNestingPartsByPreset(plate.parts, cfg, resultPresetMap);
       drawGroups.forEach((group, groupIdx) => {
-        const groupCfg = group.cfg;
-        const offsetRows = (groupCfg.rows || []).filter((r) => (r.operation || 'offset') !== 'derz' && r.operation !== 'carving');
-        const carvingRows = (groupCfg.rows || []).filter((r) => r.operation === 'carving');
-        const hueShift = groupIdx * 41; // farklı modellerin renkleri birbirine karışmasın diye kaydırma
-
-        offsetRows.forEach((r, rowIdx) => {
-          ctx.strokeStyle = `hsl(${(rowIdx * 67 + hueShift) % 360} 90% 62%)`;
-          ctx.lineWidth = 1.25 * dpr;
-
-          // Profil koordinatları G-code ile BİREBİR aynı kaynaktan
-          // (getAdaptiveRowPartCoords) gelir: hem indeks eşleşmesi hem de
-          // absoluteOffset ile sabitlenen satırlar aynı davranır.
-          const coords = getAdaptiveRowPartCoords(
-            group.parts,
-            offsetRows,
-            rowIdx,
-            groupCfg.offsetMode || 'relative'
-          );
-          coords.forEach(({ x1, y1, x2, y2 }) => {
-            const px = x1 * s, py = y1 * s, pw = (x2 - x1) * s, ph = (y2 - y1) * s;
-            if (groupCfg.topStyle && groupCfg.topStyle !== 'flat') {
-              // Gerçek kemer geometrisi: yEnd() ile üst kenarı nokta nokta çiz.
-              const curve = computeTopCurve(x1, x2, y2, groupCfg.topStyle, groupCfg.riseRatio);
-              if (curve) {
-                ctx.beginPath();
-                ctx.moveTo(px, py);
-                // Kiriş yarıçapı ne kadar büyükse o kadar çok örnek gerekir;
-                // sabit 24 nokta geniş yaylarda köşeli gösteriyordu.
-                const steps = Math.max(24, Math.min(240, Math.ceil(curve.r)));
-                for (let i = 1; i <= steps; i++) {
-                  const xx = x1 + ((x2 - x1) * i) / steps;
-                  ctx.lineTo(xx * s, curve.yEnd(xx) * s);
-                }
-                ctx.lineTo(px + pw, py + ph);
-                ctx.lineTo(px, py + ph);
-                ctx.closePath();
-                ctx.stroke();
-                return;
-              }
-            }
-            ctx.strokeRect(px, py, pw, ph);
+        group.parts.forEach((part) => {
+          partToolpathSegments(part, group.cfg).forEach((seg) => {
+            ctx.strokeStyle = toolColor(seg.tool, groupIdx);
+            ctx.lineWidth = 1.25 * dpr;
+            ctx.beginPath();
+            ctx.moveTo(seg.from.x * s, cy(seg.from.y));
+            ctx.lineTo(seg.to.x * s, cy(seg.to.y));
+            ctx.stroke();
           });
-        });
-
-        // Carving profilleri (tek çizgi, V-bıçak)
-        carvingRows.forEach((r) => {
-          ctx.strokeStyle = `hsl(${(320 + hueShift) % 360} 85% 62%)`;
-          ctx.lineWidth = 1.25 * dpr;
-          const o = Number(r.stepOffset) || 0;
-          group.parts.forEach((part) => {
-            const x1 = (part.x + o) * s;
-            const y1 = (part.y + o) * s;
-            const x2 = (part.x + part.placedWidth - o) * s;
-            const y2 = (part.y + part.placedHeight - o) * s;
-            ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-          });
-        });
-
-        // Derz satırları (bölme çizgileri) — G-code ile aynı geometri.
-        const derzRows = (groupCfg.rows || []).filter((r) => r.operation === 'derz');
-        const groupOffsetCums = offsetRows.length ? computeCumOffsets(offsetRows, groupCfg.offsetMode || 'relative') : [];
-        derzRows.forEach((r, derzIdx) => {
-          ctx.strokeStyle = `hsl(${(30 + derzIdx * 47 + hueShift) % 360} 90% 60%)`;
-          ctx.lineWidth = 1.25 * dpr;
-          ctx.setLineDash([6 * dpr, 3 * dpr]);
-          const derz = r.derz || {};
-          const prevOffset = derz.respectPreviousOffset === false ? 0 : (groupOffsetCums[groupOffsetCums.length - 1] || 0);
-          group.parts.forEach((part) => {
-            buildPartDerzGeometry(part, r, offsetRows, {
-              prevOffset,
-              topStyle: groupCfg.topStyle,
-              riseRatio: groupCfg.riseRatio,
-            }).segments.forEach((seg) => {
-              // Gölge değişken çakışması: `s` canvas ölçeği, segment nesnesi
-              // asla `s` adıyla almaz (önceki hâli segmenti ölçek sanıp
-              // NaN üretiyordu).
-              ctx.beginPath();
-              ctx.moveTo(seg.x1 * s, seg.y1 * s);
-              ctx.lineTo(seg.x2 * s, seg.y2 * s);
-              ctx.stroke();
-            });
-          });
-          ctx.setLineDash([]);
         });
       });
     }
@@ -489,18 +464,20 @@ export default function NestingPanel({ cfg, plateCfg }) {
   const rawLegendGroups = showToolpaths ? groupNestingPartsByPreset(selectedPlateParts, cfg, resultPresetMap) : [];
   const legendMultiModel = rawLegendGroups.length > 1;
   const legendGroups = rawLegendGroups.map((group, groupIdx) => {
-    const offsetRows = (group.cfg.rows || []).filter((r) => (r.operation || 'offset') !== 'derz' && r.operation !== 'carving');
-    const carvingRows = (group.cfg.rows || []).filter((r) => r.operation === 'carving');
-    const derzRows = (group.cfg.rows || []).filter((r) => r.operation === 'derz');
-    const hueShift = groupIdx * 41;
+    // One chip per tool, in the order the rows first use it, naming its rows.
+    const tools = [];
+    const legendRows = group.cfg.cam
+      ? [{ toolNo: group.cfg.cam.taramaToolNo, name: 'Cam tarama' }, { toolNo: group.cfg.cam.kesimToolNo, name: 'Cam iç kesim' }]
+      : (group.cfg.rows || []);
+    legendRows.forEach((r) => {
+      const key = String(r.toolNo);
+      let t = tools.find((x) => x.toolNo === key);
+      if (!t) { t = { toolNo: key, color: toolColor(key, groupIdx), names: [] }; tools.push(t); }
+      if (r.name && !t.names.includes(r.name)) t.names.push(r.name);
+    });
     return {
       label: legendMultiModel ? (group.key === '__default__' ? 'Ayarlar' : (group.cfg.name || 'Model')) : null,
-      offsetRows,
-      carvingRows,
-      derzRows: derzRows.map((r, i) => ({ row: r, color: `hsl(${(30 + i * 47 + hueShift) % 360} 90% 60%)` })),
-      cums: offsetRows.length ? computeCumOffsets(offsetRows, group.cfg.offsetMode || 'relative') : [],
-      toolColors: offsetRows.map((r, i) => `hsl(${(i * 67 + hueShift) % 360} 90% 62%)`),
-      carvingColor: `hsl(${(320 + hueShift) % 360} 85% 62%)`,
+      tools,
     };
   });
 
@@ -639,7 +616,8 @@ export default function NestingPanel({ cfg, plateCfg }) {
               </thead>
               <tbody>
                 {parts.map((p, idx) => (
-                  <tr key={idx}>
+                  <Fragment key={idx}>
+                  <tr>
                     <td>
                       <input
                         className="part-name"
@@ -689,6 +667,7 @@ export default function NestingPanel({ cfg, plateCfg }) {
                         onChange={(e) => updatePart(idx, 'presetId', e.target.value)}
                       >
                         <option value="">Ayarlardaki (varsayılan)</option>
+                        <option value={CAM_ID}>Cam kapak (tarama + iç kesim)</option>
                         {presets.map((preset) => (
                           <option key={getPresetId(preset)} value={getPresetId(preset)}>
                             {preset.name}{preset.category === 'kapi' ? ' (Kapı)' : ''}
@@ -715,6 +694,27 @@ export default function NestingPanel({ cfg, plateCfg }) {
                       </button>
                     </td>
                   </tr>
+                  {p.presetId === CAM_ID && (
+                    <tr className="cam-settings-row">
+                      <td colSpan={7}>
+                        <div className="cam-settings">
+                          {CAM_FIELDS.map(([field, label, step]) => (
+                            <label key={field}>
+                              <span>{label}</span>
+                              <input
+                                type={field.endsWith('ToolNo') ? 'text' : 'number'}
+                                min="0"
+                                step={step}
+                                value={(p.cam || DEFAULT_CAM)[field]}
+                                onChange={(e) => updateCam(idx, field, e.target.value)}
+                              />
+                            </label>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -845,23 +845,10 @@ export default function NestingPanel({ cfg, plateCfg }) {
               {legendGroups.map((group, gi) => (
                 <span key={`grp-${gi}`}>
                   {group.label && <span className="legend-chip" style={{ fontWeight: 600 }}>{group.label}:</span>}
-                  {group.offsetRows.map((r, i) => (
-                    <span key={`off-${gi}-${i}`} className="legend-chip">
-                      <span className="legend-dot" style={{ background: group.toolColors[i] }} />
-                      T{r.toolNo} {r.name || ''}
-                      {group.cums[i] < 0 ? ' (kesikli = dışarıda)' : ''}
-                    </span>
-                  ))}
-                  {group.carvingRows.map((r, i) => (
-                    <span key={`carv-${gi}-${i}`} className="legend-chip">
-                      <span className="legend-dot" style={{ background: group.carvingColor }} />
-                      T{r.toolNo} {r.name || 'Carving'} (V-bıçak profili)
-                    </span>
-                  ))}
-                  {group.derzRows.map(({ row, color }, i) => (
-                    <span key={`derz-${gi}-${i}`} className="legend-chip">
-                      <span className="legend-dot" style={{ background: color }} />
-                      T{row.toolNo} {row.name || 'Derz'} ({(row.derz?.yon || 'dikey') === 'dikey' ? '⇕ dikey' : '⇔ yatay'} · {row.derz?.spacing || row.stepOffset || 60}mm)
+                  {group.tools.map((t) => (
+                    <span key={`tool-${gi}-${t.toolNo}`} className="legend-chip" title={t.names.join(' · ')}>
+                      <span className="legend-dot" style={{ background: t.color }} />
+                      T{t.toolNo} {t.names.join(' · ')}
                     </span>
                   ))}
                 </span>

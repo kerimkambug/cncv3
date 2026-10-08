@@ -5,6 +5,10 @@
  */
 import { useEffect, useState } from 'react';
 import { usePresets } from '../../hooks/usePresets.js';
+import { carveExitDistance } from '../../lib/gcode/kapak.js';
+
+// Operations that take part in the offset chain (the others have their own geometry).
+const CHAIN_OPS = ['offset'];
 
 // Seçilen preset, bir sonraki açılışta da bıçak listesinin başlangıç değeri
 // olarak kullanılsın diye saklanır. Anahtarlar modüle özeldir.
@@ -77,6 +81,21 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
   function updateRow(idx, field, value) {
     const next = rows.slice();
     next[idx] = { ...next[idx], [field]: field === 'name' || field === 'toolNo' || field === 'operation' ? value : parseFloat(value) || 0 };
+    // A pinned row is cut at its absoluteOffset, so the offset cell edits that too
+    // (otherwise typing a new offset would silently change nothing).
+    if (field === 'stepOffset' && Number.isFinite(Number(next[idx].absoluteOffset))) {
+      next[idx].absoluteOffset = next[idx].stepOffset;
+    }
+    setRows(next);
+    markCustom();
+  }
+
+  // Settings of the feature operations (tarama / uzatma) live in a
+  // sub-object named after the operation; empty input = default.
+  function updateSub(idx, group, field, value) {
+    const next = rows.slice();
+    const parsed = typeof value === 'boolean' || field === 'yon' ? value : (value === '' ? undefined : parseFloat(value));
+    next[idx] = { ...next[idx], [group]: { ...(next[idx][group] || {}), [field]: parsed } };
     setRows(next);
     markCustom();
   }
@@ -100,7 +119,26 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
   }
   function updateDerz(idx, field, value) {
     const next = rows.slice();
-    next[idx] = { ...next[idx], derz: { yon: 'dikey', margin: 0, spacing: 60, autoFit: true, overshoot: 1, overshootX: 1, overshootY: 1, edgeExtra: 0, respectPreviousOffset: true, ...(next[idx].derz || {}), [field]: field === 'yon' || field === 'autoFit' || field === 'respectPreviousOffset' ? value : parseFloat(value) || 0 } };
+    const BOOL = ['yon', 'autoFit', 'insideFrame', 'stagger', 'respectPreviousOffset'];
+    // count / lineFromPct / lineToPct are optional: empty = not set.
+    const OPTIONAL = ['count', 'lineFromPct', 'lineToPct'];
+    let parsed;
+    if (BOOL.includes(field)) parsed = value;
+    else if (OPTIONAL.includes(field)) parsed = value === '' ? null : parseFloat(value);
+    else parsed = parseFloat(value) || 0;
+    next[idx] = { ...next[idx], derz: { yon: 'dikey', margin: 0, spacing: 60, autoFit: true, overshoot: 1, overshootX: 1, overshootY: 1, edgeExtra: 0, respectPreviousOffset: true, ...(next[idx].derz || {}), [field]: parsed } };
+    setRows(next);
+    markCustom();
+  }
+  // Kulp box: vertical lines stop `fromTop` below the top except the first/last `skip`.
+  function updateStopBox(idx, field, value) {
+    const next = rows.slice();
+    const d = next[idx].derz || {};
+    const box = { ...(d.stopBox || {}) };
+    if (field === 'line') box.line = value;
+    else if (value === '') delete box[field];
+    else box[field] = parseFloat(value) || 0;
+    next[idx] = { ...next[idx], derz: { ...d, stopBox: box.fromTop > 0 ? box : undefined } };
     setRows(next);
     markCustom();
   }
@@ -183,8 +221,11 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
         </thead>
         <tbody>
           {rows.map((r, i) => {
-            if (r.operation === 'derz' || r.operation === 'carving') {
-              cum = cum;
+            const pinned = Number.isFinite(Number(r.absoluteOffset)) ? Number(r.absoluteOffset) : null;
+            if (!CHAIN_OPS.includes(r.operation || 'offset')) {
+              // derz / carving / features do not move the offset chain
+            } else if (pinned != null) {
+              cum = pinned;
             } else if (isAbsolute) {
               cum = Number(r.stepOffset) || 0;
             } else {
@@ -214,6 +255,9 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
                     <option value="offset">Offset</option>
                     <option value="derz">Derz</option>
                     <option value="carving">Carving (V-bıçak profil)</option>
+                    <option value="tarama">Tarama (cep boşaltma)</option>
+                    <option value="uzatma">Uzatma (çerçeveden kenara)</option>
+                    <option value="sablon" disabled={r.operation !== 'sablon'}>Şablon (süsleme)</option>
                   </select>
                 </td>
                 <td>
@@ -229,12 +273,13 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
                   <input
                     type="number"
                     step="0.1"
-                    value={r.stepOffset}
+                    value={pinned ?? r.stepOffset ?? ''}
+                    disabled={r.operation === 'sablon'}
                     onChange={(e) => updateRow(i, 'stepOffset', e.target.value)}
                     style={{ width: 60 }}
                   />
                 </td>
-                <td>{r.operation === 'derz' || r.operation === 'carving' ? '-' : cum.toFixed(2)}</td>
+                <td>{CHAIN_OPS.includes(r.operation || 'offset') ? cum.toFixed(2) : '-'}</td>
                 {/* NOT: ayarlar satır sonundaki ⚙ düğmesinden açılır */}
                 <td>{z.toFixed(2)}</td>
                 <td className="row-actions">
@@ -262,7 +307,7 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
         // supplies is the bit angle. Offset + depth already say where and how deep
         // the flat floor runs; the angle turns that into the corner ramp.
         const hasAngle = Number(r.bitAngle) > 0;
-        const ramp = hasAngle ? +(Number(r.depth) / Math.tan((Number(r.bitAngle) / 2) * (Math.PI / 180))).toFixed(2) : null;
+        const ramp = hasAngle ? +carveExitDistance(r.depth, r.bitAngle).toFixed(2) : null;
         const offset = Number(r.stepOffset) || 0;
         // The plate clamp silently shortens any ramp wider than the offset.
         const clipped = ramp != null && ramp > offset;
@@ -296,10 +341,12 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
               )}
               {r.operation !== 'carving' && (
                 <>
-                  <label>
-                    <span>Köşe R (mm) — boş = düz köşe</span>
-                    <input type="number" min="0" step="0.5" value={r.cornerRadius ?? ''} placeholder="—" onChange={(e) => updateOptional(selected, 'cornerRadius', e.target.value)} />
-                  </label>
+                  {(r.operation || 'offset') === 'offset' && (
+                    <label>
+                      <span>Köşe R (mm) — boş = düz köşe</span>
+                      <input type="number" min="0" step="0.5" value={r.cornerRadius ?? ''} placeholder="—" onChange={(e) => updateOptional(selected, 'cornerRadius', e.target.value)} />
+                    </label>
+                  )}
                   <label>
                     <span>Feed (mm/dk) — boş = genel</span>
                     <input type="number" min="0" step="100" value={r.feed ?? ''} placeholder="genel" onChange={(e) => updateOptional(selected, 'feed', e.target.value)} />
@@ -335,11 +382,86 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
                     <input type="checkbox" checked={r.derz?.autoFit !== false} onChange={(e) => updateDerz(selected, 'autoFit', e.target.checked)} />
                     <span>Aralığı otomatik sığdır</span>
                   </label>
+                  <label className="check-field" title="Kenar payı = çerçeve çizgisi (ör. iç V offseti). Çerçeveler arası, verilen aralığa en yakın eşit parçalara bölünür; çerçevenin üstüne denk gelen iki çizgi atılır.">
+                    <input type="checkbox" checked={r.derz?.insideFrame === true} onChange={(e) => updateDerz(selected, 'insideFrame', e.target.checked)} />
+                    <span>Çerçeve içini eşit böl (kenar payı = çerçeve)</span>
+                  </label>
                   <label className="check-field">
                     <input type="checkbox" checked={r.derz?.respectPreviousOffset !== false} onChange={(e) => updateDerz(selected, 'respectPreviousOffset', e.target.checked)} />
                     <span>Önceki offset sınırlarına uy</span>
                   </label>
+                  <label>
+                    <span>Çizgi sayısı — boş = aralıktan</span>
+                    <input type="number" min="1" step="1" value={r.derz?.count ?? ''} placeholder="—" onChange={(e) => updateDerz(selected, 'count', e.target.value)} />
+                  </label>
+                  <label className="check-field" title="Çizgiler eşit bölmenin aralıklarının tam ortasına gelir (ör. model 4 üst yarısındaki kısa ara derzler).">
+                    <input type="checkbox" checked={r.derz?.stagger === true} onChange={(e) => updateDerz(selected, 'stagger', e.target.checked)} />
+                    <span>Ara çizgi (aralıkların ortasına)</span>
+                  </label>
+                  <label>
+                    <span>Çizgi başı (%) — boş = çerçeve</span>
+                    <input type="number" min="0" max="100" step="1" value={r.derz?.lineFromPct ?? ''} placeholder="—" onChange={(e) => updateDerz(selected, 'lineFromPct', e.target.value)} />
+                  </label>
+                  <label>
+                    <span>Çizgi sonu (%) — boş = çerçeve</span>
+                    <input type="number" min="0" max="100" step="1" value={r.derz?.lineToPct ?? ''} placeholder="—" onChange={(e) => updateDerz(selected, 'lineToPct', e.target.value)} />
+                  </label>
+                  <label title="Kulp kutusu: dikey çizgiler üst kenarın bu kadar altında durur (boş = kutu yok).">
+                    <span>Kulp kutusu: üstten (mm)</span>
+                    <input type="number" min="0" step="0.5" value={r.derz?.stopBox?.fromTop ?? ''} placeholder="—" onChange={(e) => updateStopBox(selected, 'fromTop', e.target.value)} />
+                  </label>
+                  <label title="Baştan ve sondan bu kadar çizgi kutunun kenarıdır, üste kadar devam eder.">
+                    <span>Kutu kenarı: baş/son çizgi sayısı</span>
+                    <input type="number" min="0" step="1" value={r.derz?.stopBox?.skip ?? ''} placeholder="0" onChange={(e) => updateStopBox(selected, 'skip', e.target.value)} />
+                  </label>
+                  <label className="check-field">
+                    <input type="checkbox" checked={r.derz?.stopBox?.line === true} onChange={(e) => updateStopBox(selected, 'line', e.target.checked)} />
+                    <span>Kutunun üst çizgisini de çiz</span>
+                  </label>
                 </>
+              )}
+              {r.operation === 'tarama' && (
+                <>
+                  <div className="hint" style={{ gridColumn: '1 / -1' }}>
+                    Offset = boşaltılacak alanın dış sınırı. İç sınır boşsa ortaya kadar taranır.
+                  </div>
+                  <label>
+                    <span>İç sınır offseti (mm) — boş = orta</span>
+                    <input type="number" min="0" step="0.5" value={r.tarama?.innerOffset || ''} placeholder="—" onChange={(e) => updateSub(selected, 'tarama', 'innerOffset', e.target.value)} />
+                  </label>
+                  <label>
+                    <span>Bıçak çapı (mm)</span>
+                    <input type="number" min="0.1" step="0.5" value={r.tarama?.toolDiameter ?? ''} placeholder="6" onChange={(e) => updateSub(selected, 'tarama', 'toolDiameter', e.target.value)} />
+                  </label>
+                  <label>
+                    <span>Adım (mm) — boş = çapın %80 i</span>
+                    <input type="number" min="0.1" step="0.5" value={r.tarama?.stepover ?? ''} placeholder="—" onChange={(e) => updateSub(selected, 'tarama', 'stepover', e.target.value)} />
+                  </label>
+                </>
+              )}
+              {r.operation === 'uzatma' && (
+                <>
+                  <div className="hint" style={{ gridColumn: '1 / -1' }}>
+                    Offset = uzatılacak çerçeve. Köşelerinden kapak kenarına çizgi çekilir.
+                  </div>
+                  <label>
+                    <span>Yön</span>
+                    <select value={r.uzatma?.yon || 'dikey'} onChange={(e) => updateSub(selected, 'uzatma', 'yon', e.target.value)}>
+                      <option value="dikey">Dikey (üst/alt kenara)</option>
+                      <option value="yatay">Yatay (sağ/sol kenara)</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Kenardan taşma (mm)</span>
+                    <input type="number" min="0" step="0.1" value={r.uzatma?.overshoot ?? ''} placeholder="0.5" onChange={(e) => updateSub(selected, 'uzatma', 'overshoot', e.target.value)} />
+                  </label>
+                </>
+              )}
+              {r.operation === 'sablon' && (
+                <div className="hint" style={{ gridColumn: '1 / -1' }}>
+                  Şablon (süsleme): {r.sablon?.paths?.length || 0} yol, {r.sablon?.refWidth} × {r.sablon?.refHeight} mm kapaktan alındı.
+                  Köşe süslemeleri köşelerinde sabit kalır, çerçeve kolları kapak boyuna göre uzar. Derinlik şablonda kayıtlıdır.
+                </div>
               )}
             </div>
           </div>

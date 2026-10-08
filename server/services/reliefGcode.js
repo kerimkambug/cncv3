@@ -119,7 +119,9 @@ function appendRasterToolpath(lines, depthGrid, options) {
       const depthRatio = Math.max(0, Math.min(1, depthGrid[rowIdx][colIdx]));
       // Same Z convention as the client generator — see
       // shared/gcode/reliefConvention.js (Z0 = table, thickness = material top).
-      const z = +reliefMachineZ(depthRatio, options.thickness, options.maxDepth).toFixed(3);
+      // This grid's value means "1 = deepest" (see reliefConvention.js), while
+      // reliefMachineZ takes "1 = top surface" — so it is passed inverted.
+      const z = +reliefMachineZ(1 - depthRatio, options.thickness, options.maxDepth).toFixed(3);
       if (!isToolDown) {
         lines.push(`G0 X${fmt(x)} Y${fmt(y)} Z${fmt(options.safeZ)}`);
         lines.push(`G1 Z${fmt3(z)} F${options.plungeFeed.toFixed(1)}`);

@@ -2,7 +2,8 @@
 // Rectangular multi-tool pocket cutting (cabinet doors / "tabla")
 import { fmt, computeCumOffsets } from './common.js';
 import { numOr, toFiniteNumber, validateDepthAgainstThickness } from '../../../../shared/gcode/validation.js';
-import { computeDerzPositions } from './derz.js';
+import { computeDerzPositions, trimDerzLine, derzBoxLine } from './derz.js';
+import { buildFeaturePaths, isFeatureRow, rowNeedsOffset } from './features.js';
 
 export const DEG2RAD = Math.PI / 180;
 
@@ -65,21 +66,23 @@ export function carveHalfAngle(angleDeg) {
  * How far out the tool must travel per 1mm of rise, for a given INCLUDED angle.
  * This single number is the whole story of the corner ramp:
  *
- *   1 / tan(bitAngle / 2)
+ *   tan(bitAngle / 2)
  *
- *   bitAngle 60  (kenara 30°)   -> 1.732x
- *   bitAngle 90  (kenara 45°)   -> 1.000x   <- the 1 NUMARA bit
- *   bitAngle 120 (kenara 60°)   -> 0.577x
- *   bitAngle 135                -> 0.414x
+ *   bitAngle 60  (kenara 30°)   -> 0.577x
+ *   bitAngle 90  (kenara 45°)   -> 1.000x   <- the 1 NUMARA bit (T1)
+ *   bitAngle 120 (kenara 60°)   -> 1.732x
+ *   bitAngle 135 (kenara 67.5°) -> 2.414x   <- T12
  *
- * A narrower bit needs a longer outward ramp; a wider one a shorter ramp.
+ * A wider bit cuts a wider groove at the same depth, so its corner reaches
+ * further out. Verified on the ArtCAM TABLA panel: T12 (135°) corners at
+ * 8.1 / 9.0 / 8.0 mm depth step out 19.5 / 21.7 / 19.3 mm (models 12 / 11 / 9).
  * @param {number} angleDeg - INCLUDED V-bit angle in degrees
  * @returns {number} outward mm per mm of depth (0 when the angle is unknown)
  */
 export function carveRampRatio(angleDeg) {
   const half = carveHalfAngle(angleDeg);
   if (half <= 0) return 0;
-  return 1 / Math.tan(half);
+  return Math.tan(half);
 }
 
 /**
@@ -90,7 +93,7 @@ export function carveRampRatio(angleDeg) {
  *   - depth      : how deep the flat floor is cut
  *   - bitAngle   : the V-bit's INCLUDED angle
  * Everything else is derived. This helper returns the ramp the row will produce:
- *  - angle given -> `ramp` = depth / tan(angle/2), the outward+up move at each corner
+ *  - angle given -> `ramp` = depth * tan(angle/2), the outward+up move at each corner
  *  - no angle    -> `derived:false`, callers fall back to the 1:1 ramp (a 90° bit),
  *                   which is what 1 NUMARA.cnc's real corner treatment measures.
  *
@@ -121,11 +124,11 @@ export function solveCarveGeometry(row = {}) {
  * pocket floor (at `depth`) back up to the material surface while it is still
  * cutting on its flank. That is exactly the flank half-width at that depth:
  *
- *   exit = depth / tan(angle / 2)
+ *   exit = depth * tan(angle / 2)
  *
- * Derivation (same trigonometry as the V-bit width-of-cut formula): a V-bit of
- * included angle α rises 1mm per tan(α/2)mm of horizontal travel, so climbing
- * `depth` millimetres takes depth / tan(α/2) millimetres of horizontal move.
+ * Derivation (the V-bit width-of-cut formula): at `depth` below its tip a V-bit
+ * of included angle α is depth * tan(α/2) wide on each side of its axis, so the
+ * corner must step that far out for the flank to finish the corner exactly.
  * See carveRampRatio for the resulting ratios; the 1:1 case is a 90° included bit
  * (kenara 45°) — which is what 1_NUMARA.cnc's 6mm-out-for-6mm-deep corner ramps
  * are, and its T1 is a 90° V-bit. The old hard-coded 1:1 was silently wrong for
@@ -538,7 +541,7 @@ export function clampCarvingExit(rawExit, offset) {
  *
  * The corner ramp distance is derived from the bit, not hard-coded: a V-bit of
  * included angle `angleDeg` climbing back to the surface from `depth` must travel
- * `depth / tan(angle/2)` outward (see carveExitDistance). For 1_NUMARA.cnc's 90°
+ * `depth * tan(angle/2)` outward (see carveExitDistance). For 1_NUMARA.cnc's 90°
  * included bit (kenara 45°) that is 1:1 — its real 6mm-out / 6mm-deep ramps.
  * @param {number} width - part width (mm)
  * @param {number} height - part height (mm)
@@ -630,6 +633,9 @@ function buildDerzOptions(row, d, previousOffset, width, height) {
     margin: previousOffset + numOr(d.margin, 0),
     spacing: numOr(d.spacing, null) ?? numOr(row.stepOffset, 60),
     autoFit: d.autoFit !== false,
+    insideFrame: d.insideFrame === true,
+    stagger: d.stagger === true,
+    count: numOr(d.count, null),
     // 0 overshoot is a real setting (stop exactly on the frame edge) — it must
     // not be raised to 1mm by an `|| 1` fallback.
     overshootX: numOr(d.overshootX ?? d.overshoot, 1),
@@ -656,7 +662,10 @@ function rowFeed(ctx, r) {
  */
 export function buildKapakGcode(width, height, cfg, offsetX = 0, offsetY = 0, isCombined = false) {
   const rows = cfg.rows || [];
-  const isDerzOrCarving = (row) => row.operation === 'derz' || row.operation === 'carving';
+  // Feature rows (tarama / sablon / uzatma) carry their own geometry and never take
+  // part in the offset chain, exactly like derz and carving rows.
+  const isDerzOrCarving = (row) => row.operation === 'derz' || row.operation === 'carving' || isFeatureRow(row);
+  const featureRows = rows.filter(isFeatureRow);
   // Offset passes declared AFTER a carving row are emitted in a later phase (see
   // emitOffsetPasses calls below), so the leading run must exclude them.
   const lastCarvingIdx = rows.reduce((last, row, i) => (row.operation === 'carving' ? i : last), -1);
@@ -704,23 +713,46 @@ export function buildKapakGcode(width, height, cfg, offsetX = 0, offsetY = 0, is
     const dRow = firstDerzEntry.row;
     const dIdx = firstDerzEntry.rowIndex;
     const d = dRow.derz || {};
-    const dPrevRows = rows.slice(0, dIdx).filter((it) => (it.operation || 'offset') !== 'derz');
+    const dPrevRows = rows.slice(0, dIdx).filter((it) => (it.operation || 'offset') !== 'derz' && !isFeatureRow(it));
     const dPrevOff = computeCumOffsets(dPrevRows, cfg.offsetMode || 'relative');
     const dOpts = buildDerzOptions(dRow, d, d.respectPreviousOffset === false ? 0 : (dPrevOff[dPrevOff.length - 1] || 0), width, height);
     const dPos = computeDerzPositions(dOpts).positions;
     if ((d.yon || 'dikey') === 'dikey' && dPos.length) ctx.interleavedDerzPos = dPos[dPos.length - 1];
   }
 
+  // Feature rows ride along with the phase that leaves their tool in the spindle,
+  // so e.g. model 9's T1 extension lines follow the T1 frame without an extra
+  // tool change; whatever is left runs at the end, in row order.
+  let pendingFeatures = featureRows;
+  const flushFeaturesOnCurrentTool = () => {
+    const now = pendingFeatures.filter((r) => String(r.toolNo) === String(ctx.lastEmittedToolNo));
+    pendingFeatures = pendingFeatures.filter((r) => !now.includes(r));
+    emitFeatureRows(ctx, now);
+  };
+
   // Leading offset passes (everything declared before the first carving row).
   emitOffsetPasses(ctx, offsetRows, adaptiveRows);
+  flushFeaturesOnCurrentTool();
 
   emitCarvingRows(ctx, carvingRows);
+  flushFeaturesOnCurrentTool();
 
   // Finishing/offset passes declared after the carving rows — ArtCAM emits these
   // after the V-bit run (1_NUMARA.cnc's plain 70 mm rectangle).
   emitOffsetPasses(ctx, trailingRows, trailingAdaptiveRows);
+  flushFeaturesOnCurrentTool();
 
   emitDerzRows(ctx, derzRows);
+
+  // Remaining features: same-tool runs stay together.
+  while (pendingFeatures.length) {
+    flushFeaturesOnCurrentTool();
+    if (!pendingFeatures.length) break;
+    const next = pendingFeatures[0];
+    const sameTool = pendingFeatures.filter((r) => String(r.toolNo) === String(next.toolNo));
+    pendingFeatures = pendingFeatures.filter((r) => !sameTool.includes(r));
+    emitFeatureRows(ctx, sameTool);
+  }
 
   finalizeKapak(ctx);
   return normalizeModalArtcam(ctx.lines, cfg.safeZ).join('\n');
@@ -933,7 +965,7 @@ function emitCarvingRows(ctx, carvingRows) {
   carvingRows.forEach((row) => {
     // Carving = a closed V-bit profile whose corners are ALWAYS sharpened. The row
     // gives where (stepOffset) and how deep (depth); the bit angle turns those into
-    // the corner ramp (depth / tan(angle/2)). Nothing else to ask for.
+    // the corner ramp (depth * tan(angle/2)). Nothing else to ask for.
     const geo = solveCarveGeometry(row);
     const depth = Number(row.depth) || 0;
     const offset = Number(row.stepOffset) || 0;
@@ -975,7 +1007,7 @@ function emitDerzRows(ctx, derzRows) {
   let { lastEmittedToolNo, activeSpindleSpeed, derzPosEmitted } = ctx;
   derzRows.forEach(({ row, rowIndex }) => {
     const derz = row.derz || {};
-    const previousOffsetRows = rows.slice(0, rowIndex).filter((item) => (item.operation || 'offset') !== 'derz');
+    const previousOffsetRows = rows.slice(0, rowIndex).filter((item) => (item.operation || 'offset') !== 'derz' && !isFeatureRow(item));
     const previousOffsets = computeCumOffsets(previousOffsetRows, cfg.offsetMode || 'relative');
     const previousOffset = derz.respectPreviousOffset === false ? 0 : (previousOffsets[previousOffsets.length - 1] || 0);
     const opts = buildDerzOptions(row, derz, previousOffset, width, height);
@@ -1019,7 +1051,7 @@ function emitDerzRows(ctx, derzRows) {
     // xl=100/xr=192).
     // Uses the cumulative offset of that first profiled row (not the raw step)
     // so the arch centre stays exact in absolute mode too.
-    const previousOffsetRowsFull = rows.slice(0, rowIndex).filter((item) => (item.operation || 'offset') !== 'derz');
+    const previousOffsetRowsFull = rows.slice(0, rowIndex).filter((item) => (item.operation || 'offset') !== 'derz' && !isFeatureRow(item));
     const shapeOffset = previousOffsetRowsFull.length
       ? computeCumOffsets([previousOffsetRowsFull[0]], 'relative')[0]
       : 0;
@@ -1033,13 +1065,13 @@ function emitDerzRows(ctx, derzRows) {
       // the first offset row's stepOffset (1_NUMARA derz lines start at Y70,
       // which is the rounded-frame offset, not rows[0]'s 62).
       const startYOverride = Number.isFinite(Number(derz.startY)) ? Number(derz.startY) : null;
-      const x1 = vertical ? offsetX + pos : offsetX + opts.margin - opts.overshootX;
+      let x1 = vertical ? offsetX + pos : offsetX + opts.margin - opts.overshootX;
       // Vertical lines start exactly on the bottom frame edge the first profiled pass
       // cut (offset 60 in 2_NUMARA.cnc -> "G0 X100.00 Y60.00"). No overshoot is
       // subtracted here: overshoot extends the line PAST the frame, and on the
       // bottom edge the reference does not run into the waste strip.
-      const y1 = vertical ? offsetY + (startYOverride ?? verticalFrameOffset) : offsetY + pos;
-      const x2 = vertical ? x1 : offsetX + width - opts.margin + opts.overshootX;
+      let y1 = vertical ? offsetY + (startYOverride ?? verticalFrameOffset) : offsetY + pos;
+      let x2 = vertical ? x1 : offsetX + width - opts.margin + opts.overshootX;
       // Vertical divider lines must END on the curve, not at the flat top edge.
       // The curve arc only spans [shapeXl, shapeXr] — both of which are ABSOLUTE
       // (they include offsetX) — so the test and the yEnd lookup both need the
@@ -1051,13 +1083,21 @@ function emitDerzRows(ctx, derzRows) {
       const curvedTop = vertical && curve && posAbs > shapeXl && posAbs < shapeXr;
       // yEnd takes and returns absolute coordinates (xc/yc already carry offsetX
       // and offsetY), so it must NOT be given a part-local X or have offsetY added.
-      const y2 = vertical
+      let y2 = vertical
         ? (curvedTop
             ? curve.yEnd(posAbs)
             : offsetY + (startYOverride != null
                 ? height - startYOverride
                 : height - opts.margin + opts.overshootY))
         : y1;
+      // Optional along-line trimming (lineFromPct / lineToPct / stopBox).
+      if (vertical) {
+        const [s, e] = trimDerzLine(derz, true, pos, y1 - offsetY, y2 - offsetY, width, height, positions.indexOf(pos), positions.length);
+        y1 = offsetY + s; y2 = offsetY + e;
+      } else {
+        const [s, e] = trimDerzLine(derz, false, pos, x1 - offsetX, x2 - offsetX, width, height, positions.indexOf(pos), positions.length);
+        x1 = offsetX + s; x2 = offsetX + e;
+      }
       // ArtCAM's FIRST divider in a group continues the previous pass modally and
       // therefore drops the Y it already sits on (1 NUMARA "G0 X89.00" after the
       // finishing pass left Y at 70; 3 NUMARA "G0 X70.69" after the frame pass left
@@ -1066,7 +1106,11 @@ function emitDerzRows(ctx, derzRows) {
       // a tool block is the block's first approach and writes X, Y and Z
       // (2 NUMARA "G0 X100.00 Y60.00 Z46.00").
       const isFirstDivider = positionsToCut.indexOf(pos) === 0;
-      if (isFirstDivider && !opensToolBlock) {
+      // The X-only approach is only valid when the machine already stands on the
+      // line's start Y; a trimmed (lineFromPct) or horizontal divider starts
+      // somewhere else and must write its Y.
+      const standsOnStartY = lastWordValue(lines, 'Y') === kfmt(y1);
+      if (isFirstDivider && !opensToolBlock && standsOnStartY) {
         lines.push(`G0 X${kfmt(x1)} `);
       } else {
         lines.push(`G0 X${kfmt(x1)} Y${kfmt(y1)}`);
@@ -1082,9 +1126,64 @@ function emitDerzRows(ctx, derzRows) {
       }
       lines.push(`G0   Z${fmt(cfg.safeZ)}`);
     });
+    // Kulp box top line (stopBox.line): between the row's box-side lines.
+    const box = derzBoxLine(derz, positions, height);
+    if (box) {
+      lines.push(`G0 X${kfmt(offsetX + box.x1)} Y${kfmt(offsetY + box.y)}`);
+      lines.push(`G1   Z${kfmt(z)} F${cfg.plungeFeed.toFixed(1)}`);
+      lines.push(`G1 X${kfmt(offsetX + box.x2)}   F${Number(feed).toFixed(1)}`);
+      lines.push(`G0   Z${fmt(cfg.safeZ)}`);
+    }
   });
   ctx.lastEmittedToolNo = lastEmittedToolNo;
   ctx.activeSpindleSpeed = activeSpindleSpeed;
+}
+
+/**
+ * The last value written for an axis word (X/Y/Z) in the emitted lines, as text,
+ * or null — i.e. where the machine stands on that axis right now.
+ */
+function lastWordValue(lines, axis) {
+  const re = new RegExp(`${axis}(-?\\d+(?:\\.\\d+)?)`);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = re.exec(lines[i]);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+/**
+ * Emits feature rows (tarama / sablon / uzatma, see features.js) in the
+ * given order, changing tool when needed.
+ */
+function emitFeatureRows(ctx, featureRows) {
+  const { cfg, width, height, offsetX, offsetY, lines } = ctx;
+  let { lastEmittedToolNo } = ctx;
+  featureRows.forEach((row) => {
+    const paths = buildFeaturePaths(width, height, row, cfg.thickness).filter((p) => p.length > 1);
+    if (!paths.length) return;
+    if (String(row.toolNo) !== String(lastEmittedToolNo)) {
+      // Same tool-change block as the offset phase: the program's first tool has
+      // no M5 and no post-M3 retract, a later change has both.
+      const first = lastEmittedToolNo === null;
+      if (!first) lines.push('M5');
+      lines.push(`M6T${row.toolNo}`);
+      lines.push(`M3 S${cfg.spindleSpeed}`);
+      if (!first) lines.push(`G0Z${fmt(cfg.toolChangeZ)}`);
+      lastEmittedToolNo = row.toolNo;
+    }
+    const feed = Number(rowFeed(ctx, row)).toFixed(1);
+    const X = (v) => kfmt(offsetX + v);
+    const Y = (v) => kfmt(offsetY + v);
+    paths.forEach((p) => {
+      const [s, ...rest] = p;
+      lines.push(`G0 X${X(s.x)} Y${Y(s.y)}`);
+      lines.push(`G1   Z${kfmt(s.z)} F${cfg.plungeFeed.toFixed(1)}`);
+      rest.forEach((q) => lines.push(`G1 X${X(q.x)} Y${Y(q.y)} Z${kfmt(q.z)} F${feed}`));
+      lines.push(`G0   Z${fmt(cfg.safeZ)}`);
+    });
+  });
+  ctx.lastEmittedToolNo = lastEmittedToolNo;
 }
 
 /**
@@ -1342,21 +1441,26 @@ export function buildKapakPresetDxf(width, height, cfg = {}) {
       // absent value falls back to the historical 1mm default.
       const overshootX = numOr(derz.overshootX ?? derz.overshoot, 1);
       const overshootY = numOr(derz.overshootY ?? derz.overshoot, 1);
-      const spacing = numOr(derz.spacing, null) ?? numOr(row.stepOffset, 60);
-      const available = (yon === 'dikey' ? width : height) - margin * 2;
-      const count = derz.autoFit === false ? Math.max(0, Math.floor(available / spacing) + 1) : Math.max(0, Math.round(available / spacing) + 1);
-      const exact = count > 1 ? available / (count - 1) : spacing;
+      // Same positions as the G-code (one source of truth: computeDerzPositions).
+      const { positions } = computeDerzPositions(buildDerzOptions(row, derz, derz.respectPreviousOffset === false ? 0 : base, width, height));
       const derzCurve = topStyle === 'flat' ? null : computeTopCurve(margin, width - margin, height - margin, topStyle, cfg.riseRatio);
-      for (let i = 0; i < count; i++) {
-        const pos = margin + i * exact;
+      for (const pos of positions) {
+        // Same ends as the G-code: startY (mirrored at the top), then the row's
+        // along-line trimming (lineFromPct / lineToPct / stopBox).
+        const startY = Number.isFinite(Number(derz.startY)) ? Number(derz.startY) : null;
         if (yon === 'dikey') {
           // Vertical divider ends on the curve, not the flat top edge.
-          const topY = derzCurve && pos > derzCurve.xl && pos < derzCurve.xr ? derzCurve.yEnd(pos) : height - margin + overshootY;
-          addLine(layer, pos, margin - overshootY, pos, topY);
+          const topY = derzCurve && pos > derzCurve.xl && pos < derzCurve.xr ? derzCurve.yEnd(pos)
+            : startY != null ? height - startY : height - margin + overshootY;
+          const [s, e] = trimDerzLine(derz, true, pos, startY ?? margin - overshootY, topY, width, height, positions.indexOf(pos), positions.length);
+          addLine(layer, pos, s, pos, e);
         } else {
-          addLine(layer, margin - overshootX, pos, width - margin + overshootX, pos);
+          const [s, e] = trimDerzLine(derz, false, pos, margin - overshootX, width - margin + overshootX, width, height, positions.indexOf(pos), positions.length);
+          addLine(layer, s, pos, e, pos);
         }
       }
+      const box = derzBoxLine(derz, positions, height);
+      if (box) addLine(layer, box.x1, box.y, box.x2, box.y);
     } else if (row.operation === 'carving') {
       // Closed single-line carving profile (V-bit) with outward corner ramps.
       const o = Number(row.stepOffset) || 0;
@@ -1365,8 +1469,18 @@ export function buildKapakPresetDxf(width, height, cfg = {}) {
       addLine(layer, x2, y1, x2, y2);
       addLine(layer, x2, y2, x1, y2);
       addLine(layer, x1, y2, x1, y1);
+    } else if (isFeatureRow(row)) {
+      buildFeaturePaths(width, height, row, cfg.thickness).forEach((p) => {
+        for (let i = 1; i < p.length; i++) addLine(layer, p[i - 1].x, p[i - 1].y, p[i].x, p[i].y);
+      });
     } else {
-      offsetRows += Number(row.stepOffset) || 0;
+      // Same offset rules as the G-code: a pinned absoluteOffset wins, absolute
+      // mode reads stepOffset as the distance from the edge, relative mode chains.
+      const pinned = Number(row.absoluteOffset);
+      const step = Number(row.stepOffset) || 0;
+      if (Number.isFinite(pinned)) offsetRows = pinned;
+      else if ((cfg.offsetMode || 'relative') === 'absolute') offsetRows = step;
+      else offsetRows += step;
       const x1 = offsetRows; const x2 = width - offsetRows; const y1 = offsetRows; const y2 = height - offsetRows;
       const rowRadius = Number(row.cornerRadius);
       if (Number.isFinite(rowRadius) && rowRadius > 0) {
@@ -1414,7 +1528,7 @@ export function validateKapakSize(width, height, rows, offsetMode = 'relative', 
     if (r.toolNo === '' || r.toolNo === undefined || r.toolNo === null) return 'Bir satırda Tool No eksik.';
     if (!Number.isFinite(Number(r.toolNo))) return `${label} için Tool No geçersiz (${r.toolNo}).`;
     if (!Number.isFinite(r.depth)) return `${label} için derinlik eksik.`;
-    if (!Number.isFinite(r.stepOffset)) return `${label} için adım offset eksik.`;
+    if (rowNeedsOffset(r) && !Number.isFinite(r.stepOffset)) return `${label} için adım offset eksik.`;
     if (r.depth <= 0) return `${label}: derinlik ${r.depth}mm — sıfır/negatif derinlik talaş kaldırmaz.`;
     if (hasThickness && r.depth > t) {
       return `${label}: derinlik (${r.depth}mm) kalınlıktan (${t}mm) büyük — tabla delinebilir.`;

@@ -18,9 +18,22 @@ import { fileURLToPath } from 'node:url';
 import { buildKapakGcode } from '../../client/src/lib/gcode/kapak.js';
 import { NUMUNE_PRESETS, toPresetDoc } from './seed-numune-presets.js';
 
-const norm = (s) => s.replace(/\s+/g, ' ').trim().toUpperCase();
+// ArtCAM writes a signed epsilon where an arc offset is exactly zero ("I-0.00");
+// the sign is not reproducible and means nothing to the machine, so -0.00 == 0.00
+// (the same rule as client/src/lib/gcode/artcam.test.js).
+const norm = (s) => s.replace(/\s+/g, ' ').trim().toUpperCase().replace(/-0\.00(?![0-9])/g, '0.00');
 
-const NAMES = NUMUNE_PRESETS.map((d) => d.name);
+// Only models that HAVE a final ArtCAM file (numuneler/N NUMARA.cnc) can be
+// compared; 4 and 9-14 come from the TABLA panel (see client tabla.test.js).
+const refFile = (name) => fileURLToPath(new URL(`../../numuneler/${name}.cnc`, import.meta.url));
+const NAMES = NUMUNE_PRESETS.map((d) => d.name).filter((name) => fs.existsSync(refFile(name)));
+// A frozen numuneler/artcam/modelN.preset.json wins over the live preset: the
+// shop may evolve a recipe (1 NUMARA: carving 56 -> 63) while this check keeps
+// proving the generator reproduces the ArtCAM job (same rule as artcam.test.js).
+const frozenPreset = (name) => {
+  const f = fileURLToPath(new URL(`../../numuneler/artcam/model${parseInt(name, 10)}.preset.json`, import.meta.url));
+  return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : null;
+};
 
 let passCount = 0;
 const failures = [];
@@ -28,8 +41,10 @@ const detail = process.argv.includes('--detail');
 
 for (const name of NAMES) {
   const def = NUMUNE_PRESETS.find((d) => d.name === name);
-  const doc = toPresetDoc(def);
-  const w = def.width, h = def.height;
+  const frozen = frozenPreset(name);
+  const doc = frozen || toPresetDoc(def);
+  const w = frozen ? frozen.previewWidth : def.width;
+  const h = frozen ? frozen.previewHeight : def.height;
 
   let genText;
   try {

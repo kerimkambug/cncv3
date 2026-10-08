@@ -195,21 +195,24 @@ describe('kapak: bit-angle sensitivity (V-carve math)', () => {
     expect(carveHalfAngle(90)).toBeCloseTo(2 * carveHalfAngle(45), 9);
   });
 
-  it('ramp ratio follows tan(included/2): 60°=1.732, 90°=1, 120°=0.577', () => {
+  it('ramp ratio follows tan(included/2): 60°=0.577, 90°=1, 120°=1.732, 135°=2.414', () => {
     expect(carveRampRatio(90)).toBeCloseTo(1, 9);
-    expect(carveRampRatio(60)).toBeCloseTo(1.7321, 3);
-    expect(carveRampRatio(120)).toBeCloseTo(0.5774, 3);
+    expect(carveRampRatio(60)).toBeCloseTo(0.5774, 3);
+    expect(carveRampRatio(120)).toBeCloseTo(1.7321, 3);
+    expect(carveRampRatio(135)).toBeCloseTo(2.4142, 3);
   });
 
   it('exit distance scales with depth and angle', () => {
-    expect(carveExitDistance(6, 60)).toBeCloseTo(10.3923, 3);
+    expect(carveExitDistance(6, 60)).toBeCloseTo(3.4641, 3);
     expect(carveExitDistance(6, 90)).toBeCloseTo(6, 6);
-    expect(carveExitDistance(6, 120)).toBeCloseTo(3.4641, 3);
+    expect(carveExitDistance(6, 120)).toBeCloseTo(10.3923, 3);
+    // ArtCAM TABLA panel, model 12: T12 (135°) at 8.1mm depth steps out 19.5mm
+    expect(carveExitDistance(8.1, 135)).toBeCloseTo(19.555, 2);
     expect(carveExitDistance(6, 0)).toBe(6); // legacy rows keep the 1:1 ramp
   });
 
   it('solveCarveGeometry derives the ramp from depth+angle, flags derived', () => {
-    expect(solveCarveGeometry({ bitAngle: 60, depth: 6 }).ramp).toBeCloseTo(10.3923, 3);
+    expect(solveCarveGeometry({ bitAngle: 135, depth: 6 }).ramp).toBeCloseTo(14.4853, 3);
     const noAngle = solveCarveGeometry({ depth: 6, stepOffset: 56 });
     expect(noAngle.derived).toBe(false);
   });
@@ -236,16 +239,22 @@ describe('kapak: carving ramp geometry', () => {
       .toBe(buildCarvingProfile(292, 400, 56, 6, 18, 90).join('\n'));
   });
 
-  it('a 60° included bit derives a 1.73x ramp from the angle', () => {
-    const wide60 = buildCarvingProfile(292, 400, 20, 6, 18, 60);
-    expect(wide60.some((l) => l.includes('X282.39 Y390.39 Z18.00'))).toBe(true);
-    expect(wide60.filter((l) => l.includes('Z12.00')).length).toBe(5);
+  it('a 135° included bit (T12) derives a 2.414x ramp from the angle', () => {
+    // 8mm deep -> 19.31mm out, oi = 70 - 19.31 = 50.69 (ArtCAM panel: ~19.3mm at 8mm)
+    const wide135 = buildCarvingProfile(292, 400, 70, 8, 18, 135);
+    expect(wide135.some((l) => l.includes('X241.31 Y349.31 Z18.00'))).toBe(true);
+    expect(wide135.filter((l) => l.includes('Z10.00')).length).toBe(5);
+  });
+
+  it('a 60° included bit derives a 0.577x ramp from the angle', () => {
+    const narrow60 = buildCarvingProfile(292, 400, 20, 6, 18, 60);
+    expect(narrow60.some((l) => l.includes('X275.46 Y383.46 Z18.00'))).toBe(true);
   });
 
   it('clamps the ramp to the offset when it would leave the plate', () => {
-    const clamped60 = buildCarvingProfile(292, 400, 5, 6, 18, 60);
-    expect(clamped60.some((l) => /X-|Y-/.test(l))).toBe(false);
-    expect(clamped60.some((l) => l.includes('X0.00 Y0.00 Z18.00'))).toBe(true);
+    const clamped135 = buildCarvingProfile(292, 400, 5, 6, 18, 135);
+    expect(clamped135.some((l) => /X-|Y-/.test(l))).toBe(false);
+    expect(clamped135.some((l) => l.includes('X0.00 Y0.00 Z18.00'))).toBe(true);
 
     const clampedCarving = buildCarvingProfile(200, 200, 5, 15, 18);
     expect(clampedCarving.some((l) => /X-|Y-/.test(l))).toBe(false);
@@ -269,7 +278,7 @@ describe('kapak: carving ramp geometry', () => {
   it('emits advisory warnings for unsafe ramps, silent for safe rows', () => {
     expect(validateCarvingWarnings([{ operation: 'carving', depth: 15, stepOffset: 5 }]).length).toBe(1);
     expect(validateCarvingWarnings([{ operation: 'carving', depth: 6, stepOffset: 56 }]).length).toBe(0);
-    expect(validateCarvingWarnings([{ operation: 'carving', depth: 6, stepOffset: 10, bitAngle: 60 }]).length).toBe(1);
+    expect(validateCarvingWarnings([{ operation: 'carving', depth: 6, stepOffset: 10, bitAngle: 135 }]).length).toBe(1);
     expect(validateCarvingWarnings([{ operation: 'carving', depth: 6, stepOffset: 10, bitAngle: 90 }]).length).toBe(0);
     expect(validateCarvingWarnings([{ operation: 'carving', depth: 0, stepOffset: 56, bitAngle: 90 }]).length).toBe(1);
   });

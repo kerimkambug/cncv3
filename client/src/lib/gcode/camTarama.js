@@ -61,6 +61,54 @@ export function camBuildTaramaRings(cfg) {
   return rings;
 }
 
+/**
+ * One glass door as a part program for nesting: part-local coordinates, no
+ * header / tail, two tool blocks — first the tarama (glass rebate) then the iç
+ * kesim (through-cut of the openings). The kesim block always opens with its own
+ * M6T even on the same tool, so nesting can run every part's tarama before any
+ * part's through-cut (loose göz scraps never sit under a running tarama); the
+ * nesting merge drops the redundant tool change.
+ * @param {number} width - door width (mm)
+ * @param {number} height - door height (mm)
+ * @param {object} cfg - machine cfg + cam settings (gozSayisi, kolonSayisi,
+ *   disMargin, icerGap, oturmaPayi, taramaDepth, stepover, toolDia,
+ *   taramaToolNo, kesimToolNo)
+ * @returns {string}
+ */
+export function buildCamPartProgram(width, height, cfg) {
+  const c = { ...cfg, width, height };
+  const f2 = (v) => Number(v).toFixed(2);
+  const safeZ = f2(c.safeZ);
+  const plunge = Number(c.plungeFeed).toFixed(1);
+  const feed = Number(c.cutFeed).toFixed(1);
+  const lines = [];
+
+  // 1) tarama: the rebate the glass sits in
+  const rings = camBuildTaramaRings(c).filter((r) => r.length >= 3);
+  const zT = f2(c.thickness - c.taramaDepth);
+  lines.push(`M6T${c.taramaToolNo}`, `M3 S${c.spindleSpeed}`);
+  rings.forEach((ring) => {
+    lines.push(`G0 X${f2(ring[0].x)} Y${f2(ring[0].y)} Z${safeZ}`);
+    lines.push(`G1 Z${zT} F${plunge}`);
+    ring.slice(1).forEach((p) => lines.push(`G1 X${f2(p.x)} Y${f2(p.y)} F${feed}`));
+    lines.push(`G1 X${f2(ring[0].x)} Y${f2(ring[0].y)} F${feed}`);
+    lines.push(`G0 Z${safeZ}`);
+  });
+
+  // 2) iç kesim: the openings, cut through (tool inset by its radius)
+  const r = Number(c.toolDia) / 2;
+  lines.push(`M6T${c.kesimToolNo}`, `M3 S${c.spindleSpeed}`);
+  camComputeOpenings(c).openings.forEach((o) => {
+    const x1 = o.x1 + r; const y1 = o.y1 + r; const x2 = o.x2 - r; const y2 = o.y2 - r;
+    if (x2 <= x1 || y2 <= y1) throw new Error(`Takım çapı (${c.toolDia}mm) cam gözünden büyük.`);
+    lines.push(`G0 X${f2(x2)} Y${f2(y1)} Z${safeZ}`);
+    lines.push(`G1 Z0.00 F${plunge}`);
+    lines.push(`G1 Y${f2(y2)} F${feed}`, `G1 X${f2(x1)}`, `G1 Y${f2(y1)}`, `G1 X${f2(x2)}`);
+    lines.push(`G0 Z${safeZ}`);
+  });
+  return lines.join('\n');
+}
+
 export function buildCamTaramaGcode(cfg) {
   const rings = camBuildTaramaRings(cfg);
   if (rings.length === 0) throw new Error('Hiç toolpath halkası üretilemedi.');

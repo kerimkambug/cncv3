@@ -26,7 +26,7 @@
 | `client/src/lib/relief/stlExporter.js` | Mesh/STL dışa aktarma |
 | `client/src/lib/gcode/relief.js` | **G-code motoru** (bozulmayacak) — depth grid → G-code |
 | `server/services/reliefGcode.js` | Sunucu tarafı G-code sarmalayıcı |
-| `karsilastirma-ham-veri.txt` | G-code motoru ↔ gerçek ArtCAM dosyaları karşılaştırması |
+| `server/scripts/compare-numuneler-strict.mjs` | G-code motoru ↔ gerçek ArtCAM dosyaları karşılaştırması (satır satır) |
 
 ---
 
@@ -92,7 +92,7 @@
 - Raster (x/y/diag/cross), `smoothZTrack(3)`, `simplifyPathPoints(0.006)`, dış kontur kesimi, park.
 - Depth grid'in anlamı: **0 = taban/en derin, 1 = üst yüzey/en yüksek.**
 
-> `karsilastirma-ham-veri.txt` G-code motorun gerçek üretim dosyalarına çok yakın
+> `server/scripts/compare-numuneler-strict.mjs` G-code motorun gerçek üretim dosyalarıyla birebir
 > çalıştığını gösteriyor. **G-code tarafına dokunmuyoruz.** Girdi sözleşmesi tek:
 > `Float32Array` 0..1, satır-major, `width*height`.
 

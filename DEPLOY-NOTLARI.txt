@@ -14,14 +14,19 @@ Sorun: Köşe keskinleştirme mesafesi koda SABİT 1:1 gömülüydü (derinlik =
 
 Düzeltilen: Köşe rampası artık bıçağın TAM (included) açısından hesaplanıyor:
 
-      rampa = derinlik / tan(tamAçı / 2)
+      rampa = derinlik * tan(tamAçı / 2)
 
   Bıçak tam açısı  ->  rampa katsayısı
   ------------------------------------
-   60° (kenara 30°)  ->  1.732x
-   90° (kenara 45°)  ->  1.000x   <-- 1 NUMARA'daki bıçak
-  120° (kenara 60°)  ->  0.577x
-  135°              ->  0.414x
+   60° (kenara 30°)   ->  0.577x
+   90° (kenara 45°)   ->  1.000x   <-- 1 NUMARA'daki bıçak (T1)
+  120° (kenara 60°)   ->  1.732x
+  135° (kenara 67.5°) ->  2.414x   <-- T12
+
+  DÜZELTME (2026-10-08): ilk sürümde formül ters yazılmıştı (derinlik / tan).
+  90°'de ikisi de 1x verdiği için 1 NUMARA'da fark görünmüyordu; 135° T12'de
+  köşe 2.414x yerine 0.414x çıkıyordu. ArtCAM TABLA panosu doğruladı:
+  T12 8.1 / 9.0 / 8.0 mm derinlikte köşeyi 19.5 / 21.7 / 19.3 mm dışa çıkarıyor.
 
   ÖNEMLİ: "kenara 45°" = TAM 90° bıçak. Arayüz bunu net gösteriyor.
 

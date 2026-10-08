@@ -56,6 +56,9 @@ const ToolRowSchema = new mongoose.Schema(
       margin: { type: Number, default: 0 },
       spacing: { type: Number, default: 60 },
       autoFit: { type: Boolean, default: true },
+      // insideFrame: margin is the frame line; the frame-to-frame span is split
+      //   into equal intervals nearest to `spacing`, lines on the frame dropped.
+      insideFrame: { type: Boolean, default: false },
       overshoot: { type: Number, default: 1 },
       overshootX: { type: Number, default: 1 },
       overshootY: { type: Number, default: 1 },

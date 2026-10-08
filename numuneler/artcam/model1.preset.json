@@ -1,0 +1,112 @@
+{
+  "category": "kapak",
+  "previewWidth": 292,
+  "previewHeight": 400,
+  "name": "1 NUMARA",
+  "module": "kapak",
+  "description": "DONMUŞ TEST KOPYASI — 1 NUMARA.cnc (ArtCAM, 292x400) birebir üreten ayarlar: carving 56, iç V 70, derz 19mm/3mm. Atölyenin güncel 1 NUMARA tarifi server/data/presets.json içindedir (carving 63). Carving + düz offset + derz. T1 V-bıçak köşe keskinleştirmesi doğrulandı. Derz: X çizgileri 89/108/127/146/165/184/203 (eşit 19mm aralık) — 1_NUMARA.cnc ile birebir. kaba boşaltma pasoları (abs 62/59, r4/r2) ve derz başlangıç Y değeri (70 = çerçeve offseti) doğrulandı.",
+  "thickness": 18,
+  "spindleSpeed": 18000,
+  "safeZ": 46,
+  "toolChangeZ": 46,
+  "homeZ": 46,
+  "plungeFeed": 3000,
+  "cutFeed": 5000,
+  "offsetMode": "absolute",
+  "topStyle": "flat",
+  "riseRatio": 0.125,
+  "rows": [
+    {
+      "toolNo": "6",
+      "depth": 6,
+      "stepOffset": 62,
+      "absoluteOffset": 62,
+      "name": "6mm kaba boşaltma (dış, dik köşe)",
+      "operation": "offset",
+      "roughing": true,
+      "chain": false,
+      "repeatStartY": false
+    },
+    {
+      "toolNo": "6",
+      "depth": 6,
+      "stepOffset": 59,
+      "absoluteOffset": 59,
+      "chain": true,
+      "name": "6mm kaba boşaltma (iç, dik köşe)",
+      "operation": "offset",
+      "roughing": true,
+      "repeatStartY": false
+    },
+    {
+      "toolNo": "6",
+      "depth": 6,
+      "stepOffset": 64,
+      "absoluteOffset": 64,
+      "cornerRadius": 6,
+      "name": "6mm dış rounded offset",
+      "operation": "offset",
+      "roughing": false,
+      "chain": false,
+      "repeatStartY": false
+    },
+    {
+      "toolNo": "6",
+      "depth": 6,
+      "stepOffset": 67,
+      "absoluteOffset": 67,
+      "cornerRadius": 3,
+      "chain": true,
+      "name": "6mm iç rounded offset",
+      "operation": "offset",
+      "roughing": false,
+      "repeatStartY": false
+    },
+    {
+      "toolNo": "1",
+      "depth": 6,
+      "stepOffset": 56,
+      "feed": 6000,
+      "name": "Carving V-bıçak (90° = kenara 45°)",
+      "operation": "carving",
+      "bitAngle": 90,
+      "roughing": false,
+      "chain": false,
+      "repeatStartY": false
+    },
+    {
+      "toolNo": "1",
+      "depth": 6,
+      "stepOffset": 70,
+      "absoluteOffset": 70,
+      "feed": 6000,
+      "name": "düz bitirme pası (carving sonrası, T1 devamı)",
+      "operation": "offset",
+      "roughing": false,
+      "chain": false,
+      "repeatStartY": false
+    },
+    {
+      "toolNo": "1",
+      "depth": 3,
+      "stepOffset": 89,
+      "feed": 6000,
+      "name": "135° derz",
+      "operation": "derz",
+      "derz": {
+        "yon": "dikey",
+        "margin": 89,
+        "spacing": 19,
+        "autoFit": true,
+        "overshootY": 0,
+        "startY": 70,
+        "respectPreviousOffset": false
+      },
+      "roughing": false,
+      "chain": false,
+      "repeatStartY": false
+    }
+  ],
+  "createdAt": "2026-09-25T15:51:01.940Z",
+  "updatedAt": "2026-09-25T15:51:01.940Z"
+}

@@ -87,6 +87,22 @@ empire-cnc-mern/
 | Preset kaydet/yükle/sil | ✅ `PresetPanel.jsx` (backend'e bağlı) |
 | preset.json içe/dışa aktarma | ✅ aynı panelde — eski `preset.json` dosyaları doğrudan yüklenebilir |
 | Ctrl+Enter kısayolu | ✅ `useCtrlEnter` hook'u, her üretim ekranında |
+| Tarama (cep boşaltma), uzatma çizgisi, şablon (süsleme) | ✅ `features.js` — satırın `operation` alanı: `tarama` / `uzatma` / `sablon` |
+| Kulp yuvası | ⏳ ayrı bir iş — şimdilik sistemde yok (model 4'ün panodaki T10/T11 kulp yolları presete alınmadı) |
+| Derz: çerçeve içini eşit böl, sabit çizgi sayısı, ara çizgi, çizgi boyu (%), kulp kutusu | ✅ `derz.js` (`insideFrame`, `count`, `stagger`, `lineFromPct`/`lineToPct`, `stopBox`) |
+| Nesting her parçayı Tek Ölçü ile birebir aynı keser (döndürülen parça modeliyle birlikte döner) | ✅ `nesting.js` `partProgram` — G-code, DXF ve önizleme aynı programdan |
+| Nesting'de cam kapak (parça satırında Model = "Cam kapak"; göz, sütun, çıta… satırda seçilir) | ✅ `camTarama.js` `buildCamPartProgram` — plakada kapaklardan sonra: önce tüm cam taramaları, sonra iç kesimler, en son dış kesim. `cam.test.js` ArtCAM numunesiyle (`numuneler/cam/`) alan alan karşılaştırır |
+
+### Model presetleri (1–14) nereden geliyor
+
+- **1, 2, 3, 5, 6, 7, 8**: nihai ArtCAM çıktıları `numuneler/N NUMARA.cnc`. `node server/scripts/compare-numuneler-strict.mjs`
+  hepsini satır satır karşılaştırır (7/7). 1 NUMARA'nın atölye tarifi (carving 63) numuneden (56) farklı olduğu için
+  numunenin ayarları `numuneler/artcam/model1.preset.json` içinde donmuş durumda; test o dosyayla yapılır.
+- **4, 9–14**: tek kaynak TABLA panosu (`numuneler/TABLA MODELLERİMİZ pano şeklinde.anc` + `.dxf`). Presetler
+  `node server/scripts/build-tabla-presets.mjs` ile kurulur; 13/14'ün süsleme şablonları
+  `server/scripts/extract-tabla-sablon.mjs` ile panodaki ArtCAM yolundan çıkarılır (`numuneler/tabla-sablon/`).
+  `client/src/lib/gcode/tabla.test.js` her modeli panodaki yollarla paso paso karşılaştırır.
+- V-bıçak köşe rampası `derinlik × tan(açı/2)`: 90° (T1) = 1×, 135° (T12) = 2.414×.
 | Ayarlar/Bıçaklar modalı | Modal değil, hep-açık kart (senin ayrı isteğinle böyle değiştirilmişti) |
 | Preset dosyasını File System Access API ile diskte seçme | Yerine MongoDB/dosya tabanlı backend + preset.json import/export — daha esnek, farklı mekanizma |
 

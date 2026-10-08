@@ -107,6 +107,17 @@ check('derz 2 NUMARA: first/last exactly 100/192 (edge-to-edge fit)', derz2n.pos
 // 3 NUMARA: derz x = 70.69/84.38/... equal 13.69mm
 const derz3n = computeDerzPositions({ width: 292, height: 400, yon: 'dikey', margin: 70.69, spacing: 13.69, autoFit: true });
 check('derz 3 NUMARA: starts at 70.69 with equal ~13.69 spacing', derz3n.positions[0] === 70.69 && Math.abs(derz3n.exactSpacing - 13.69) < 0.02);
+// insideFrame: margin is the FRAME line, the span between frames is split into
+// equal gaps nearest to the requested spacing and the on-frame lines are dropped.
+// Same numune lines as above, but from the frame value — so it holds for any width.
+const near2 = (a, b) => a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 0.005);
+const derz1f = computeDerzPositions({ width: 292, height: 400, yon: 'dikey', margin: 70, spacing: 19, insideFrame: true });
+check('derz insideFrame: 1 NUMARA frame 70 / spacing 19 -> 89..203', near2(derz1f.positions, [89, 108, 127, 146, 165, 184, 203]));
+const derz3f = computeDerzPositions({ width: 292, height: 400, yon: 'dikey', margin: 57, spacing: 13.69, insideFrame: true });
+check('derz insideFrame: 3 NUMARA frame 57 / spacing 13.69 -> 12 lines 70.69..221.31', derz3f.positions.length === 12 && near2([derz3f.positions[0], derz3f.positions[11]], [70.6923, 221.3077]));
+const derzWide = computeDerzPositions({ width: 600, height: 700, yon: 'dikey', margin: 77, spacing: 20, insideFrame: true });
+check('derz insideFrame: spacing is the equal split nearest the request (600 wide: 446/22 = 20.27)', Math.abs(derzWide.exactSpacing - 446 / 22) < 1e-9 && derzWide.positions.length === 21);
+check('derz insideFrame: no line sits on the frame itself', derzWide.positions[0] > 77 && derzWide.positions[derzWide.positions.length - 1] < 600 - 77);
 // Every gap identical (the shop rule: equal gaps, fractional allowed)
 const gapsEqual = (pos) => pos.slice(1).every((p, i) => Math.abs((p - pos[i]) - (pos[1] - pos[0])) < 0.002);
 check('derz: all gaps are identical on every sample (equal spacing rule, 0.001mm rounding tol)', [derz1, derz2n, derz3n].every((r) => gapsEqual(r.positions)));
@@ -200,7 +211,7 @@ const testParts = [
   { name: 'SolUst', x: 10, y: 600, placedWidth: 500, placedHeight: 500 },
   { name: 'SagAlt', x: 600, y: 10, placedWidth: 500, placedHeight: 500 },
 ];
-const sortedParts = orderPartsVacuumSafeFinalCut(testParts, 2440, 1220);
+const sortedParts = orderPartsVacuumSafeFinalCut(testParts);
 check('vacuum-safe final cut: Top-Right first', sortedParts[0].name === 'SagUst');
 check('vacuum-safe final cut: Top-Left second', sortedParts[1].name === 'SolUst');
 check('vacuum-safe final cut: Bottom-Right third', sortedParts[2].name === 'SagAlt');
@@ -382,33 +393,34 @@ check('carving: profile runs at depth Z12.00 between corners', carvingLines.filt
 
 // --- V-bit carve math (bit angle drives depth + corner ramp length) ---
 // A V-bit is sold by its INCLUDED (full) angle; the angle to the part edge is half
-// of it. A V-bit rises 1mm per tan(included/2)mm of horizontal travel, so the
-// outward ramp per mm of depth is 1/tan(included/2):
-//   incl 60 (kenara 30°)  -> 1.732x   incl 90  (kenara 45°) -> 1.000x  <- 1 NUMARA
-//   incl 120 (kenara 60°) -> 0.577x   incl 135              -> 0.414x
+// of it. At depth d a V-bit is d*tan(included/2) wide on each side, so the
+// outward ramp per mm of depth is tan(included/2):
+//   incl 60 (kenara 30°)  -> 0.577x   incl 90  (kenara 45°)   -> 1.000x  <- 1 NUMARA (T1)
+//   incl 120 (kenara 60°) -> 1.732x   incl 135 (kenara 67.5°) -> 2.414x  <- T12
 const { carveExitDistance, carveHalfAngle, carveRampRatio, solveCarveGeometry } = await import('./kapak.js');
 const near = (a, b, eps = 0.02) => Math.abs(a - b) <= eps;
 check('carve math: included 90° => half-angle 45° in radians', near(carveHalfAngle(90), Math.PI / 4, 1e-9));
 check('carve math: half-angle is literally 2× the 45° included half-angle', near(carveHalfAngle(90), 2 * carveHalfAngle(45), 1e-9));
 check('carve math: included 90° (kenara 45°) gives the 1:1 ramp ratio', near(carveRampRatio(90), 1, 1e-9));
-check('carve math: included 60° (kenara 30°) gives a 1.732x ramp ratio', near(carveRampRatio(60), 1.7321));
-check('carve math: included 120° (kenara 60°) gives a 0.577x ramp ratio', near(carveRampRatio(120), 0.5774));
-check('carve math: 60° included bit needs a 1.73x ramp (6mm deep -> 10.39mm out)', near(carveExitDistance(6, 60), 10.3923));
+check('carve math: included 60° (kenara 30°) gives a 0.577x ramp ratio', near(carveRampRatio(60), 0.5774));
+check('carve math: included 120° (kenara 60°) gives a 1.732x ramp ratio', near(carveRampRatio(120), 1.7321));
+check('carve math: included 135° (T12) gives a 2.414x ramp ratio', near(carveRampRatio(135), 2.4142));
+check('carve math: 60° included bit needs only a 0.58x ramp (6mm deep -> 3.46mm out)', near(carveExitDistance(6, 60), 3.4641));
 check('carve math: 90° included bit gives the 1:1 ramp (6mm deep -> 6mm out)', near(carveExitDistance(6, 90), 6, 1e-6));
-check('carve math: 120° included bit needs only a 0.58x ramp (6mm deep -> 3.46mm out)', near(carveExitDistance(6, 120), 3.4641));
+check('carve math: 135° T12 at 8.1mm deep steps 19.55mm out (ArtCAM panel model 12: 19.5)', near(carveExitDistance(8.1, 135), 19.555));
 check('carve math: legacy row with no angle keeps the 1:1 ramp (assumes the 90° bit)', carveExitDistance(6, 0) === 6);
-check('carve math: solveCarveGeometry derives the ramp from depth+angle', near(solveCarveGeometry({ bitAngle: 60, depth: 6 }).ramp, 10.3923));
+check('carve math: solveCarveGeometry derives the ramp from depth+angle', near(solveCarveGeometry({ bitAngle: 135, depth: 6 }).ramp, 14.4853));
 check('carve math: solveCarveGeometry falls back to depth when no angle', solveCarveGeometry({ depth: 6, stepOffset: 56 }).derived === false);
 
-// Angle-corrected profile: the ramp comes from the bit's included angle. A narrow
-// 60° (kenara 30°) bit needs a 10.39mm ramp => oi = 20 - 10.39 = 9.61.
-const wide60 = buildCarvingProfile(292, 400, 20, 6, 18, 60);
-check('carving 60°: 1.73x ramp derived from the angle (oi = 20 - 10.39 = 9.61)', wide60.some((l) => l.includes('X282.39 Y390.39 Z18.00')));
-check('carving 60°: profile still cut at the requested depth Z12.00', wide60.filter((l) => l.includes('Z12.00')).length === 5);
-// A 60° bit needs 10.39mm but the offset is only 5mm, so the ramp is clipped to 5
-// (oi = 0): the corner lands on the part's zero point, never off-plate.
-const clamped60 = buildCarvingProfile(292, 400, 5, 6, 18, 60);
-check('carving 60°: ramp clipped to the offset when it would leave the plate', !clamped60.some((l) => /X-|Y-/.test(l)) && clamped60.some((l) => l.includes('X0.00 Y0.00 Z18.00')));
+// Angle-corrected profile: the ramp comes from the bit's included angle. The
+// 135° T12 at 8mm needs a 19.31mm ramp => oi = 70 - 19.31 = 50.69.
+const wide135 = buildCarvingProfile(292, 400, 70, 8, 18, 135);
+check('carving 135°: 2.414x ramp derived from the angle (oi = 70 - 19.31 = 50.69)', wide135.some((l) => l.includes('X241.31 Y349.31 Z18.00')));
+check('carving 135°: profile still cut at the requested depth Z10.00', wide135.filter((l) => l.includes('Z10.00')).length === 5);
+// A 135° bit at 6mm needs 14.49mm but the offset is only 5mm, so the ramp is
+// clipped to 5 (oi = 0): the corner lands on the part's zero point, never off-plate.
+const clamped135 = buildCarvingProfile(292, 400, 5, 6, 18, 135);
+check('carving 135°: ramp clipped to the offset when it would leave the plate', !clamped135.some((l) => /X-|Y-/.test(l)) && clamped135.some((l) => l.includes('X0.00 Y0.00 Z18.00')));
 
 // --- Carving corner ramp must NEVER leave the plate (offset < exit) ---
 // Regression: offset=5, depth=15 => exit=15 => oi would be -10 (off-plate).
@@ -432,9 +444,9 @@ check('carving clamp: reference case (292,400,56,6,18) still byte-matches 1_NUMA
 const { validateCarvingWarnings } = await import('./kapak.js');
 check('carving warning: emitted when exit >= offset', validateCarvingWarnings([{ operation: 'carving', depth: 15, stepOffset: 5 }]).length === 1);
 check('carving warning: silent for the safe reference row', validateCarvingWarnings([{ operation: 'carving', depth: 6, stepOffset: 56 }]).length === 0);
-// A V-bit with an angle: the ramp is derived from the angle, so a narrow 60° bit
+// A V-bit with an angle: the ramp is derived from the angle, so a wide 135° bit
 // warns where the legacy 1:1 rule used to stay silent.
-check('carving warning: 60° included ramp warns when it exceeds the offset', validateCarvingWarnings([{ operation: 'carving', depth: 6, stepOffset: 10, bitAngle: 60 }]).length === 1);
+check('carving warning: 135° included ramp warns when it exceeds the offset', validateCarvingWarnings([{ operation: 'carving', depth: 6, stepOffset: 10, bitAngle: 135 }]).length === 1);
 check('carving warning: 90° included bit stays silent for the same row (1:1 fits)', validateCarvingWarnings([{ operation: 'carving', depth: 6, stepOffset: 10, bitAngle: 90 }]).length === 0);
 check('carving warning: depth 0 is flagged (the bit would cut nothing)', validateCarvingWarnings([{ operation: 'carving', depth: 0, stepOffset: 56, bitAngle: 90 }]).length === 1);
 

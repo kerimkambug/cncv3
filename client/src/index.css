@@ -182,6 +182,10 @@ textarea{
 .parts-table{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
 .parts-table th{font-size:9.5px;color:var(--muted);font-weight:500;padding:6px 2px;text-align:left}
 .parts-table td{padding:4px 2px;border-top:1px solid var(--border)}
+.parts-table .cam-settings-row td{border-top:none;padding-top:0}
+.cam-settings{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));align-items:end;gap:6px;padding:6px;border:1px dashed var(--border);border-radius:6px}
+.cam-settings label{display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--muted)}
+.cam-settings input{width:100%}
 .parts-table th:nth-child(1){width:24%}
 .parts-table th:nth-child(2),.parts-table th:nth-child(3){width:11%}
 .parts-table th:nth-child(4){width:8%}

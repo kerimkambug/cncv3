@@ -98,7 +98,13 @@ describe('Kapak G-code — ArtCAM 2008 birebir karsilastirmasi', () => {
   });
 
   describe.each(Object.entries(MODEL_OF))('%s', (presetName, model) => {
-    const preset = allPresets.find((p) => p.name === presetName);
+    // A frozen numuneler/artcam/modelN.preset.json wins over the live preset: the
+    // shop may evolve a model's recipe (1 NUMARA: carving 56 -> 63) while this test
+    // must keep proving the generator reproduces the ArtCAM job byte-for-byte.
+    const frozen = join(FIXTURE_DIR, `model${model}.preset.json`);
+    const preset = existsSync(frozen)
+      ? JSON.parse(readFileSync(frozen, 'utf8'))
+      : allPresets.find((p) => p.name === presetName);
     const referenceText = referenceFor(model);
     const expected = normalizeGcode(referenceText);
     const expectedStrict = stripTrailingWs(referenceText);

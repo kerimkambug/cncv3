@@ -1,4 +1,4 @@
-const TOKEN_RE = /([XYZIJKFS])\s*([-+]?(?:\d+(?:[.,]\d*)?|[.,]\d+)(?:[Ee][-+]?\d+)?)/gi;
+const TOKEN_RE = /([XYZIJKFSR])\s*([-+]?(?:\d+(?:[.,]\d*)?|[.,]\d+)(?:[Ee][-+]?\d+)?)/gi;
 
 function number(value) {
   return Number.parseFloat(String(value).replace(',', '.'));
@@ -15,9 +15,26 @@ function addPoint(state, token, value) {
 }
 
 function arcPoints(start, end, params, clockwise) {
-  if (!Number.isFinite(params.I) || !Number.isFinite(params.J)) return [end];
-  const centerX = start.x + params.I;
-  const centerY = start.y + params.J;
+  let centerX;
+  let centerY;
+  if (Number.isFinite(params.I) || Number.isFinite(params.J)) {
+    centerX = start.x + (Number.isFinite(params.I) ? params.I : 0);
+    centerY = start.y + (Number.isFinite(params.J) ? params.J : 0);
+  } else if (Number.isFinite(params.R)) {
+    // R-format arc (ArtCAM .anc posts): centre from the chord and the radius;
+    // a negative R asks for the arc longer than 180 degrees.
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const d = Math.hypot(dx, dy);
+    const r = Math.abs(params.R);
+    if (!d || r < d / 2 - 1e-6) return [end];
+    const h = Math.sqrt(Math.max(0, r * r - (d * d) / 4));
+    const side = (!clockwise) === (params.R > 0) ? 1 : -1;
+    centerX = (start.x + end.x) / 2 + side * h * (-dy / d);
+    centerY = (start.y + end.y) / 2 + side * h * (dx / d);
+  } else {
+    return [end];
+  }
   const radius = Math.hypot(start.x - centerX, start.y - centerY);
   if (!radius) return [end];
 
@@ -30,11 +47,13 @@ function arcPoints(start, end, params, clockwise) {
 
   const steps = Math.max(8, Math.ceil(Math.abs(sweep) * radius / 8));
   const points = [];
+  const z0 = Number.isFinite(start.z) ? start.z : end.z;
   for (let index = 1; index <= steps; index += 1) {
     const angle = startAngle + sweep * (index / steps);
     points.push({
       x: centerX + Math.cos(angle) * radius,
       y: centerY + Math.sin(angle) * radius,
+      z: z0 + (end.z - z0) * (index / steps),
     });
   }
   points[points.length - 1] = end;
@@ -46,6 +65,7 @@ export function parseGcode(text, options = {}) {
   const segments = [];
   const state = { x: 0, y: 0, z: 0, absolute: true, unitScale: 1 };
   let motion = null;
+  let tool = null;
   let previous = { x: 0, y: 0, z: 0 };
 
   String(text || '').split(/\r?\n/).forEach((rawLine, lineIndex) => {
@@ -57,8 +77,12 @@ export function parseGcode(text, options = {}) {
     if (/\bG90\b/.test(line)) state.absolute = true;
     if (/\bG91\b/.test(line)) state.absolute = false;
 
-    const motionMatch = line.match(/\bG([0-3])(?:\.0+)?\b/);
+    // ArtCAM writes arcs without spaces ("G2X64.00Y70.00I4.24J4.24"), so the
+    // motion word cannot rely on a word boundary after its number.
+    const motionMatch = line.match(/(?:^|[^A-Z])G0*([0-3])(?:\.0+)?(?![0-9])/);
     if (motionMatch) motion = Number(motionMatch[1]);
+    const toolMatch = line.match(/M0*6\s*T\s*(\d+)|(?:^|[^A-Z])T\s*(\d+)\s*M0*6/);
+    if (toolMatch) tool = toolMatch[1] || toolMatch[2];
     if (motion === null) return;
 
     const params = {};
@@ -79,12 +103,14 @@ export function parseGcode(text, options = {}) {
         ? arcPoints(previous, next, {
           I: Number.isFinite(params.I) ? params.I * state.unitScale : NaN,
           J: Number.isFinite(params.J) ? params.J * state.unitScale : NaN,
+          R: Number.isFinite(params.R) ? params.R * state.unitScale : NaN,
         }, motion === 2)
         : [next];
-      let from = { x: previous.x, y: previous.y };
+      let from = { x: previous.x, y: previous.y, z: previous.z };
       points.forEach((to) => {
-        segments.push({ from, to: { x: to.x, y: to.y }, type, line: lineIndex + 1 });
-        from = { x: to.x, y: to.y };
+        const toZ = Number.isFinite(to.z) ? to.z : next.z;
+        segments.push({ from, to: { x: to.x, y: to.y, z: toZ }, type, line: lineIndex + 1, tool });
+        from = { x: to.x, y: to.y, z: toZ };
       });
     }
 
