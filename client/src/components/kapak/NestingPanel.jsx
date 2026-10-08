@@ -663,11 +663,11 @@ export default function NestingPanel({ cfg, plateCfg }) {
                       <select
                         className="part-preset-select"
                         value={p.presetId || ''}
-                        title="Boş = Ayarlar/Bıçaklar panelindeki aktif model"
+                        title="Ayarlar = Ayarlar/Bıçaklar panelindeki aktif model. Cam kapak = tarama + iç kesim (ayarları satırın altında)."
                         onChange={(e) => updatePart(idx, 'presetId', e.target.value)}
                       >
-                        <option value="">Ayarlardaki (varsayılan)</option>
-                        <option value={CAM_ID}>Cam kapak (tarama + iç kesim)</option>
+                        <option value="">Ayarlar</option>
+                        <option value={CAM_ID}>Cam kapak</option>
                         {presets.map((preset) => (
                           <option key={getPresetId(preset)} value={getPresetId(preset)}>
                             {preset.name}{preset.category === 'kapi' ? ' (Kapı)' : ''}

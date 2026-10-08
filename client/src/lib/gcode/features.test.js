@@ -230,3 +230,19 @@ describe('nesting: variant search', async () => {
     expect(JSON.stringify(a.plates)).toBe(JSON.stringify(b.plates));
   });
 });
+
+describe('every preset moves exactly with its plate position (nesting)', async () => {
+  const { parseGcode } = await import('./gcodeToDxf.js');
+  const presets = JSON.parse((await import('node:fs')).readFileSync(new URL('../../../../server/data/presets.json', import.meta.url), 'utf8'));
+  for (const p of presets) {
+    it(`${p.name}: program at (1000, 300) = program at (0, 0) shifted by (1000, 300)`, () => {
+      const a = parseGcode(buildKapakGcode(500, 600, p, 0, 0, true)).segments;
+      const b = parseGcode(buildKapakGcode(500, 600, p, 1000, 300, true)).segments;
+      expect(b.length).toBe(a.length);
+      a.forEach((s, i) => {
+        expect(b[i].to.x - s.to.x).toBeCloseTo(1000, 2);
+        expect(b[i].to.y - s.to.y).toBeCloseTo(300, 2);
+      });
+    });
+  }
+});

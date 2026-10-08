@@ -816,8 +816,10 @@ function emitOffsetPasses(ctx, passRows, passAdaptive) {
     // Rounded-corner pass: a single closed profile with G2/G3 corner arcs.
     const cornerRadius = Number(srcRow && srcRow.cornerRadius);
     if (Number.isFinite(cornerRadius) && cornerRadius > 0) {
+      // x1..y2 already include offsetX/offsetY, so no extra origin shift here
+      // (passing the offsets again moved the pass twice on a nested part).
       buildRoundedRectProfile(
-        x1, y1, x2, y2, cornerRadius, z, cfg.plungeFeed, feed, cfg.safeZ, offsetX, offsetY, chainFromPrev,
+        x1, y1, x2, y2, cornerRadius, z, cfg.plungeFeed, feed, cfg.safeZ, 0, 0, chainFromPrev,
       ).forEach((line) => lines.push(line));
       chainState = { idx: r.rowIdx, tool: String(r.toolNo), z };
       return;

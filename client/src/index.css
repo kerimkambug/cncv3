@@ -175,7 +175,7 @@ textarea{
 
 
 .measure-summary{font-size:12px;color:var(--muted);margin-top:10px}
-.nesting-grid{display:grid;grid-template-columns:360px minmax(0,1fr);gap:18px;align-items:start}
+.nesting-grid{display:grid;grid-template-columns:460px minmax(0,1fr);gap:18px;align-items:start}
 .nesting-settings{display:flex;flex-direction:column;gap:12px}
 .nesting-settings .card-lite{background:var(--panel2);border:1px solid var(--border);border-radius:9px;padding:12px}
 .nesting-settings h3{font-size:12px;margin:0 0 10px}
@@ -186,13 +186,16 @@ textarea{
 .cam-settings{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));align-items:end;gap:6px;padding:6px;border:1px dashed var(--border);border-radius:6px}
 .cam-settings label{display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--muted)}
 .cam-settings input{width:100%}
-.parts-table th:nth-child(1){width:24%}
-.parts-table th:nth-child(2),.parts-table th:nth-child(3){width:11%}
-.parts-table th:nth-child(4){width:8%}
-.parts-table th:nth-child(5){width:26%}
-.parts-table th:nth-child(6){width:10%}
-.parts-table th:nth-child(7){width:9%}
-.parts-table input{padding:7px 4px;font-size:11.5px;min-width:0;width:100%;box-sizing:border-box}
+.parts-table th:nth-child(1){width:21%}
+.parts-table th:nth-child(2),.parts-table th:nth-child(3){width:15%}
+.parts-table th:nth-child(4){width:10%}
+.parts-table th:nth-child(5){width:25%}
+.parts-table th:nth-child(6){width:6%}
+.parts-table th:nth-child(7){width:8%}
+.parts-table input{padding:7px 4px;font-size:12px;min-width:0;width:100%;box-sizing:border-box}
+/* number spinners eat half of a narrow cell: hide them, the values must stay readable */
+.parts-table input[type=number]{-moz-appearance:textfield;appearance:textfield}
+.parts-table input[type=number]::-webkit-outer-spin-button,.parts-table input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 .parts-table .num,.parts-table .qty,.parts-table .part-name{width:100%;min-width:0;text-align:center}
 .parts-table .part-name{text-align:left}
 .parts-table .lock-cell{text-align:center}
