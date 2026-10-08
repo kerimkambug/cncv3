@@ -116,6 +116,35 @@ export default function MachineSettingsPanel({ cfg, setCfg, plateCfg, setPlateCf
           ? 'Üst kenar düz çıkar (klasik dikdörtgen).'
           : 'Üst kenar eğri çıkar; dikey derz çizgileri ve profil bıçaklarının üst ucu eğriyi takip eder.'}
       </div>
+
+      <h3 style={{ marginTop: 20, marginBottom: 8 }}>Dar Kapak</h3>
+      <label className="check-field" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <input
+          type="checkbox"
+          style={{ width: 'auto' }}
+          checked={cfg.narrowAdapt !== false}
+          onChange={(e) => setCfg({ ...cfg, narrowAdapt: e.target.checked })}
+        />
+        <span>Dar kenarda çerçeveyi daralt (mutlak modda)</span>
+      </label>
+      {cfg.narrowAdapt !== false && (
+        <div className="row2" style={{ marginTop: 8 }}>
+          <div>
+            <label>En az iç panel (mm)</label>
+            <input type="number" step="1" min="0" value={cfg.narrowMinPanel ?? 60} onChange={(e) => set('narrowMinPanel', e.target.value)} />
+          </div>
+          <div>
+            <label>En az ilk offset (mm)</label>
+            <input type="number" step="1" min="0" value={cfg.narrowMinFirst ?? 30} onChange={(e) => set('narrowMinFirst', e.target.value)} />
+          </div>
+        </div>
+      )}
+      <div className="hint">
+        Dar kenarda (ör. 500×180'in 180'i) orta panel bu değerden küçük kalıyorsa ilk offset ve ondan sonraki
+        bütün çerçeveler aynı miktarda dışa alınır; aralarındaki mesafeler korunur, uzun kenar değişmez
+        (63 → 500×180'de dar kenarda 46; iç panel 66 olursa 43). İlk offset "en az ilk offset"in altına inmez.
+        Yine sığmayan çerçeveler atılır, sığan en içteki çerçevenin içi taranır. Kenardaki satırlar (ofset 0) hiç kaymaz.
+      </div>
     </div>
   );
 }

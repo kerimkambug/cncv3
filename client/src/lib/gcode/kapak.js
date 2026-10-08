@@ -654,13 +654,123 @@ function rowFeed(ctx, r) {
   return Number.isFinite(f) && f > 0 ? f : ctx.cfg.cutFeed;
 }
 
+// Diameters of the shop's flat bits (T4/T6/T8/T10) — used to size the fallback
+// clearing pass of a door too narrow for its innermost frames.
+const FLAT_TOOL_DIA = { 4: 4, 6: 6, 8: 8, 10: 10 };
+
+/**
+ * Narrow-door plan (absolute offset mode). A model is laid out for a normal
+ * door; on a narrow one (500 x 180) its frames would eat the middle. Per AXIS:
+ *  - the model's frame lines run from F (first offset) to I (innermost frame);
+ *    the middle panel on that axis is span - 2I;
+ *  - if that panel is below the target — min(narrowMinPanel, the model's own
+ *    panel on its reference door, so a design with a deliberately small middle
+ *    such as 7 NUMARA is left alone) — every frame offset on that axis moves
+ *    outward by the same amount d (the steps between frames stay), but the first
+ *    offset never goes below narrowMinFirst;
+ *  - rows that still do not fit are dropped and the area inside the innermost
+ *    frame that does fit is cleared (tarama) with the model's clearing tool.
+ * Rows at the very edge (offset below F/2, e.g. model 4's edge profile) never move.
+ * Returns null when the door needs nothing.
+ */
+export function planNarrowDoor(width, height, cfg) {
+  if ((cfg.offsetMode || 'relative') !== 'absolute' || cfg.narrowAdapt === false) return null;
+  const rows = cfg.rows || [];
+  const minPanel = numOr(cfg.narrowMinPanel, 60);
+  const minFirst = numOr(cfg.narrowMinFirst, 30);
+
+  // the frame offset(s) of a row (distance of its line from the door edge)
+  const frameOffsets = (r) => {
+    const op = r.operation || 'offset';
+    if (op === 'offset') {
+      const pinned = Number(r.absoluteOffset);
+      return [Number.isFinite(pinned) ? pinned : Number(r.stepOffset) || 0];
+    }
+    if (op === 'carving' || op === 'uzatma') return [Number(r.stepOffset) || 0];
+    if (op === 'tarama') return [Number(r.stepOffset) || 0, Number(r.tarama && r.tarama.innerOffset) || 0];
+    if (op === 'derz' && r.derz && r.derz.insideFrame && r.derz.respectPreviousOffset === false) return [Number(r.derz.margin) || 0];
+    return [];
+  };
+  const all = rows.flatMap(frameOffsets).filter((o) => o > 0);
+  if (!all.length) return null;
+  const F = Math.min(...all);
+  const I = Math.max(...all);
+  const E = F / 2; // below this a coordinate belongs to the edge band and never moves
+
+  const shiftFor = (span, refSpan) => {
+    const refPanel = Number(refSpan) > 0 ? Number(refSpan) - 2 * I : Infinity;
+    const target = Math.min(minPanel, refPanel);
+    const panel = span - 2 * I;
+    if (target <= 0 || panel >= target) return 0;
+    return Math.max(0, Math.min(F - minFirst, (target - panel) / 2));
+  };
+  const dx = shiftFor(width, cfg.refWidth ?? cfg.previewWidth);
+  const dy = shiftFor(height, cfg.refHeight ?? cfg.previewHeight);
+
+  // rows whose (moved) line no longer fits on an axis are dropped
+  const real = (o, d) => (o >= E ? o - d : o);
+  const fits = (r) => frameOffsets(r).filter((o) => o > 0).every((o) => width - 2 * real(o, dx) > 0 && height - 2 * real(o, dy) > 0);
+  const kept = rows.filter(fits);
+  const dropped = rows.length - kept.length;
+  if (!dx && !dy && !dropped) return null;
+
+  let planRows = kept;
+  if (dropped) {
+    // clear inside the innermost frame that still fits, with the clearing tool
+    const lines = kept.filter((r) => ['offset', 'carving'].includes(r.operation || 'offset'));
+    const inner = lines.reduce((m, r) => Math.max(m, ...frameOffsets(r)), 0);
+    const src = kept.find((r) => r.roughing === true) || kept.find((r) => r.operation === 'tarama')
+      || lines.find((r) => Math.max(...frameOffsets(r)) === inner);
+    if (src && inner > 0) {
+      const toolDia = (src.tarama && Number(src.tarama.toolDiameter)) || FLAT_TOOL_DIA[Number(src.toolNo)] || 6;
+      planRows = [...kept, {
+        toolNo: String(src.toolNo), operation: 'tarama', depth: src.depth, feed: src.feed, stepOffset: inner,
+        name: 'dar kapak: iç tarama', tarama: { toolDiameter: toolDia },
+      }];
+    }
+  }
+  return { dx, dy, E, vw: width + 2 * dx, vh: height + 2 * dy, F, I, dropped, cfg: { ...cfg, rows: planRows } };
+}
+
+/**
+ * Maps one line of a program built on the plan's virtual (wider) door back onto
+ * the real door: edge band stays, frames and middle move in by d, the far edge
+ * band by 2d — independently per axis, so modal one-axis lines stay valid. Arc
+ * centres (I/J) are relative and unchanged.
+ */
+function remapNarrowLine(line, plan, offsetX, offsetY) {
+  const mapAxis = (v, d, span) => {
+    if (v < plan.E - 1e-9) return v;
+    if (v > span - plan.E + 1e-9) return v - 2 * d;
+    return v - d;
+  };
+  return line
+    .replace(/X(-?\d+(?:\.\d+)?)/g, (_, v) => `X${kfmt(mapAxis(Number(v), plan.dx, plan.vw) + offsetX)}`)
+    .replace(/Y(-?\d+(?:\.\d+)?)/g, (_, v) => `Y${kfmt(mapAxis(Number(v), plan.dy, plan.vh) + offsetY)}`);
+}
+
+/**
+ * Kapak program for one door. On a narrow door (see planNarrowDoor) the model
+ * is built on a virtual door that is wider on the narrow axis and mapped back,
+ * so every kind of row (offsets, carving ramps, derz, tarama, şablon...) keeps
+ * its shape and only the frames move outward.
+ */
+export function buildKapakGcode(width, height, cfg, offsetX = 0, offsetY = 0, isCombined = false) {
+  const plan = planNarrowDoor(width, height, cfg);
+  if (!plan) return buildKapakGcodeCore(width, height, cfg, offsetX, offsetY, isCombined);
+  return buildKapakGcodeCore(plan.vw, plan.vh, plan.cfg, 0, 0, isCombined)
+    .split('\n')
+    .map((l) => remapNarrowLine(l, plan, offsetX, offsetY))
+    .join('\n');
+}
+
 /**
  * Thin orchestrator: classifies the tool rows into the four emission phases
  * (leading offsets, carving, trailing offsets, derz) and runs them in ArtCAM's
  * machine order over a shared context. The heavy lifting lives in the phase
  * helpers below (emitOffsetPasses / emitCarvingRows / emitDerzRows).
  */
-export function buildKapakGcode(width, height, cfg, offsetX = 0, offsetY = 0, isCombined = false) {
+function buildKapakGcodeCore(width, height, cfg, offsetX = 0, offsetY = 0, isCombined = false) {
   const rows = cfg.rows || [];
   // Feature rows (tarama / sablon / uzatma) carry their own geometry and never take
   // part in the offset chain, exactly like derz and carving rows.

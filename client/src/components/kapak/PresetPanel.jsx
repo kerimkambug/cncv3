@@ -54,7 +54,7 @@ export default function PresetPanel({ cfg, setCfg, rows, setRows }) {
     setImageDataUrl(preset.imageDataUrl || '');
     setDescription(preset.description || '');
     const { name: _n, module: _m, category: _c, imageDataUrl: _i, description: _d, previewWidth: _pw, previewHeight: _ph, dxfFileName: _df, dxfText: _dt, dxfBounds: _db, _id, id: _id2, rows: presetRows, ...rest } = preset;
-    setCfg((prev) => ({ ...prev, ...rest }));
+    setCfg((prev) => ({ ...prev, ...rest, refWidth: preset.previewWidth || null, refHeight: preset.previewHeight || null }));
     setRows(presetRows || []);
     setCategory(preset.category || 'kapak');
     setPreviewWidth(preset.previewWidth || 600);

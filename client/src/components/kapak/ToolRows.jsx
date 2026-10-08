@@ -16,7 +16,7 @@ const ACTIVE_PRESET_KEY = 'empire-cnc-active-tool-preset';
 
 // Presetten makine ayarlarına aktarılabilecek alanlar. rows/offsetMode dışarıda
 // tutulur çünkü onlar zaten tabloda ya da mod anahtarında karşılanıyor.
-const CFG_FIELDS = ['thickness', 'spindleSpeed', 'safeZ', 'toolChangeZ', 'homeZ', 'plungeFeed', 'cutFeed', 'topStyle', 'riseRatio'];
+const CFG_FIELDS = ['thickness', 'spindleSpeed', 'safeZ', 'toolChangeZ', 'homeZ', 'plungeFeed', 'cutFeed', 'topStyle', 'riseRatio', 'narrowAdapt', 'narrowMinPanel', 'narrowMinFirst'];
 
 // Preset satırları düzenlenirken nesne referansı paylaşılırsa, tabloda bir
 // satıra yapılan değişiklik kayıtlı preseti de sessizce bozabilir. Satırlar
@@ -42,7 +42,11 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
       CFG_FIELDS.forEach((f) => {
         if (preset[f] !== undefined && preset[f] !== null && preset[f] !== '') patch[f] = preset[f];
       });
-      if (Object.keys(patch).length) setCfg((prev) => ({ ...prev, ...patch }));
+      // the model's reference door: narrow-door adaptation never squeezes a design
+      // whose middle panel is small on purpose (see planNarrowDoor)
+      patch.refWidth = preset.previewWidth || null;
+      patch.refHeight = preset.previewHeight || null;
+      setCfg((prev) => ({ ...prev, ...patch }));
     }
   }
 

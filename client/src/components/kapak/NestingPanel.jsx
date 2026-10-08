@@ -184,7 +184,8 @@ export default function NestingPanel({ cfg, plateCfg }) {
       const id = getPresetId(preset);
       if (!usedIds.has(id)) return;
       const { _id, id: _id2, module, category, imageDataUrl, description, previewWidth, previewHeight, createdAt, updatedAt, ...rest } = preset;
-      map[id] = rest; // { name, thickness, spindleSpeed, safeZ, ..., offsetMode, topStyle, riseRatio, rows }
+      // refWidth/refHeight: the model's reference door (narrow-door adaptation, see planNarrowDoor)
+      map[id] = { ...rest, refWidth: previewWidth || null, refHeight: previewHeight || null };
     });
     return map;
   }

@@ -246,3 +246,65 @@ describe('every preset moves exactly with its plate position (nesting)', async (
     });
   }
 });
+
+describe('narrow doors: frames move out on the narrow axis only', async () => {
+  const { parseGcode } = await import('./gcodeToDxf.js');
+  const { planNarrowDoor } = await import('./kapak.js');
+  const presets = JSON.parse((await import('node:fs')).readFileSync(new URL('../../../../server/data/presets.json', import.meta.url), 'utf8'));
+  const m1 = presets.find((p) => p.name === '1 NUMARA');
+  const m4 = presets.find((p) => p.name === '4 NUMARA');
+  const cuts = (g) => parseGcode(g).segments.filter((s) => s.type !== 'G0');
+  // the carving V (T1 at 6 mm) runs exactly on the first offset
+  const carvingBox = (g) => {
+    const s = cuts(g).filter((x) => x.tool === '1' && Math.abs(x.to.z - 12) < 1e-6);
+    return [Math.min(...s.map((x) => x.to.x)), Math.min(...s.map((x) => x.to.y))];
+  };
+
+  it('500 x 180: long side keeps 63, the 180 side goes to 46 (66 mm panel setting -> 43)', () => {
+    expect(carvingBox(buildKapakGcode(500, 180, m1))).toEqual([63, 46]);
+    expect(carvingBox(buildKapakGcode(500, 180, { ...m1, narrowMinPanel: 66 }))).toEqual([63, 43]);
+    expect(carvingBox(buildKapakGcode(180, 500, m1))).toEqual([46, 63]);
+  });
+
+  it('steps between frames are kept (carving 63 -> inner V +14 on both axes)', () => {
+    const plan = planNarrowDoor(500, 180, m1);
+    expect(plan.dx).toBe(0);
+    expect(plan.dy).toBeCloseTo(17, 6);
+    const t1 = cuts(buildKapakGcode(500, 180, m1)).filter((x) => x.tool === '1' && Math.abs(x.to.z - 12) < 1e-6 && x.from.z === x.to.z);
+    expect(Math.min(...t1.map((x) => x.to.y))).toBeCloseTo(46, 2); // carving line
+    expect(Math.max(...t1.filter((x) => x.to.y < 90).map((x) => x.to.y))).toBeCloseTo(60, 2); // inner V = 77 - 17
+  });
+
+  it('first offset never below the minimum; what does not fit is dropped and cleared inside', () => {
+    const g = buildKapakGcode(500, 80, m1);
+    const plan = planNarrowDoor(500, 80, m1);
+    expect(plan.dy).toBeCloseTo(33, 6); // 63 -> 30 (narrowMinFirst)
+    expect(plan.dropped).toBeGreaterThan(0);
+    expect(plan.cfg.rows.some((r) => r.name === 'dar kapak: iç tarama')).toBe(true);
+    const all = cuts(g);
+    all.forEach((s) => {
+      expect(s.to.y).toBeGreaterThanOrEqual(0);
+      expect(s.to.y).toBeLessThanOrEqual(80);
+    });
+    // no 2.5 mm derz left on such a door
+    expect(all.some((s) => Math.abs(s.to.z - 15.5) < 1e-6)).toBe(false);
+  });
+
+  it('edge rows (model 4 edge profile at offset 0) and normal doors are untouched', () => {
+    const edge = cuts(buildKapakGcode(500, 180, m4)).filter((s) => s.tool === '5');
+    expect(Math.min(...edge.map((s) => s.to.y))).toBeCloseTo(0, 6);
+    expect(planNarrowDoor(500, 600, m1)).toBeNull();
+    expect(buildKapakGcode(500, 180, { ...m1, narrowAdapt: false })).not.toBe(buildKapakGcode(500, 180, m1));
+    expect(planNarrowDoor(500, 180, { ...m1, narrowAdapt: false })).toBeNull();
+  });
+
+  it('a narrow door still moves exactly with its plate position (nesting)', () => {
+    const a = parseGcode(buildKapakGcode(500, 180, m1, 0, 0, true)).segments;
+    const b = parseGcode(buildKapakGcode(500, 180, m1, 700, 250, true)).segments;
+    expect(b.length).toBe(a.length);
+    a.forEach((s, i) => {
+      expect(b[i].to.x - s.to.x).toBeCloseTo(700, 2);
+      expect(b[i].to.y - s.to.y).toBeCloseTo(250, 2);
+    });
+  });
+});
