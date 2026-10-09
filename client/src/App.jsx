@@ -9,6 +9,7 @@ import DerzBolme from './components/kapak/DerzBolme.jsx';
 import AtolyePage from './components/kapak/AtolyePage.jsx';
 import CamModule from './components/cam/CamModule.jsx';
 import PanjurModule from './components/panjur/PanjurModule.jsx';
+import CerezlikModule from './components/cerezlik/CerezlikModule.jsx';
 import ReliefGenerator from './components/ReliefGenerator.jsx';
 import GcodeDxfConverter from './components/GcodeDxfConverter.jsx';
 import { useKapakWorkspace } from './hooks/useKapakWorkspace.js';
@@ -48,6 +49,7 @@ export default function App() {
         )}
         {current === 'cam' && <CamModule />}
         {current === 'panjur' && <PanjurModule />}
+        {current === 'cerezlik' && <CerezlikModule />}
         {current === 'relief' && <ReliefGenerator />}
         {current === 'circle' && <DaireKesimi cfg={workspace.cfg} />}
         {current === 'derz' && <DerzBolme cfg={workspace.cfg} />}

@@ -7,6 +7,7 @@ export const MAIN_SCREENS = [
   { key: 'nesting', label: 'Nesting' },
   { key: 'cam', label: 'Cam' },
   { key: 'panjur', label: 'Panjur' },
+  { key: 'cerezlik', label: 'Çerezlik' },
   { key: 'relief', label: '3D Rölyef' },
 ];
 // Occasional helpers, under "Araçlar".
