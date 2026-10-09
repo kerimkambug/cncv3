@@ -1,7 +1,7 @@
 // Built-in parametric models: common, generic board / tray / snack-dish forms
 // drawn from parameters (no DXF needed). Every model returns a part in the same
 // form as a DXF part: { outline, comps: [{pts, kind, islands, depth?}], lines }.
-import { area, bbox, difference, ensureCCW, offset, roundShape, union } from './geom.js';
+import { area, bbox, difference, ensureCCW, offset, roundShape, transform, union } from './geom.js';
 
 const TAU = Math.PI * 2;
 
@@ -171,6 +171,47 @@ export const CATALOG = [
         outline,
         comps: [{ pts: pocket, islands: [], kind: 'cep', depth: p.d }, slot(p.end / 2, p.W / 2, 24, sw), slot(p.L - p.end / 2, p.W / 2, 24, sw)],
       };
+    },
+  },
+  {
+    id: 'sunum-cift-kalp', group: 'Sunumluk', name: 'Çift kalp sunumluk',
+    params: [P('W', 'Tek kalp eni', 260, 150, 400), P('ov', 'İç içe geçme', 30, 10, 45), P('rim', 'Kenar eni', 14, 10, 30), P('d', 'Derinlik', 8, 3, 15, 0.5)],
+    build: (p) => {
+      // two hearts leaning outwards, overlapping by ov % of a width; the right one lies on top
+      const h = heartPts(p.W);
+      const shift = p.W * (1 - p.ov / 100);
+      const left = transform(h, 10, 0, 0);
+      const right = transform(h, -10, shift, 0);
+      const outline = biggest(roundShape(outlineOf([left, right], 15), [], 5)).outer;
+      const bowlR = offset([right], -p.rim);
+      const bowlL = difference(offset([left], -p.rim), [right]);
+      const comps = [];
+      for (const sh of [...bowlL, ...bowlR.map((o) => ({ outer: o, holes: [] }))]) {
+        for (const r of roundShape(sh.outer, sh.holes, 9)) if (area(r.outer) > 400) comps.push({ pts: r.outer, islands: r.holes, kind: 'cep', depth: p.d });
+      }
+      return { outline, comps };
+    },
+  },
+  {
+    id: 'sunum-yinyang', group: 'Sunumluk', name: 'Yin-yang sunumluk (yarım)',
+    params: [P('D', 'Takım çapı', 360, 220, 600), P('g', 'İki yarı arası boşluk', 6, 0, 20), P('cup', 'Fincan yuvası çapı', 80, 0, 120), P('cd', 'Fincan yuvası derinliği', 5, 2, 10, 0.5), P('rim', 'Kenar eni', 14, 10, 30), P('wall', 'Ara duvar', 10, 6, 25), P('d', 'Derinlik', 8, 3, 15, 0.5)],
+    build: (p) => {
+      // one half of the yin-yang disc; the other half is the same piece turned 180°
+      const R = p.D / 2;
+      const halfDisc = [...arcPts(0, 0, R, Math.PI / 2, 1.5 * Math.PI)];
+      const head = circlePts(0, R / 2, R / 2);
+      const bite = circlePts(0, -R / 2, R / 2);
+      const comma = biggest(difference(union([halfDisc, head]).map((sh) => sh.outer), [bite])).outer;
+      const piece = biggest(roundShape(offset([comma], -p.g / 2)[0] || comma, [], 8)).outer;
+      const comps = [];
+      const cupR = Math.min(p.cup / 2, R / 2 - p.rim - p.g / 2 - 4);
+      let walls = [];
+      if (p.cup > 0 && cupR > 15) {
+        comps.push({ pts: circlePts(0, R / 2, cupR), islands: [], kind: 'cep', depth: p.cd });
+        walls = [circlePts(0, R / 2, cupR + p.wall)];
+      }
+      comps.push(...bowls(piece, p.rim, walls, 9, p.d));
+      return { outline: piece, comps };
     },
   },
   {
