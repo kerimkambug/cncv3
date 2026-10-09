@@ -8,8 +8,8 @@ import { reliefMachineZ } from '../../../../shared/gcode/reliefConvention.js';
 export const CNC_RELIEF_PRESETS = {
   wood_mdf: {
     id: 'wood_mdf',
-    name: '🪵 Ahşap & MDF Kabartma (Pürüzsüz Yüzey — Önerilen)',
-    desc: 'Ahşap liflerinde çapak yapmayan, basamaksız ve heykelsi pürüzsüz yüzey',
+    name: 'Ahşap / MDF',
+    desc: 'Yumuşak geçişli, pürüzsüz yüzey.',
     detailBoost: 0.15,
     smoothRadius: 1,
     edgeCrispness: 0.20,
@@ -21,8 +21,8 @@ export const CNC_RELIEF_PRESETS = {
   },
   stone_marble: {
     id: 'stone_marble',
-    name: '🏛️ Mermer, Taş & Alçı (Hassas Hatlar)',
-    desc: 'Sert yüzeyler için mikron hassasiyetinde keskin detay ve derinlik',
+    name: 'Mermer / taş / alçı',
+    desc: 'Keskin hatlar ve belirgin derinlik.',
     detailBoost: 0.22,
     smoothRadius: 1,
     edgeCrispness: 0.28,
@@ -34,8 +34,8 @@ export const CNC_RELIEF_PRESETS = {
   },
   portrait_photo: {
     id: 'portrait_photo',
-    name: '🖼️ Fotoğraftan Doğal Portre Rölyef',
-    desc: 'İnsan yüzleri ve ten dokusu için gürültüsüz, yumuşak anatomik geçiş',
+    name: 'Portre',
+    desc: 'Yüzler için yumuşak, gürültüsüz geçiş.',
     detailBoost: 0.12,
     smoothRadius: 1,
     edgeCrispness: 0.15,

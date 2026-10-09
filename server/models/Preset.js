@@ -4,9 +4,10 @@ const ToolRowSchema = new mongoose.Schema(
   {
     name: { type: String, default: '' },
     toolNo: { type: String, required: true },
-    operation: { type: String, enum: ['offset', 'derz', 'carving'], default: 'offset' },
+    operation: { type: String, enum: ['offset', 'derz', 'carving', 'tarama', 'uzatma', 'sablon'], default: 'offset' },
     depth: { type: Number, required: true },
-    stepOffset: { type: Number, required: true },
+    // not required: a sablon row carries its own anchored geometry and has no offset
+    stepOffset: { type: Number, default: 0 },
     // Rows pinned to an EXACT contour from the part edge, in mm, independent of
     // stepOffset. kapak.js's calculateAdaptiveOffsets freezes the offset chain at
     // this value and every later row keeps adding its own step on top — that is
@@ -74,7 +75,23 @@ const ToolRowSchema = new mongoose.Schema(
       // spindleSpeed: per-derz-block spindle override (2 NUMARA's derz block runs
       //   at S15000 while the rest of the program is S18000). Also read by kapak.js.
       spindleSpeed: { type: Number, default: null },
+      // count / stagger / lineFromPct / lineToPct / stopBox: see client derz.js
+      //   (fixed line count, half-step lines, along-line range, kulp box of model 4).
+      count: { type: Number, default: null },
+      stagger: { type: Boolean, default: false },
+      lineFromPct: { type: Number, default: null },
+      lineToPct: { type: Number, default: null },
+      stopBox: { type: mongoose.Schema.Types.Mixed, default: undefined },
+      // frameBevel / bitAngle: split from the VISIBLE panel edge (frame V bevel,
+      //   derz groove width) so the outer strips equal the inner ones (1 NUMARA).
+      frameBevel: { type: Number, default: null },
+      bitAngle: { type: Number, default: null },
     },
+    // Feature rows (client features.js). Mixed, because their settings are small
+    // plain objects and a sablon carries a long list of encoded paths.
+    tarama: { type: mongoose.Schema.Types.Mixed, default: undefined },
+    uzatma: { type: mongoose.Schema.Types.Mixed, default: undefined },
+    sablon: { type: mongoose.Schema.Types.Mixed, default: undefined },
   },
   { _id: false }
 );
@@ -100,6 +117,10 @@ const PresetSchema = new mongoose.Schema(
     topStyle: { type: String, enum: ['flat', 'semicircle', 'pointed'], default: 'flat' },
     // Rise ratio for topStyle:'pointed' (rise = innerW * riseRatio). Ignored otherwise.
     riseRatio: { type: Number, default: 0.125 },
+    // Narrow-door adaptation (client kapak.js planNarrowDoor).
+    narrowAdapt: { type: Boolean, default: true },
+    narrowMinPanel: { type: Number, default: null },
+    narrowMinFirst: { type: Number, default: null },
     rows: { type: [ToolRowSchema], default: [] },
     // Cam-specific fields (unused for module:'kapak')
     camSettings: {

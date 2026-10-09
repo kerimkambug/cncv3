@@ -28,7 +28,7 @@ export default function CamTaramaPanel({ cfg }) {
 
   return (
     <div className="card">
-      <h2>Tarama (deneysel)</h2>
+      <h2>Tarama</h2>
       <button type="button" className="btn-accent2" style={{ marginTop: 0 }} onClick={generate}>Tarama G-code Üret</button>
       {message && <div className={message.type === 'err' ? 'err' : 'ok'} style={{ display: 'block' }}>{message.text}</div>}
 

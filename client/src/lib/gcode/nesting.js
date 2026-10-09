@@ -6,15 +6,14 @@
 //    - Aşama 2 (İşleme): Tanımlı bıçak sırası (T7, T2, T9 vs.) ile kapak motifi/profili işlenir.
 //    - Aşama 3 (Final Kesim - İşleme Sonrası): 6mm kesim bıçağıyla Z0'a kadar inilerek parça plakadan ayrılır.
 // 3. Sıralama: Sağ en üstteki parçadan sola doğru, satır satır yukarıdan aşağıya (sağdan sola).
-import { fmt, computeCumOffsets, emitRectCutPath } from './common.js';
+import { fmt, emitRectCutPath } from './common.js';
 import { numOr, toFiniteNumber, validateNestingGap, validateDepthAgainstThickness } from '../../../../shared/gcode/validation.js';
 import { parseNestImportText } from '../../../../shared/nest/csvImport.js';
 export { parseNestImportText };
-import { computeDerzPositions, trimDerzLine, derzBoxLine } from './derz.js';
 import { parseGcode } from './gcodeToDxf.js';
 import { buildCamPartProgram } from './camTarama.js';
 import { rowNeedsOffset } from './features.js';
-import { calculateAdaptiveOffsets, computeTopCurve, buildKapakGcode } from './kapak.js';
+import { buildKapakGcode } from './kapak.js';
 
 function rectsIntersect(a, b) {
   return a.x < b.x + b.w - 1e-9 && a.x + a.w > b.x + 1e-9 && a.y < b.y + b.h - 1e-9 && a.y + a.h > b.y + 1e-9;
@@ -261,93 +260,10 @@ export function orderPartsTopRightToLeft(parts) {
 }
 
 /**
- * @param {object} opts - { plateW, plateH, edge, gap, rotate, parts }
- * @returns {{plates: Array}}
+ * @param {object} opts - { plateW, plateH, edge, gap, rotate, parts,
+ *   maxVariants?, timeBudgetMs?, gapSafety? }
+ * @returns {{plates: Array, search: {variants:number, ms:number, best:string, utilization:number}}}
  */
-/**
- * Single source of truth for one placed part's derz (divider) geometry.
- *
- * Mirrors kapak.js's rules so a nested part is cut exactly like the same part cut
- * standalone:
- *  - the divider MARGIN builds on the cumulative offset of the last offset row
- *    (unless derz.respectPreviousOffset is false),
- *  - a VERTICAL divider starts on the bottom frame edge the FIRST offset row cut
- *    (rows[0]'s cumulative offset) with NO bottom overshoot — overshooting there
- *    would drive the tool into the neighbouring part in a nest,
- *  - a vertical divider ends on the arch (topStyle != flat) when its X lies inside
- *    the arc, otherwise at the top margin + overshootY,
- *  - a HORIZONTAL divider runs from margin - overshootX to width - margin + overshootX.
- *
- * @param {object} part - a placed part ({x, y, placedWidth, placedHeight})
- * @param {object} row - the derz tool row (row.derz carries the options)
- * @param {Array} offsetRows - the OFFSET-only rows (derz/carving removed), in order
- * @param {{prevOffset:number, topStyle?:string, riseRatio?:number}} ctx
- * @returns {{vertical:boolean, positions:number[], segments:Array<{x1:number,y1:number,x2:number,y2:number}>}}
- */
-export function buildPartDerzGeometry(part, row, offsetRows = [], ctx = {}) {
-  const derz = row.derz || {};
-  const prevOffset = numOr(ctx.prevOffset, 0);
-  const margin = prevOffset + numOr(derz.margin, 0);
-  const opts = {
-    width: part.placedWidth,
-    height: part.placedHeight,
-    yon: derz.yon || 'dikey',
-    margin,
-    spacing: numOr(derz.spacing, null) ?? numOr(row.stepOffset, 60),
-    autoFit: derz.autoFit !== false,
-    insideFrame: derz.insideFrame === true,
-    stagger: derz.stagger === true,
-    count: numOr(derz.count, null),
-    edgeExtra: numOr(derz.edgeExtra, 0),
-  };
-  const positions = computeDerzPositions(opts).positions;
-  const vertical = (derz.yon || 'dikey') === 'dikey';
-  // A derz overshoot of 0 is meaningful ("stop on the frame edge"); numOr keeps
-  // it instead of the old `|| 0`-style coercion that also swallowed an explicit 0.
-  const overshootX = numOr(derz.overshootX ?? derz.overshoot, 0);
-  const overshootY = numOr(derz.overshootY ?? derz.overshoot, 0);
-
-  // The bottom frame edge is the FIRST offset row's contour, not the derz margin
-  // box (kapak.js: rows[0].stepOffset).
-  const firstOffsetCum = offsetRows.length
-    ? computeCumOffsets([offsetRows[0]], 'relative')[0]
-    : 0;
-  const startYOverride = Number.isFinite(Number(derz.startY)) ? Number(derz.startY) : null;
-  const frameY = startYOverride != null ? startYOverride : firstOffsetCum;
-
-  // The arch belongs to the OUTERMOST offset contour, so the curve is built from
-  // that rectangle — using the derz margin would shrink the radius.
-  const shapeOffset = firstOffsetCum;
-  const shapeXl = part.x + shapeOffset;
-  const shapeXr = part.x + part.placedWidth - shapeOffset;
-  const shapeYt = part.y + part.placedHeight - shapeOffset;
-  const curve = (ctx.topStyle && ctx.topStyle !== 'flat')
-    ? computeTopCurve(shapeXl, shapeXr, shapeYt, ctx.topStyle, ctx.riseRatio)
-    : null;
-
-  const W = part.placedWidth;
-  const H = part.placedHeight;
-  const segments = positions.map((pos) => {
-    if (!vertical) {
-      const y = part.y + pos;
-      const [s, e] = trimDerzLine(derz, false, pos, margin - overshootX, W - margin + overshootX, W, H, positions.indexOf(pos), positions.length);
-      return { x1: part.x + s, y1: y, x2: part.x + e, y2: y };
-    }
-    const x = part.x + pos;
-    const posAbs = part.x + pos;
-    // Same top end as kapak.js: arch, else startY mirrored, else margin + overshoot.
-    const y2 = (curve && posAbs > shapeXl && posAbs < shapeXr)
-      ? curve.yEnd(posAbs)
-      : part.y + (startYOverride != null ? H - startYOverride : H - margin + overshootY);
-    const [s, e] = trimDerzLine(derz, true, pos, frameY, y2 - part.y, W, H, positions.indexOf(pos), positions.length);
-    return { x1: x, y1: part.y + s, x2: x, y2: part.y + e };
-  });
-  const box = derzBoxLine(derz, positions, H);
-  if (box) segments.push({ x1: part.x + box.x1, y1: part.y + box.y, x2: part.x + box.x2, y2: part.y + box.y });
-
-  return { vertical, positions, segments, margin };
-}
-
 export function calculateNesting(opts) {
   const { plateW, plateH, edge = 0, gap = 0, rotate = true, parts: inputParts } = opts;
   const gapCfg = opts.gapSafety || {};
@@ -562,40 +478,6 @@ function getMachineParams(cfg) {
 // an explicit `absoluteOffset` pins a row to an exact contour and the adaptive S0
 // shrink must NOT move it. Passing the full cfg.rows with a filtered index was
 // shifting every contour by however many derz/carving rows came before it.
-export function getAdaptiveRowPartCoords(parts, rows, rowIdx, offsetMode = 'relative') {
-  if (!parts || !rows || !rows[rowIdx]) return [];
-  const coords = [];
-  const pinned = Number(rows[rowIdx] && rows[rowIdx].absoluteOffset);
-  const hasPinned = Number.isFinite(pinned);
-  parts.forEach((part) => {
-    const adaptiveRows = calculateAdaptiveOffsets(
-      part.placedWidth,
-      part.placedHeight,
-      rows,
-      offsetMode
-    );
-    const adRow = adaptiveRows[rowIdx];
-    if (!adRow || adRow.skipped) return;
-
-    const offX = hasPinned ? pinned : adRow.leftOffset;
-    const offY = hasPinned ? pinned : adRow.bottomOffset;
-    const x1 = part.x + offX;
-    const y1 = part.y + offY;
-    const x2 = part.x + part.placedWidth - offX;
-    const y2 = part.y + part.placedHeight - offY;
-    coords.push({
-      part,
-      adRow,
-      x1,
-      y1,
-      x2,
-      y2,
-      w: x2 - x1,
-      h: y2 - y1,
-    });
-  });
-  return coords;
-}
 
 /**
  * Emits outer cut rectangle toolpath passes for vacuum-safe ordered parts.

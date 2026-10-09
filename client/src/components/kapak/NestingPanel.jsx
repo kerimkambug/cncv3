@@ -14,6 +14,7 @@ import { validateNestingGap } from '../../../../shared/gcode/validation.js';
 import { validateCarvingWarnings } from '../../lib/gcode/kapak.js';
 import { useCtrlEnter } from '../../hooks/useCtrlEnter.js';
 import { usePresets } from '../../hooks/usePresets.js';
+import { sortPresets } from '../../hooks/useKapakWorkspace.js';
 
 function getPresetId(p) { return p._id || p.id; }
 
@@ -49,7 +50,7 @@ function hashHue(str) {
   return Math.abs(h) % 360;
 }
 
-export default function NestingPanel({ cfg, plateCfg }) {
+export default function NestingPanel({ cfg, plateCfg, defaultModelName }) {
   // Nesting, Ayarlar bölümündeki ortak plaka ölçülerini kullanır.
   const [plateWidth, setPlateWidth] = useState(plateCfg?.width || 2100);
   const [plateHeight, setPlateHeight] = useState(plateCfg?.height || 2800);
@@ -254,8 +255,8 @@ export default function NestingPanel({ cfg, plateCfg }) {
       const warnings = validateCarvingWarnings(cfg.rows);
       setMessage({
         type: 'ok',
-        text: `${nest.plates.length} plaka bulundu (${nest.search.variants} yerleşim varyasyonu denendi, en az plaka + en toplu son plaka seçildi; plaka kullanımı %${(nest.search.utilization * 100).toFixed(1)}). Tahmini süre: ~${minutes.toFixed(1)} dk.${enableOuterCut ? ' (1.5mm Ön Çizme + İşleme + Z0 Final Kesim dahil — Sağ üstten sola)' : ''
-          }. Sonuçtan memnunsan "CNC Dosyalarını İndir" butonuna bas.${warnings.length ? `\n\nUyarı:\n${warnings.join('\n')}` : ''}`,
+        text: `${nest.plates.length} plaka · plaka kullanımı %${(nest.search.utilization * 100).toFixed(1)} · tahmini süre ~${minutes.toFixed(1)} dk${enableOuterCut ? ' (dış kesim dahil)' : ''
+          }.${warnings.length ? `\n\nUyarı:\n${warnings.join('\n')}` : ''}`,
       });
     } catch (e) {
       setMessage({ type: 'err', text: e.message });
@@ -350,7 +351,7 @@ export default function NestingPanel({ cfg, plateCfg }) {
       ctx.font = '14px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('Henüz nesting hesaplanmadı.', canvas.width / 2, canvas.height / 2);
+      ctx.fillText('Parçaları ekleyip Nesting Hesapla’ya basın.', canvas.width / 2, canvas.height / 2);
       return;
     }
 
@@ -477,7 +478,7 @@ export default function NestingPanel({ cfg, plateCfg }) {
       if (r.name && !t.names.includes(r.name)) t.names.push(r.name);
     });
     return {
-      label: legendMultiModel ? (group.key === '__default__' ? 'Ayarlar' : (group.cfg.name || 'Model')) : null,
+      label: legendMultiModel ? (group.key === '__default__' ? (defaultModelName || 'Seçili model') : (group.cfg.name || 'Model')) : null,
       tools,
     };
   });
@@ -486,8 +487,8 @@ export default function NestingPanel({ cfg, plateCfg }) {
     <div className="card">
       <div className="nesting-grid">
         <div className="nesting-settings">
-          <div className="card-lite">
-            <h3>Plaka ve Boşluklar</h3>
+          <details className="card-lite collapsible">
+            <summary><h3>Plaka ve Boşluklar</h3><span className="hint">plaka, kenar boşluğu, parça arası, döndürme</span></summary>
             <div className="row2">
               <div>
                 <label>Plaka genişliği X (mm)</label>
@@ -545,10 +546,10 @@ export default function NestingPanel({ cfg, plateCfg }) {
               />
               Parçaları 90° döndürmeye izin ver
             </label>
-          </div>
+          </details>
 
-          <div className="card-lite">
-            <h3>Dış Kesim (Ebatlama)</h3>
+          <details className="card-lite collapsible">
+            <summary><h3>Dış Kesim (Ebatlama)</h3><span className="hint">ön çizme ve son kesim bıçağı</span></summary>
             <label className="checkbox-row" style={{ marginTop: 0, fontWeight: 600 }}>
               <input
                 type="checkbox"
@@ -591,15 +592,15 @@ export default function NestingPanel({ cfg, plateCfg }) {
                   </div>
                 </div>
                 <div className="hint" style={{ marginTop: 8 }}>
-                  <b>3 Aşamalı Kesim:</b><br />
+                  <b>Kesim sırası:</b><br />
                   1. İşleme öncesi {cutToolDia}mm bıçakla {cutToolDia / 2}mm dıştan {preCutDepth}mm derinliğe ön çizme atılır.<br />
-                  2. Bıçaklar tablosundaki motif/profil bıçakları sırayla işlenir.<br />
+                  2. Parçalar kendi modelinin bıçaklarıyla işlenir.<br />
                   3. İşleme bitince {cutToolDia}mm bıçakla Z0'a inilip parçalar ayrılır.<br />
-                  <b>Sıra:</b> Sağ en üstteki parçadan sola doğru.
+                  Parçalar en üst satırdan başlayarak sağdan sola kesilir.
                 </div>
               </div>
             )}
-          </div>
+          </details>
 
           <div className="card-lite">
             <h3>Parçalar</h3>
@@ -667,9 +668,9 @@ export default function NestingPanel({ cfg, plateCfg }) {
                         title="Ayarlar = Ayarlar/Bıçaklar panelindeki aktif model. Cam kapak = tarama + iç kesim (ayarları satırın altında)."
                         onChange={(e) => updatePart(idx, 'presetId', e.target.value)}
                       >
-                        <option value="">Ayarlar</option>
+                        <option value="">{defaultModelName ? `Seçili: ${defaultModelName}` : 'Seçili model'}</option>
                         <option value={CAM_ID}>Cam kapak</option>
-                        {presets.map((preset) => (
+                        {sortPresets(presets).map((preset) => (
                           <option key={getPresetId(preset)} value={getPresetId(preset)}>
                             {preset.name}{preset.category === 'kapi' ? ' (Kapı)' : ''}
                           </option>
@@ -735,7 +736,7 @@ export default function NestingPanel({ cfg, plateCfg }) {
                 style={{ flex: 1 }}
                 onClick={triggerImport}
               >
-                📄 İçe Aktar
+                İçe Aktar
               </button>
             </div>
             <input
@@ -772,11 +773,11 @@ export default function NestingPanel({ cfg, plateCfg }) {
               disabled={!result}
               onClick={downloadDxfFiles}
             >
-              📐 DXF İndir (.zip)
+              DXF İndir (.zip)
             </button>
           </div>
           <div className="hint">
-            Sığmayan parçalar otomatik olarak sonraki plakaya aktarılır. "CNC Dosyaları (.nc)" ile G-code, "DXF İndir" ile AutoCAD/Alphacam/ArtCAM uyumlu katmanlı DXF dosyaları alabilirsiniz.
+            Plakaya sığmayan parçalar bir sonraki plakaya aktarılır. Her plaka için ayrı bir G-code ve DXF dosyası oluşturulur.
           </div>
 
           {message && (
@@ -790,7 +791,7 @@ export default function NestingPanel({ cfg, plateCfg }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
             <div className="plate-label" style={{ margin: 0, flex: 1 }}>
               {!result
-                ? 'Henüz nesting hesaplanmadı.'
+                ? 'Parçaları ekleyip Nesting Hesapla’ya basın.'
                 : `Önizleme: Plaka ${result.plates[selectedPlateIndex]?.number || 1} / ${result.plates.length} — ${result.plateW} × ${result.plateH} mm — sıra: Sağ üstten sola`}
             </div>
             <label
@@ -840,7 +841,7 @@ export default function NestingPanel({ cfg, plateCfg }) {
               {enableOuterCut && (
                 <span className="legend-chip">
                   <span className="legend-dot" style={{ background: '#2fd08a' }} />
-                  T{cutToolNo} Dış Kesim (6mm / 3mm dıştan)
+                  T{cutToolNo} Dış kesim ({cutToolDia} mm)
                 </span>
               )}
               {legendGroups.map((group, gi) => (

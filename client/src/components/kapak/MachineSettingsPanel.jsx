@@ -140,10 +140,8 @@ export default function MachineSettingsPanel({ cfg, setCfg, plateCfg, setPlateCf
         </div>
       )}
       <div className="hint">
-        Dar kenarda (ör. 500×180'in 180'i) orta panel bu değerden küçük kalıyorsa ilk offset ve ondan sonraki
-        bütün çerçeveler aynı miktarda dışa alınır; aralarındaki mesafeler korunur, uzun kenar değişmez
-        (63 → 500×180'de dar kenarda 46; iç panel 66 olursa 43). İlk offset "en az ilk offset"in altına inmez.
-        Yine sığmayan çerçeveler atılır, sığan en içteki çerçevenin içi taranır. Kenardaki satırlar (ofset 0) hiç kaymaz.
+        Dar kenarda orta panel bu değerin altında kalırsa çerçeveler kenara doğru kaydırılır; aralarındaki mesafeler korunur.
+        Sığmayan çerçeveler çıkarılır ve kalan alanın içi taranır.
       </div>
     </div>
   );

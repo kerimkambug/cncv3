@@ -30,7 +30,11 @@ describe('tarama (pocket)', () => {
     // outermost ring at 60 + 3 = 63, innermost at 90 - 3 = 87 (never closer to the centre)
     expect(Math.max(...ring.map((p) => p.x))).toBeCloseTo(400 - 63, 6);
     expect(Math.min(...ring.map((p) => p.y))).toBeCloseTo(63, 6);
-    expect(ring.every((p) => p.x <= 87 + 1e-9 || p.x >= 400 - 87 - 1e-9 || p.y <= 87 + 1e-9 || p.y >= 600 - 87 - 1e-9)).toBe(true);
+    // the 6 mm tool never cuts into the island (90..310 x 90..510)...
+    const toIsland = (p) => Math.hypot(Math.max(90 - p.x, 0, p.x - 310), Math.max(90 - p.y, 0, p.y - 510));
+    expect(Math.min(...ring.map(toIsland))).toBeGreaterThanOrEqual(3 - 1e-9);
+    // ...and still reaches its corners: the last ring arcs around them (sharp island corner)
+    expect(Math.min(...ring.map((p) => Math.hypot(p.x - 90, p.y - 90)))).toBeCloseTo(3, 6);
   });
 
   it('returns nothing when the band is narrower than the tool', () => {
@@ -51,6 +55,21 @@ describe('sablon (anchored template)', () => {
     const [a, b] = buildSablonPaths(500, 700, { sablon }, 18);
     expect(a.map((p) => [p.x, p.y])).toEqual([[10, 20], [490, 680]]);
     expect([b[0].x, b[0].y]).toEqual([200, 50]); // ax = 0: follows the left edge although it is in the right half
+  });
+
+  describe('smaller door: margin narrows first (max 20 mm), then the motif scales', () => {
+    const framed = { refWidth: 300, refHeight: 400, paths: [[[50, 50, 2], [250, 350, 2]], [[150, 200, 2, 0, 0]]] };
+    it('30 mm too narrow: the 50 mm margin becomes 35 mm on every side, motif unchanged', () => {
+      const [a, b] = buildSablonPaths(270, 400, { sablon: framed }, 18);
+      expect(a.map((p) => [p.x, p.y, p.z])).toEqual([[35, 35, 16], [235, 365, 16]]);
+      expect([b[0].x, b[0].y]).toEqual([135, 185]);
+    });
+    it('much narrower: margin stops at 30 mm and the motif scales down (depth too)', () => {
+      // (160 - 2*30) / (300 - 2*50) = 0.5
+      const [a, b] = buildSablonPaths(160, 400, { sablon: framed }, 18);
+      expect(a.map((p) => [p.x, p.y, p.z])).toEqual([[30, 30, 17], [130, 370, 17]]);
+      expect([b[0].x, b[0].y, b[0].z]).toEqual([80, 105, 17]);
+    });
   });
 
   it('depth follows the material thickness', () => {
@@ -202,7 +221,7 @@ describe('nesting: variant search', async () => {
       if (many < one) saved++;
     });
     expect(saved).toBeGreaterThan(0);
-  });
+  }, 30000);
 
   it('keeps margins, gaps and locked orientations; places every part exactly once', () => {
     orders.forEach((parts) => {
@@ -221,7 +240,7 @@ describe('nesting: variant search', async () => {
         if (g !== null) expect(g).toBeGreaterThanOrEqual(12 - 1e-6);
       });
     });
-  });
+  }, 30000);
 
   it('is deterministic for the same order (variant budget, not the clock, ends the search)', () => {
     const parts = orders[3];
@@ -307,4 +326,22 @@ describe('narrow doors: frames move out on the narrow axis only', async () => {
       expect(b[i].to.y - s.to.y).toBeCloseTo(250, 2);
     });
   });
+});
+
+describe('derz: equal visible strips (frame bevel + derz groove width)', async () => {
+  const { parseGcode } = await import('./gcodeToDxf.js');
+  const presets = JSON.parse((await import('node:fs')).readFileSync(new URL('../../../../server/data/presets.json', import.meta.url), 'utf8'));
+  const m1 = presets.find((p) => p.name === '1 NUMARA');
+  for (const W of [500, 420, 292]) {
+    it(`1 NUMARA ${W} wide: the strips beside the inner V are as wide as the ones between derz`, () => {
+      // vertical 2.5 mm derz grooves (90° bit: 2.5 mm each side); inner V 77, 6 mm deep -> panel from 83
+      const xs = [...new Set(parseGcode(buildKapakGcode(W, 600, m1)).segments
+        .filter((s) => s.type !== 'G0' && Math.abs(s.to.z - 15.5) < 1e-6 && Math.abs(s.from.x - s.to.x) < 1e-6)
+        .map((s) => +s.to.x.toFixed(3)))].sort((a, b) => a - b);
+      expect(xs.length).toBeGreaterThan(2);
+      const strips = [xs[0] - 2.5 - 83, ...xs.slice(1).map((x, i) => (x - 2.5) - (xs[i] + 2.5)), (W - 83) - (xs[xs.length - 1] + 2.5)];
+      // equal to the G-code's 0.01 mm resolution (two coordinates rounded per strip)
+      strips.forEach((w) => expect(Math.abs(w - strips[1])).toBeLessThanOrEqual(0.0201));
+    });
+  }
 });

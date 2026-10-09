@@ -206,7 +206,11 @@ textarea{
   min-height:440px;background:#0b0d11;border:1px solid var(--border);border-radius:10px;
   padding:12px;display:flex;align-items:center;justify-content:center;overflow:auto
 }
-#nestCanvas{display:block;max-width:100%;height:auto}
+/* The backing store is drawn at 2-3x for sharpness; on screen the whole plate
+   must fit both the column width AND the window height (a portrait 2100 x 2800
+   plate stretched to the column width ran far below the fold). With both
+   limits and auto size the canvas keeps its aspect ratio. */
+#nestCanvas{display:block;width:auto;height:auto;max-width:100%;max-height:calc(100vh - var(--navh) - 150px)}
 .nesting-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px;margin-top:10px}
 .stat{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:9px}
 .stat b{display:block;font-size:16px;margin-bottom:2px}.stat span{font-size:10px;color:var(--muted)}
@@ -739,3 +743,85 @@ body{padding:0;display:block}
 .tools-card .settings-toggle.open{opacity:1;color:var(--accent,#38bdf8)}
 .tools-card::-webkit-scrollbar{width:10px;height:10px}
 .tools-card::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px}
+
+/* ===== Sade arayüz: üst menü, model galerisi, kapak ekranı, atölye ===== */
+.topnav{gap:14px}
+.topnav-nav{display:flex;align-items:center;gap:4px;flex:1 1 auto;min-width:0;overflow-x:auto}
+.nav-btn{background:transparent;border:1px solid transparent;color:var(--muted);padding:7px 12px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.nav-btn:hover{background:var(--panel2);color:var(--text)}
+.nav-btn.active{background:var(--accent);color:#fff}
+.nav-dropdown{position:relative}
+.nav-menu{position:absolute;top:calc(100% + 6px);left:0;min-width:180px;background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:5px;box-shadow:0 10px 30px rgba(0,0,0,.35);z-index:70;display:flex;flex-direction:column}
+.nav-menu button{background:transparent;border:none;color:var(--text);text-align:left;padding:8px 10px;border-radius:6px;font-size:13px;cursor:pointer}
+.nav-menu button:hover,.nav-menu button.active{background:var(--panel2)}
+.atolye-btn{border-color:var(--border)}
+.theme-toggle{min-width:34px}
+.main-content{padding:22px 24px}
+
+.kapak-screen{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(340px,1fr);gap:18px;align-items:start;max-width:1440px;width:100%;margin:0 auto}
+.kapak-screen .card{margin:0}
+.kapak-screen h2{font-size:15px;margin:0 0 12px}
+.kapak-job h2{margin-top:20px}
+.kapak-job{position:sticky;top:calc(var(--navh) + 14px)}
+.kapak-job-model{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--panel2);border:1px solid var(--border);border-radius:9px}
+.kapak-job-model strong{font-size:16px}
+.active-model-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+
+.model-gallery-tabs{display:flex;gap:6px;margin-bottom:10px}
+.model-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px}
+.model-gallery.compact .model-grid{grid-template-columns:repeat(auto-fill,minmax(96px,1fr))}
+.model-card{position:relative;display:flex;flex-direction:column;align-items:stretch;gap:4px;padding:6px 6px 8px;background:var(--panel2);border:2px solid var(--border);border-radius:10px;cursor:pointer;color:var(--text);text-align:left}
+.model-card:hover{border-color:var(--accent)}
+.model-card.active{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 30%,transparent)}
+.model-card img{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:6px;background:var(--panel)}
+.model-card-name{font-weight:700;font-size:13px}
+.model-card-sub{font-size:11px;color:var(--muted);line-height:1.3}
+.model-card-check{position:absolute;top:8px;right:8px;width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700}
+
+.size-rows{display:flex;flex-direction:column;gap:8px}
+.size-row{display:flex;align-items:flex-end;gap:10px}
+.size-row label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);flex:1 1 0}
+.size-row input{font-size:20px;font-weight:700;padding:10px 12px}
+.size-x{font-size:20px;color:var(--muted);padding-bottom:12px}
+.size-index{color:var(--muted);padding-bottom:14px;font-weight:700}
+.link-btn{background:none;border:none;color:var(--accent);cursor:pointer;padding:6px 0;font-size:13px;font-weight:600}
+.download-btn{width:100%;margin-top:14px;padding:14px;font-size:16px}
+.download-btn:disabled{opacity:.45;cursor:not-allowed}
+.notes{margin-top:8px}
+.code-toggle{margin-top:10px}
+.code-toggle textarea{margin:6px 0}
+
+.part-preview{display:flex;flex-direction:column;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:10px}
+.part-preview canvas{display:block;border-radius:4px}
+.part-preview-legend{display:flex;flex-wrap:wrap;gap:6px}
+
+.active-model{margin:0 0 14px}
+.active-model-bar{display:flex;align-items:center;gap:12px;padding:8px 10px;background:var(--panel2);border:1px solid var(--border);border-radius:9px}
+.active-model-bar img{width:44px;height:58px;object-fit:cover;border-radius:5px}
+.active-model-text{display:flex;flex-direction:column;flex:1 1 auto;gap:2px}
+.active-model .model-gallery{margin-top:10px}
+
+details.collapsible > summary{display:flex;align-items:baseline;gap:10px;cursor:pointer;list-style:none}
+details.collapsible > summary::-webkit-details-marker{display:none}
+details.collapsible > summary h3{margin:0}
+details.collapsible > summary::before{content:'▸';color:var(--muted)}
+details.collapsible[open] > summary::before{content:'▾'}
+details.collapsible[open] > summary{margin-bottom:10px}
+
+.atolye{max-width:1180px;width:100%;margin:0 auto}
+.atolye-head h1{margin:0 0 4px;font-size:20px}
+.atolye-head{margin-bottom:12px}
+.atolye-models{display:flex;flex-direction:column;gap:16px}
+
+@media(max-width:980px){
+  .kapak-screen{grid-template-columns:1fr}
+  .kapak-job{position:static}
+}
+@media(max-width:700px){
+  .topnav{height:auto;flex-wrap:wrap;padding:8px 10px}
+  .topnav-nav{order:3;flex-basis:100%}
+  .main-content{padding:14px 12px}
+}
+/* the plate preview stays in view while the parts list on the left scrolls */
+.nesting-grid > :last-child{position:sticky;top:calc(var(--navh) + 12px)}
+@media(max-width:900px){ .nesting-grid > :last-child{position:static} }

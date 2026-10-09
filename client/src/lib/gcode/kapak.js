@@ -630,7 +630,7 @@ function buildDerzOptions(row, d, previousOffset, width, height) {
     width,
     height,
     yon: d.yon || 'dikey',
-    margin: previousOffset + numOr(d.margin, 0),
+    margin: previousOffset + numOr(d.margin, 0) + derzVisibleShift(row, d),
     spacing: numOr(d.spacing, null) ?? numOr(row.stepOffset, 60),
     autoFit: d.autoFit !== false,
     insideFrame: d.insideFrame === true,
@@ -642,6 +642,25 @@ function buildDerzOptions(row, d, previousOffset, width, height) {
     overshootY: numOr(d.overshootY ?? d.overshoot, 1),
     edgeExtra: numOr(d.edgeExtra, 0),
   };
+}
+
+/**
+ * "Equal visible strips" for a derz split inside a frame (insideFrame). The
+ * frame line is usually a V groove whose bevel eats into the panel — 1 NUMARA's
+ * 90° inner V, 6 mm deep, leaves the flat panel 6 mm further in — and each
+ * derz groove is itself depth * tan(angle/2) wide on each side. Splitting from
+ * the frame line would leave the two outer strips narrower than the rest, so the
+ * split starts from the visible panel edge, treated like half a derz groove:
+ *     frame + frameBevel - derz half-width
+ * derz.frameBevel: how far the frame's bevel reaches into the panel (mm);
+ * derz.bitAngle: the derz bit's included angle (90 for T1). Both 0/empty = old rule.
+ */
+function derzVisibleShift(row, d) {
+  if (!d.insideFrame) return 0;
+  const bevel = numOr(d.frameBevel, 0);
+  const angle = numOr(d.bitAngle, 0);
+  const half = angle > 0 ? (Number(row.depth) || 0) * Math.tan(((Math.min(angle, 179) / 2) * Math.PI) / 180) : 0;
+  return bevel > 0 ? bevel - half : 0;
 }
 
 /**
@@ -719,7 +738,8 @@ export function planNarrowDoor(width, height, cfg) {
     // clear inside the innermost frame that still fits, with the clearing tool
     const lines = kept.filter((r) => ['offset', 'carving'].includes(r.operation || 'offset'));
     const inner = lines.reduce((m, r) => Math.max(m, ...frameOffsets(r)), 0);
-    const src = kept.find((r) => r.roughing === true) || kept.find((r) => r.operation === 'tarama')
+    // the model's own clearing tool — even when its tarama row is the one dropped
+    const src = rows.find((r) => r.operation === 'tarama') || rows.find((r) => r.roughing === true)
       || lines.find((r) => Math.max(...frameOffsets(r)) === inner);
     if (src && inner > 0) {
       const toolDia = (src.tarama && Number(src.tarama.toolDiameter)) || FLAT_TOOL_DIA[Number(src.toolNo)] || 6;
@@ -833,15 +853,49 @@ function buildKapakGcodeCore(width, height, cfg, offsetX = 0, offsetY = 0, isCom
   // Feature rows ride along with the phase that leaves their tool in the spindle,
   // so e.g. model 9's T1 extension lines follow the T1 frame without an extra
   // tool change; whatever is left runs at the end, in row order.
-  let pendingFeatures = featureRows;
+  // Features listed before every other row (1 NUMARA's tarama) are cut first,
+  // in that order — the clearing comes before the V-bit, as in ArtCAM.
+  const firstOther = rows.findIndex((r) => !isFeatureRow(r));
+  const leadingFeatures = firstOther === -1 ? featureRows : rows.slice(0, firstOther).filter(isFeatureRow);
+  let pendingFeatures = featureRows.filter((r) => !leadingFeatures.includes(r));
+  emitFeatureRows(ctx, leadingFeatures);
   const flushFeaturesOnCurrentTool = () => {
     const now = pendingFeatures.filter((r) => String(r.toolNo) === String(ctx.lastEmittedToolNo));
     pendingFeatures = pendingFeatures.filter((r) => !now.includes(r));
     emitFeatureRows(ctx, now);
   };
 
+  // Offset passes of one phase, with any feature row declared BETWEEN them cut
+  // at its own place in the list (8 NUMARA: T3 frame, T8 tarama, T12 V — the
+  // clearing must come before the V it runs up to).
+  const emitPhase = (phaseRows, phaseAdaptive, from, to) => {
+    // only features that sit between two passes of this phase are cut in place;
+    // one listed after its last pass waits (it may belong after the derz)
+    let lastPass = -1;
+    for (let i = from; i < to; i++) if (phaseRows.includes(rows[i])) lastPass = i;
+    to = Math.min(to, lastPass + 1);
+    let group = [];
+    const flushGroup = () => {
+      if (!group.length) return;
+      const idx = new Set(group);
+      emitOffsetPasses(ctx, phaseRows, phaseAdaptive.filter((a) => idx.has(a.rowIdx)));
+      group = [];
+    };
+    for (let i = from; i < to; i++) {
+      const r = rows[i];
+      const k = phaseRows.indexOf(r);
+      if (k !== -1) group.push(k);
+      else if (pendingFeatures.includes(r)) {
+        flushGroup();
+        emitFeatureRows(ctx, [r]);
+        pendingFeatures = pendingFeatures.filter((x) => x !== r);
+      }
+    }
+    flushGroup();
+  };
+
   // Leading offset passes (everything declared before the first carving row).
-  emitOffsetPasses(ctx, offsetRows, adaptiveRows);
+  emitPhase(offsetRows, adaptiveRows, 0, lastCarvingIdx === -1 ? rows.length : lastCarvingIdx);
   flushFeaturesOnCurrentTool();
 
   emitCarvingRows(ctx, carvingRows);
@@ -849,7 +903,7 @@ function buildKapakGcodeCore(width, height, cfg, offsetX = 0, offsetY = 0, isCom
 
   // Finishing/offset passes declared after the carving rows — ArtCAM emits these
   // after the V-bit run (1_NUMARA.cnc's plain 70 mm rectangle).
-  emitOffsetPasses(ctx, trailingRows, trailingAdaptiveRows);
+  if (lastCarvingIdx !== -1) emitPhase(trailingRows, trailingAdaptiveRows, lastCarvingIdx + 1, rows.length);
   flushFeaturesOnCurrentTool();
 
   emitDerzRows(ctx, derzRows);

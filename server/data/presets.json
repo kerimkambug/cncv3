@@ -7,7 +7,7 @@
     "previewHeight": 400,
     "name": "1 NUMARA",
     "module": "kapak",
-    "description": "Atölye tarifi: T1 90° V carving 63 mm (6 mm, köşe keskinleştirmeli); tarama 6 mm derinlikte carving+6 (69) mm den iç V ye kadar; T1 düz V 77 mm (carving+14, 6 mm); derz T1 2.5 mm, iç V (77) içi ~20.75 mm ye en yakın eşit aralıkla. Düz bıçak (T6) yerine T4/T10 de kullanılabilir. ArtCAM 1 NUMARA.cnc (carving 56) test kopyası: numuneler/artcam/model1.preset.json",
+    "description": "Atölye tarifi: T1 90° V carving 63 mm (6 mm, köşe keskinleştirmeli); T6 tarama 6 mm derinlikte carving (63) ile iç V (77) arası; T1 düz V 77 mm (carving+14, 6 mm); derz T1 2.5 mm, iç V (77) içi ~20.75 mm ye en yakın eşit aralıkla. Düz bıçak (T6) yerine T4/T10 de kullanılabilir. ArtCAM 1 NUMARA.cnc (carving 56) test kopyası: numuneler/artcam/model1.preset.json Derzler, iç V nin 6 mm pahından sonra görünen panel kenarından eşit bölünür (kenar şeritleri de eşit).",
     "thickness": 18,
     "spindleSpeed": 18000,
     "safeZ": 46,
@@ -21,49 +21,15 @@
     "rows": [
       {
         "toolNo": "6",
+        "operation": "tarama",
+        "stepOffset": 63,
         "depth": 6,
-        "stepOffset": 69,
-        "absoluteOffset": 69,
-        "name": "tarama (carving+6: carving bittiği yerden başlar)",
-        "operation": "offset",
-        "roughing": true,
-        "chain": false,
-        "repeatStartY": false
-      },
-      {
-        "toolNo": "6",
-        "depth": 6,
-        "stepOffset": 66,
-        "absoluteOffset": 66,
-        "chain": true,
-        "name": "tarama (dik köşe)",
-        "operation": "offset",
-        "roughing": true,
-        "repeatStartY": false
-      },
-      {
-        "toolNo": "6",
-        "depth": 6,
-        "stepOffset": 71,
-        "absoluteOffset": 71,
-        "cornerRadius": 6,
-        "name": "tarama R6 köşe",
-        "operation": "offset",
-        "roughing": false,
-        "chain": false,
-        "repeatStartY": false
-      },
-      {
-        "toolNo": "6",
-        "depth": 6,
-        "stepOffset": 74,
-        "absoluteOffset": 74,
-        "cornerRadius": 3,
-        "chain": true,
-        "name": "tarama R3 köşe",
-        "operation": "offset",
-        "roughing": false,
-        "repeatStartY": false
+        "feed": 5000,
+        "name": "T6 tarama (carving ile iç V arası)",
+        "tarama": {
+          "innerOffset": 77,
+          "toolDiameter": 6
+        }
       },
       {
         "toolNo": "1",
@@ -94,7 +60,7 @@
         "depth": 2.5,
         "stepOffset": 77,
         "feed": 6000,
-        "name": "T1 90° derz (iç V içini eşit böl ~20.75)",
+        "name": "T1 90° derz (görünen panel içini eşit böl ~20.75)",
         "operation": "derz",
         "derz": {
           "yon": "dikey",
@@ -104,7 +70,9 @@
           "overshootY": 0,
           "startY": 77,
           "respectPreviousOffset": false,
-          "insideFrame": true
+          "insideFrame": true,
+          "frameBevel": 6,
+          "bitAngle": 90
         },
         "roughing": false,
         "chain": false,
@@ -493,28 +461,15 @@
       },
       {
         "toolNo": "8",
+        "operation": "tarama",
+        "stepOffset": 56,
         "depth": 5.5,
-        "stepOffset": 60,
         "feed": 9000,
-        "name": "düz kaba offset",
-        "operation": "offset",
-        "absoluteOffset": 60,
-        "roughing": false,
-        "chain": false,
-        "repeatStartY": false
-      },
-      {
-        "toolNo": "8",
-        "depth": 5.5,
-        "stepOffset": 64.5,
-        "cornerRadius": 4,
-        "feed": 9000,
-        "name": "yuvarlak köşe offset",
-        "operation": "offset",
-        "absoluteOffset": 64.5,
-        "roughing": false,
-        "chain": false,
-        "repeatStartY": false
+        "name": "T8 tarama (T3 ile T12 arası)",
+        "tarama": {
+          "innerOffset": 68.5,
+          "toolDiameter": 8
+        }
       },
       {
         "toolNo": "12",
@@ -745,7 +700,7 @@
     "riseRatio": 0.125,
     "_id": "local_1791375996075_cnnw0v",
     "name": "10 NUMARA",
-    "description": "TABLA panosu model 10: iç içe çerçeveler. T1 90° carving 57 mm (7 mm, köşeler 50 ye), T4 58.5 mm (5 mm), T3 profil 60 ve 74 mm (7 mm), T6 77 mm düz + 78 mm R3 (7 mm, arayı temizler), T12 135° 81 mm (7 mm).",
+    "description": "TABLA panosu model 10: iç içe çerçeveler. T1 90° carving 57 mm (7 mm, köşeler 50 ye), T4 58.5 mm (5 mm), T3 profil 60 ve 74 mm (7 mm), T6 tarama 74 ile 81 arası (7 mm), T12 135° 81 mm (7 mm).",
     "rows": [
       {
         "toolNo": "3",
@@ -809,28 +764,15 @@
       },
       {
         "toolNo": "6",
-        "operation": "offset",
-        "stepOffset": 77,
-        "absoluteOffset": 77,
+        "operation": "tarama",
+        "stepOffset": 74,
         "depth": 7,
         "feed": 6000,
-        "name": "T6 temizleme",
-        "roughing": false,
-        "chain": false,
-        "repeatStartY": false
-      },
-      {
-        "toolNo": "6",
-        "operation": "offset",
-        "stepOffset": 78,
-        "absoluteOffset": 78,
-        "depth": 7,
-        "feed": 6000,
-        "name": "T6 temizleme R3",
-        "roughing": false,
-        "chain": false,
-        "repeatStartY": false,
-        "cornerRadius": 3
+        "name": "T6 tarama (T3 74 ile T12 81 arası)",
+        "tarama": {
+          "innerOffset": 81,
+          "toolDiameter": 6
+        }
       }
     ],
     "createdAt": "2026-10-07T12:26:36.075Z",

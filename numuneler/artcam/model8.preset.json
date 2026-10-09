@@ -1,0 +1,72 @@
+{
+  "category": "kapak",
+  "imageDataUrl": "",
+  "previewWidth": 292,
+  "previewHeight": 400,
+  "name": "8 NUMARA",
+  "module": "kapak",
+  "description": "DONMUŞ TEST KOPYASI — 8 NUMARA.cnc (ArtCAM, 292x400) satır satır üreten ayarlar (T8 iki ayrı paso). Güncel preset server/data/presets.json içinde (T8 tek tarama satırı). Rounded-corner (G2 köşe yaylı) T8 offset + düz T3/T12. 8_NUMARA.cnc köşe yayları doğrulandı (I4J0 / I0J-4 / I-4J-0). T8 bloğunun BL köşesi temiz 90° yay değil, ArtCAM'in 45° teğetsel dalış rampasıdır: G0 X65.67 Y65.67 -> G2X64.50Y68.50I2.83J2.83 (yarıçap 2.828 = r*sqrt(2)/2, merkez BL köşe çemberinde) — bu motor aynı yolu birebir üretir. Bıçak-başı feed (T3→F8000, T8/T12→F9000).",
+  "thickness": 18,
+  "spindleSpeed": 18000,
+  "safeZ": 46,
+  "toolChangeZ": 46,
+  "homeZ": 46,
+  "plungeFeed": 3000,
+  "cutFeed": 5000,
+  "offsetMode": "absolute",
+  "topStyle": "flat",
+  "riseRatio": 0.125,
+  "rows": [
+    {
+      "toolNo": "3",
+      "depth": 5,
+      "stepOffset": 57,
+      "feed": 8000,
+      "name": "düz dış offset",
+      "operation": "offset",
+      "absoluteOffset": 57,
+      "roughing": false,
+      "chain": false,
+      "repeatStartY": false
+    },
+    {
+      "toolNo": "8",
+      "depth": 5.5,
+      "stepOffset": 60,
+      "feed": 9000,
+      "name": "düz kaba offset",
+      "operation": "offset",
+      "absoluteOffset": 60,
+      "roughing": false,
+      "chain": false,
+      "repeatStartY": false
+    },
+    {
+      "toolNo": "8",
+      "depth": 5.5,
+      "stepOffset": 64.5,
+      "cornerRadius": 4,
+      "feed": 9000,
+      "name": "yuvarlak köşe offset",
+      "operation": "offset",
+      "absoluteOffset": 64.5,
+      "roughing": false,
+      "chain": false,
+      "repeatStartY": false
+    },
+    {
+      "toolNo": "12",
+      "depth": 5.5,
+      "stepOffset": 68.5,
+      "feed": 9000,
+      "name": "135° iç",
+      "operation": "offset",
+      "absoluteOffset": 68.5,
+      "roughing": false,
+      "chain": false,
+      "repeatStartY": false
+    }
+  ],
+  "createdAt": "2026-09-25T15:51:01.965Z",
+  "updatedAt": "2026-09-25T15:51:01.965Z"
+}

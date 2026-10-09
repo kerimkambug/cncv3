@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { usePresets } from '../../hooks/usePresets.js';
 import { buildKapakPresetDxf } from '../../lib/gcode/kapak.js';
+import { sortPresets } from '../../hooks/useKapakWorkspace.js';
 
 function createDefaultPresetImage(name) {
   const label = String(name || 'Preset').trim() || 'Preset';
@@ -8,7 +9,8 @@ function createDefaultPresetImage(name) {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
-export default function PresetPanel({ cfg, setCfg, rows, setRows }) {
+export default function PresetPanel({ workspace }) {
+  const { cfg, rows } = workspace;
   const { presets, loading, error, storage, savePreset, deletePreset } = usePresets('kapak');
   const [category, setCategory] = useState('kapak');
   const [name, setName] = useState('');
@@ -42,7 +44,7 @@ export default function PresetPanel({ cfg, setCfg, rows, setRows }) {
   }
 
   async function handleDelete(id, presetName) {
-    if (!window.confirm(`"${presetName}" presetini silmek istediğine emin misin?`)) return;
+    if (!window.confirm(`"${presetName}" modelini silmek istediğinize emin misiniz?`)) return;
     await deletePreset(id);
     if (activeId === id) setActiveId(null);
   }
@@ -53,11 +55,8 @@ export default function PresetPanel({ cfg, setCfg, rows, setRows }) {
     setName(preset.name || '');
     setImageDataUrl(preset.imageDataUrl || '');
     setDescription(preset.description || '');
-    const { name: _n, module: _m, category: _c, imageDataUrl: _i, description: _d, previewWidth: _pw, previewHeight: _ph, dxfFileName: _df, dxfText: _dt, dxfBounds: _db, _id, id: _id2, rows: presetRows, ...rest } = preset;
-    setCfg((prev) => ({ ...prev, ...rest, refWidth: preset.previewWidth || null, refHeight: preset.previewHeight || null }));
-    setRows(presetRows || []);
-    // keep the Bıçaklar preset picker on the same model
-    try { window.dispatchEvent(new CustomEvent('empire-cnc-preset-selected', { detail: presetId })); } catch { /* yoksay */ }
+    // choosing a model here chooses it for the whole workspace (one selection path)
+    workspace.selectPreset(preset);
     setCategory(preset.category || 'kapak');
     setPreviewWidth(preset.previewWidth || 600);
     setPreviewHeight(preset.previewHeight || 600);
@@ -100,7 +99,7 @@ export default function PresetPanel({ cfg, setCfg, rows, setRows }) {
     URL.revokeObjectURL(url);
   }
 
-  const visiblePresets = presets.filter((preset) => (preset.category || 'kapak') === category);
+  const visiblePresets = sortPresets(presets.filter((preset) => (preset.category || 'kapak') === category));
   const getPresetId = (preset) => preset._id || preset.id;
 
   function movePreview(step) {
@@ -175,10 +174,10 @@ export default function PresetPanel({ cfg, setCfg, rows, setRows }) {
       for (const [presetName, data] of entries) {
         try {
           if (!data || typeof data !== 'object' || Array.isArray(data)) {
-            throw new Error('preset verisi nesne olmalı');
+            throw new Error('model verisi geçersiz');
           }
           const resolvedName = String(data.name || presetName || '').trim();
-          if (!resolvedName) throw new Error('preset adı boş');
+          if (!resolvedName) throw new Error('model adı boş');
           const { name: _n, module: _m, _id, ...rest } = data;
           rest.imageDataUrl = rest.imageDataUrl || createDefaultPresetImage(resolvedName);
           const existing = presets.find((preset) => preset.name === resolvedName && (preset.module || 'kapak') === 'kapak');
@@ -190,17 +189,18 @@ export default function PresetPanel({ cfg, setCfg, rows, setRows }) {
       }
       setImportMsg(
         errors.length
-          ? `${imported} preset içe aktarıldı, ${errors.length} tanesi atlandı (muhtemelen aynı isim zaten var):\n${errors.join('\n')}`
-          : `${imported} preset içe aktarıldı.`
+          ? `${imported} model içe aktarıldı, ${errors.length} tanesi atlandı (aynı isimde model mevcut):\n${errors.join('\n')}`
+          : `${imported} model içe aktarıldı.`
       );
     } catch (err) {
-      setImportMsg(`preset.json okunamadı: ${err.message}`);
+      setImportMsg(`Dosya okunamadı: ${err.message}`);
     }
   }
 
   return (
     <div className="card">
-      <h2>Presetler</h2>
+      <h2>Modeller</h2>
+      <div className="hint">Bir modele tıklayıp “Düzenle” deyince seçilir; bıçak sırası aşağıdaki tabloda düzenlenir, sonra “Değişiklikleri Kaydet”.</div>
       <div className="preset-category-tabs">
         <button type="button" className={`tab${category === 'kapak' ? ' active' : ''}`} onClick={() => setCategory('kapak')}>Kapak Modelleri</button>
         <button type="button" className={`tab${category === 'kapi' ? ' active' : ''}`} onClick={() => setCategory('kapi')}>Kapı Modelleri</button>
@@ -222,19 +222,16 @@ export default function PresetPanel({ cfg, setCfg, rows, setRows }) {
             : `${error.message}`}
         </div>
       )}
-      {!error && storage === 'server' && (
-        <div className="hint">Presetler sunucudan yüklendi.</div>
-      )}
       <div className="preset-list">
         {visiblePresets.length === 0 && !loading && (
-          <span className="hint">Bu kategoride preset yok. Ayarları yapıp model görseliyle kaydet.</span>
+          <span className="hint">Bu kategoride model yok. Bıçak sırasını ayarlayıp görseliyle kaydedin.</span>
         )}
         {visiblePresets.map((p) => (
           <div key={getPresetId(p)} className={`preset-card${activeId === getPresetId(p) ? ' active' : ''}`} onClick={() => setPreviewPreset(p)}>
             <button type="button" className="preset-image-button" onClick={(event) => { event.stopPropagation(); setPreviewPreset(p); }}>
               <img src={p.imageDataUrl || createDefaultPresetImage(p.name)} alt={`${p.name} önizleme`} />
             </button>
-            <div className="preset-card-info"><strong>{p.name}</strong><span>{p.category === 'kapi' ? 'Kapı' : 'Kapak'} · {p.rows?.length || 0} işlem</span><small>{(p.rows || []).filter((row) => row.operation === 'derz').length} derz / {(p.rows || []).filter((row) => row.operation === 'carving').length} carving / {(p.rows || []).filter((row) => !row.operation || row.operation === 'offset').length} offset</small><small className="dxf-badge">DXF kontrolü · {Number(p.previewWidth || 600).toFixed(0)} × {Number(p.previewHeight || 600).toFixed(0)} mm</small><button type="button" className="preset-select-button" onClick={(event) => { event.stopPropagation(); handleLoad(p); }}>Seç</button><button type="button" className="preset-dxf-button" onClick={(event) => { event.stopPropagation(); downloadDxf(p); }}>DXF indir</button></div>
+            <div className="preset-card-info"><strong>{p.name}</strong><span>{p.category === 'kapi' ? 'Kapı' : 'Kapak'} · {p.rows?.length || 0} işlem</span><small className="dxf-badge">Örnek ölçü {Number(p.previewWidth || 600).toFixed(0)} × {Number(p.previewHeight || 600).toFixed(0)} mm</small><button type="button" className="preset-select-button" onClick={(event) => { event.stopPropagation(); handleLoad(p); }}>Seç</button><button type="button" className="preset-dxf-button" onClick={(event) => { event.stopPropagation(); downloadDxf(p); }}>DXF indir</button></div>
             <span className="x" title="Bu kapağı sil" onClick={(event) => { event.stopPropagation(); handleDelete(getPresetId(p), p.name); }}>✕</span>
           </div>
         ))}
@@ -250,14 +247,14 @@ export default function PresetPanel({ cfg, setCfg, rows, setRows }) {
       {imageDataUrl && <button type="button" className="btn-danger preset-remove-image" onClick={removeImage}>Görseli kaldır, varsayılanı kullan</button>}
       <label>Model açıklaması</label>
       <textarea className="preset-description-input" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Örn: Dıştan 53 mm offset, içte derzli kapak modeli." rows="3" />
-      <label>DXF kontrol ölçüsü (mm)</label>
+      <label>Örnek ölçü (mm)</label>
       <div className="row2"><input type="number" min="1" value={previewWidth} onChange={(e) => setPreviewWidth(e.target.value)} placeholder="Genişlik" /><input type="number" min="1" value={previewHeight} onChange={(e) => setPreviewHeight(e.target.value)} placeholder="Yükseklik" /></div>
-      <div className="hint">Preset kartındaki DXF indir düğmesi bu ölçüyle nominal, offset ve derz katmanlarını dışa aktarır.</div>
+      <div className="hint">Modelin tasarlandığı ölçü. DXF çıktısı ve dar kapak uyarlaması bu ölçüyü esas alır.</div>
       {saveError && <div className="err" style={{ display: 'block' }}>{saveError}</div>}
 
       <div className="row2" style={{ marginTop: 12 }}>
-        <button type="button" className="btn-secondary" onClick={triggerImport}>preset.json Yükle</button>
-        <button type="button" className="btn-secondary" onClick={exportPresetsJson} disabled={presets.length === 0}>preset.json İndir</button>
+        <button type="button" className="btn-secondary" onClick={triggerImport}>Modelleri içe aktar</button>
+        <button type="button" className="btn-secondary" onClick={exportPresetsJson} disabled={presets.length === 0}>Modelleri dışa aktar</button>
       </div>
       <input ref={fileInputRef} type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={handleImportFile} />
       {importMsg && <div className="hint" style={{ whiteSpace: 'pre-line' }}>{importMsg}</div>}

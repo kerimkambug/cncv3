@@ -81,7 +81,7 @@ export default function GcodeDxfConverter({ onBackToMenu }) {
   }
 
   function formatBounds() {
-    if (!parsed.bounds) return 'Henüz yol yok';
+    if (!parsed.bounds) return 'G-code yüklenmedi';
     return `${parsed.bounds.minX.toFixed(1)} × ${parsed.bounds.minY.toFixed(1)} → ${parsed.bounds.maxX.toFixed(1)} × ${parsed.bounds.maxY.toFixed(1)} mm`;
   }
 

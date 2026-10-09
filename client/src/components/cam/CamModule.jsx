@@ -22,8 +22,8 @@ export default function CamModule({ onBackToMenu }) {
     <div className="wrap app-screen active">
       <div className="topbar">
         <div>
-          <h1>Empire CNC — Cam Modelleri (deneysel)</h1>
-          <div className="sub">Göz ızgarası kesimi + Clipper.js tabanlı offset kenar taraması. Köşelerdeki dekoratif rozet/fileto şekli henüz taklit edilmiyor — köşeler şu an keskin (kare).</div>
+          <h1>Cam</h1>
+          <div className="sub">Cam gözlerinin kesimi ve camın oturacağı yuvanın taraması.</div>
         </div>
         {onBackToMenu && (
           <div className="top-actions">

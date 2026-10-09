@@ -299,9 +299,9 @@ export default function ReliefGenerator({ onBackToMenu }) {
     <div className="wrap app-screen active">
       <div className="topbar">
         <div>
-          <h1>Empire CNC — Harici Derinlik Haritasından 3D Bas-Rölyef & G-Code Üretici</h1>
+          <h1>3D Rölyef</h1>
           <div className="sub">
-            Harici Derinlik Haritası, Küre Uçlu Takım Telafisi ve Gerçekçi 3D Simülasyon.
+            Gri tonlamalı derinlik haritasından rölyef G-code'u ve STL üretir.
           </div>
         </div>
         <div className="top-actions">
@@ -317,15 +317,15 @@ export default function ReliefGenerator({ onBackToMenu }) {
         <div className="grid">
           {/* 1. Harici Derinlik Haritası Kartı */}
           <div className="card">
-            <h2>1. Harici Derinlik Haritası Yükle</h2>
+            <h2>1. Derinlik Haritası</h2>
 
             <div className="ai-engine-box">
               <div className="ai-engine-info">
-                <b>📥 Harici Derinlik Haritası</b>
+                <b>Derinlik haritası</b>
                 <p>
-                  Dışarıda (ör. SculptOK gibi bir araçla) hazırlanmış gri tonlamalı depth map yükleyin —
+                  Gri tonlamalı derinlik haritası yükleyin:
                   beyaz = yüzey/en yüksek, siyah = taban/en derin. Gri tonlama doğrudan yükseklik olarak
-                  okunur; foto-detay sentezi / AI hesaplaması uygulanmaz. Siyah fonlu haritalarda koyu fon
+                  okunur. Siyah fonlu haritalarda koyu fon
                   varsayılan olarak düz tabana alınır.
                 </p>
               </div>
@@ -342,7 +342,7 @@ export default function ReliefGenerator({ onBackToMenu }) {
                 className="btn-accent2"
                 onClick={() => customDepthInputRef.current?.click()}
               >
-                {customDepthSrc ? '🔁 Derinlik Haritasını Değiştir' : '📥 Derinlik Haritası Yükle'}
+                {customDepthSrc ? 'Derinlik haritasını değiştir' : 'Derinlik haritası yükle'}
               </button>
 
               {customDepthSrc && (
@@ -382,21 +382,11 @@ export default function ReliefGenerator({ onBackToMenu }) {
 
           {/* 2. Otomatik CNC Yüzey & Kalite Motoru */}
           <div className="card">
-            <h2>2. Otomatik CNC Yüzey & Kalite Motoru</h2>
+            <h2>2. Malzeme ve Çözünürlük</h2>
 
             <div className="cnc-auto-box">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                <span style={{ fontSize: 24 }}>🛡️</span>
-                <div>
-                  <b style={{ color: '#38bdf8', fontSize: 13.5 }}>Otomatik Pürüzsüzleştirme & STL Kalibrasyonu Aktif</b>
-                  <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 2 }}>
-                    Ahşap/MDF lifleri ve küre uçlu (ballnose) CNC frezeler için pütür ve basamaklanma (terracing) önleyici filtreler uygulandı.
-                  </div>
-                </div>
-              </div>
-
               <div>
-                <label><b>İşlenecek Malzeme & Rölyef Profili:</b></label>
+                <label><b>Malzeme</b></label>
                 <select
                   value={cfg.preset || 'wood_mdf'}
                   onChange={(e) => handlePresetChange(e.target.value)}
@@ -411,37 +401,6 @@ export default function ReliefGenerator({ onBackToMenu }) {
                 </small>
               </div>
 
-              <div className="cnc-spec-grid" style={{ marginTop: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                <div className="spec-badge">
-                  <span className="spec-icon">✨</span>
-                  <div>
-                    <small>Yüzey Kalitesi</small>
-                    <b>Pürüzsüz & Tırtıksız</b>
-                  </div>
-                </div>
-                <div className="spec-badge">
-                  <span className="spec-icon">🎯</span>
-                  <div>
-                    <small>Zemin İzolasyonu</small>
-                    <b>%100 Temiz Sıfır Taban</b>
-                  </div>
-                </div>
-                <div className="spec-badge">
-                  <span className="spec-icon">📐</span>
-                  <div>
-                    <small>Ton Dağılımı</small>
-                    <b>Doğrusal (Linear / Soft)</b>
-                  </div>
-                </div>
-                <div className="spec-badge">
-                  <span className="spec-icon">📦</span>
-                  <div>
-                    <small>STL Mesh</small>
-                    <b>Watertight Manifold</b>
-                  </div>
-                </div>
-              </div>
-
               <div className="row2" style={{ marginTop: 14 }}>
                 <div>
                   <label>STL Mesh Çözünürlüğü</label>
@@ -449,10 +408,10 @@ export default function ReliefGenerator({ onBackToMenu }) {
                     value={cfg.stlQuality ?? 1024}
                     onChange={(e) => updateField('stlQuality', parseInt(e.target.value, 10))}
                   >
-                    <option value={512}>512 × 512 (Hızlı Önizleme)</option>
-                    <option value={1024}>1024 × 1024 (Yüksek Kalite CAD — Önerilen)</option>
-                    <option value={1536}>1536 × 1536 (Ultra Mikron Hassas)</option>
-                    <option value={2048}>2048 × 2048 (Pro Sınıfı CAD — En Yüksek Detay)</option>
+                    <option value={512}>512 × 512 (hızlı)</option>
+                    <option value={1024}>1024 × 1024 (önerilen)</option>
+                    <option value={1536}>1536 × 1536</option>
+                    <option value={2048}>2048 × 2048 (en yüksek detay)</option>
                   </select>
                 </div>
 
@@ -631,7 +590,7 @@ export default function ReliefGenerator({ onBackToMenu }) {
                 disabled={isGeneratingGcode || !processedResult}
                 onClick={generateGcode}
               >
-                {isGeneratingGcode ? 'G-Code Hesaplanıyor...' : '⚡ Kusursuz Rölyef G-Code Üret'}
+                {isGeneratingGcode ? 'G-Code Hesaplanıyor...' : 'Rölyef G-code üret'}
               </button>
 
               <button
@@ -649,7 +608,7 @@ export default function ReliefGenerator({ onBackToMenu }) {
                 disabled={!processedResult}
                 onClick={handleDownloadDepthMap}
               >
-                🖼️ Derinlik Haritası (PNG) İndir
+                Derinlik haritasını indir (PNG)
               </button>
             </div>
 
@@ -675,14 +634,14 @@ export default function ReliefGenerator({ onBackToMenu }) {
                 className={`view-tab ${activeTab === '3d' ? 'active' : ''}`}
                 onClick={() => setActiveTab('3d')}
               >
-                🌐 3D İnteraktif Simülasyon (Three.js)
+                3D önizleme
               </button>
               <button
                 type="button"
                 className={`view-tab ${activeTab === '2d' ? 'active' : ''}`}
                 onClick={() => setActiveTab('2d')}
               >
-                🖼️ 2D Görsel & Derinlik Haritası
+                2D görüntü
               </button>
               {output && (
                 <button
@@ -709,7 +668,7 @@ export default function ReliefGenerator({ onBackToMenu }) {
                   />
                 ) : (
                   <div className="empty-preview-box">
-                    <span>🖼️ Lütfen önce bir derinlik haritası yükleyin</span>
+                    <span>Önce bir derinlik haritası yükleyin.</span>
                   </div>
                 )}
 

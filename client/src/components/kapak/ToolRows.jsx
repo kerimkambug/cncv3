@@ -3,96 +3,15 @@
  * sequence shared by every Kapak operation (Tek Ölçü, Toplu Liste,
  * Nesting all read the same rows).
  */
-import { useEffect, useState } from 'react';
-import { usePresets } from '../../hooks/usePresets.js';
+import { useState } from 'react';
 import { carveExitDistance } from '../../lib/gcode/kapak.js';
 
 // Operations that take part in the offset chain (the others have their own geometry).
 const CHAIN_OPS = ['offset'];
 
-// Seçilen preset, bir sonraki açılışta da bıçak listesinin başlangıç değeri
-// olarak kullanılsın diye saklanır. Anahtarlar modüle özeldir.
-const ACTIVE_PRESET_KEY = 'empire-cnc-active-tool-preset';
-
-// Presetten makine ayarlarına aktarılabilecek alanlar. rows/offsetMode dışarıda
-// tutulur çünkü onlar zaten tabloda ya da mod anahtarında karşılanıyor.
-const CFG_FIELDS = ['thickness', 'spindleSpeed', 'safeZ', 'toolChangeZ', 'homeZ', 'plungeFeed', 'cutFeed', 'topStyle', 'riseRatio', 'narrowAdapt', 'narrowMinPanel', 'narrowMinFirst'];
-
-// Preset satırları düzenlenirken nesne referansı paylaşılırsa, tabloda bir
-// satıra yapılan değişiklik kayıtlı preseti de sessizce bozabilir. Satırlar
-// her zaman kopyalanır.
-function cloneRows(rows) {
-  return (rows || []).map((r) => ({ ...r, ...(r.derz ? { derz: { ...r.derz } } : {}) }));
-}
-
-export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relative', setOffsetMode, setCfg, restoreFromPreset = true }) {
+export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relative', setOffsetMode }) {
   // ⚙ ile seçilen satırın ayarları tablonun altındaki panelde gösterilir.
   const [selected, setSelected] = useState(null);
-  const { presets, loading } = usePresets('kapak');
-  // null = henüz seçim yok (kullanıcı boş bıraktı), '__custom__' = elle düzenlendi.
-  const [activePresetId, setActivePresetId] = useState(() => {
-    try { return localStorage.getItem(ACTIVE_PRESET_KEY) || null; } catch { return null; }
-  });
-
-  function applyPreset(preset) {
-    setRows(cloneRows(preset.rows));
-    if (preset.offsetMode && setOffsetMode) setOffsetMode(preset.offsetMode);
-    if (setCfg) {
-      const patch = {};
-      CFG_FIELDS.forEach((f) => {
-        if (preset[f] !== undefined && preset[f] !== null && preset[f] !== '') patch[f] = preset[f];
-      });
-      // the model's reference door: narrow-door adaptation never squeezes a design
-      // whose middle panel is small on purpose (see planNarrowDoor)
-      patch.refWidth = preset.previewWidth || null;
-      patch.refHeight = preset.previewHeight || null;
-      setCfg((prev) => ({ ...prev, ...patch }));
-    }
-  }
-
-  function handlePresetChange(id) {
-    setActivePresetId(id || null);
-    try {
-      if (id) localStorage.setItem(ACTIVE_PRESET_KEY, id);
-      else localStorage.removeItem(ACTIVE_PRESET_KEY);
-    } catch { /* localStorage kapalıysa seçim sadece bu oturumda geçerli */ }
-    if (!id) return; // boş seçim: mevcut satırlara dokunma
-    const preset = presets.find((p) => (p._id || p.id) === id);
-    if (preset) applyPreset(preset);
-  }
-
-  // A model loaded from the Ayarlar preset panel becomes the selection here too.
-  useEffect(() => {
-    const onSelected = (e) => {
-      if (!e.detail) return;
-      setActivePresetId(e.detail);
-      try { localStorage.setItem(ACTIVE_PRESET_KEY, e.detail); } catch { /* yoksay */ }
-    };
-    window.addEventListener('empire-cnc-preset-selected', onSelected);
-    return () => window.removeEventListener('empire-cnc-preset-selected', onSelected);
-  }, []);
-
-  // The rows and settings themselves are saved by KapakModule, so normally there
-  // is nothing to restore here — re-applying the preset on every open would wipe
-  // the user's own edits and settings. Only a first start without saved rows
-  // falls back to the last chosen preset.
-  const [restored, setRestored] = useState(!restoreFromPreset);
-  useEffect(() => {
-    if (restored || loading || !activePresetId || activePresetId === '__custom__' || presets.length === 0) return;
-    const preset = presets.find((p) => (p._id || p.id) === activePresetId);
-    if (preset) applyPreset(preset);
-    setRestored(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [presets, loading, activePresetId, restored]);
-
-  // Tablo elle değiştirilince seçili preset artık bu satırları tanımlamaz; ama
-  // düzenlenmiş liste kalıcıdır (KapakModule kaydeder) ve "özelleştirilmiş"
-  // durumu da bir sonraki açılışta görünür.
-  function markCustom() {
-    setActivePresetId('__custom__');
-    try { localStorage.setItem(ACTIVE_PRESET_KEY, '__custom__'); } catch { /* yoksay */ }
-  }
-
   function updateRow(idx, field, value) {
     const next = rows.slice();
     next[idx] = { ...next[idx], [field]: field === 'name' || field === 'toolNo' || field === 'operation' ? value : parseFloat(value) || 0 };
@@ -102,7 +21,6 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
       next[idx].absoluteOffset = next[idx].stepOffset;
     }
     setRows(next);
-    markCustom();
   }
 
   // Settings of the feature operations (tarama / uzatma) live in a
@@ -112,7 +30,6 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
     const parsed = typeof value === 'boolean' || field === 'yon' ? value : (value === '' ? undefined : parseFloat(value));
     next[idx] = { ...next[idx], [group]: { ...(next[idx][group] || {}), [field]: parsed } };
     setRows(next);
-    markCustom();
   }
 
   // cornerRadius / feed accept an empty string to mean "not set" (cleared),
@@ -122,7 +39,6 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
     const stored = value === '' || value === null || value === undefined ? null : parseFloat(value) || 0;
     next[idx] = { ...next[idx], [field]: stored };
     setRows(next);
-    markCustom();
   }
   function updateCarving(idx, field, value) {
     const next = rows.slice();
@@ -130,20 +46,18 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
     const stored = value === '' || value === null || value === undefined ? null : parseFloat(value) || 0;
     next[idx] = { ...next[idx], [field]: stored };
     setRows(next);
-    markCustom();
   }
   function updateDerz(idx, field, value) {
     const next = rows.slice();
     const BOOL = ['yon', 'autoFit', 'insideFrame', 'stagger', 'respectPreviousOffset'];
     // count / lineFromPct / lineToPct are optional: empty = not set.
-    const OPTIONAL = ['count', 'lineFromPct', 'lineToPct'];
+    const OPTIONAL = ['count', 'lineFromPct', 'lineToPct', 'frameBevel', 'bitAngle'];
     let parsed;
     if (BOOL.includes(field)) parsed = value;
     else if (OPTIONAL.includes(field)) parsed = value === '' ? null : parseFloat(value);
     else parsed = parseFloat(value) || 0;
     next[idx] = { ...next[idx], derz: { yon: 'dikey', margin: 0, spacing: 60, autoFit: true, overshoot: 1, overshootX: 1, overshootY: 1, edgeExtra: 0, respectPreviousOffset: true, ...(next[idx].derz || {}), [field]: parsed } };
     setRows(next);
-    markCustom();
   }
   // Kulp box: vertical lines stop `fromTop` below the top except the first/last `skip`.
   function updateStopBox(idx, field, value) {
@@ -155,15 +69,12 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
     else box[field] = parseFloat(value) || 0;
     next[idx] = { ...next[idx], derz: { ...d, stopBox: box.fromTop > 0 ? box : undefined } };
     setRows(next);
-    markCustom();
   }
   function addRow() {
     setRows([...rows, { name: '', toolNo: '', operation: 'offset', depth: 1, stepOffset: 10, derz: { yon: 'dikey', margin: 0, spacing: 60, autoFit: true, overshoot: 1, edgeExtra: 0, outerFrame: false } }]);
-    markCustom();
   }
   function removeRow(idx) {
     setRows(rows.filter((_, i) => i !== idx));
-    markCustom();
   }
 
   const isAbsolute = offsetMode === 'absolute';
@@ -181,32 +92,6 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
       <div className="tool-header-row" style={{ marginBottom: 12 }}>
         <h2 style={{ margin: 0 }}>Bıçaklar</h2>
         <span className="badge">{rows.length} bıçak</span>
-      </div>
-
-      {/* Küçük preset seçici: seçilen preset bıçak listesinin ve işleme
-          ayarlarının varsayılanı olur. Tablo elle düzenlenene kadar seçim
-          geçerli kalır ve sonraki açılışta da uygulanır. */}
-      <div className="tool-preset-picker">
-        <label htmlFor="toolPresetSelect">Preset</label>
-        <select
-          id="toolPresetSelect"
-          value={activePresetId === '__custom__' ? '' : activePresetId || ''}
-          onChange={(e) => handlePresetChange(e.target.value)}
-          disabled={loading}
-        >
-          <option value="">{loading ? 'Yükleniyor...' : 'Elle (preset yok)'}</option>
-          {presets.map((p) => (
-            <option key={p._id || p.id} value={p._id || p.id}>
-              {p.name}{p.category === 'kapi' ? ' (kapı)' : ''}
-            </option>
-          ))}
-        </select>
-        {activePresetId && activePresetId !== '__custom__' && (
-          <span className="badge" title="Bu preset şu an varsayılan olarak kullanılıyor">varsayılan</span>
-        )}
-        {activePresetId === '__custom__' && (
-          <span className="badge" title="Satırlar elle değiştirildi">özelleştirilmiş</span>
-        )}
       </div>
 
       <div className="mode-switch" style={{ marginBottom: 14 }}>
@@ -404,6 +289,14 @@ export default function ToolRows({ rows, setRows, thickness, offsetMode = 'relat
                   <label className="check-field">
                     <input type="checkbox" checked={r.derz?.respectPreviousOffset !== false} onChange={(e) => updateDerz(selected, 'respectPreviousOffset', e.target.checked)} />
                     <span>Önceki offset sınırlarına uy</span>
+                  </label>
+                  <label title="Çerçeve bir V kanalıysa pahı panelin içine taşar (90° bıçak, 6 mm derin → 6 mm). Girilirse derzler görünen panel kenarından bölünür, kenar şeritleri de eşit çıkar.">
+                    <span>Çerçeve pahı (mm) — boş = yok</span>
+                    <input type="number" min="0" step="0.5" value={r.derz?.frameBevel ?? ''} placeholder="—" onChange={(e) => updateDerz(selected, 'frameBevel', e.target.value)} />
+                  </label>
+                  <label title="Derz bıçağının tam açısı (T1 = 90). Derz kanalının genişliği de hesaba katılır.">
+                    <span>Derz bıçak açısı (°) — boş = yok</span>
+                    <input type="number" min="0" max="179" step="1" value={r.derz?.bitAngle ?? ''} placeholder="—" onChange={(e) => updateDerz(selected, 'bitAngle', e.target.value)} />
                   </label>
                   <label>
                     <span>Çizgi sayısı — boş = aralıktan</span>

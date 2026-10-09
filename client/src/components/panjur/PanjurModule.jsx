@@ -221,8 +221,8 @@ function downloadFile() {
     <div className="wrap app-screen active">
       <div className="topbar">
         <div>
-          <h1>Empire CNC — Panjur Kapak</h1>
-          <div className="sub">Dış ölçüden offseti çıkarır, panjur boylarını otomatik böler ve referans NC'deki eğimli raster mantığıyla G-code üretir.</div>
+          <h1>Panjur</h1>
+          <div className="sub">Dış ölçü ve offsetlerden panjur sayısını ve boyunu hesaplar, eğimli taramayla G-code üretir.</div>
         </div>
         {onBackToMenu && (
           <div className="top-actions">
@@ -314,7 +314,7 @@ function downloadFile() {
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
-        <h2>1b. Yan Yana Kapaklar (Seri Üretim)</h2>
+        <h2>Yan Yana Kapaklar</h2>
         <div className="hint" style={{ marginBottom: 10 }}>
           Soldan sağa yan yana farklı ölçülerde kapaklar ekleyin; her kapak en/boy ister ve hepsine aynı ayarlar uygulanır. X başlangıcı her kapakta oransal olarak ilerler. Toplam genişlik plaka sınırına (2100 mm) kadar serbesttir.
         </div>
@@ -442,7 +442,7 @@ function downloadFile() {
         )}
 
         <div className="hint" style={{ marginTop: 10 }}>
-          Panjur kademesi, bir panjur başlangıcından sonraki panjur başlangıcına hedef mesafedir. Sistem offsetlerden kalan alanı ve bu kademeyi kullanarak panjur sayısını ve gerçek panjur uzunluğunu otomatik hesaplar; çıkış payı panjurlar arasındaki boşluktur. Zemine giriş açıksa T4, tüm panjur uçlarında tek seferde; panjur eğimini end-3'ten end+1'e devam ettirerek Z0'a iner ve sonra uç boyunca keser.
+          Panjur kademesi, iki panjurun başlangıçları arasındaki hedef mesafedir; panjur sayısı ve boyu bu değere ve kalan alana göre hesaplanır. Çıkış payı, panjurlar arasındaki boşluktur.
         </div>
       </div>
 
@@ -509,7 +509,7 @@ function downloadFile() {
         </div>
 
         <div className="hint" style={{ marginTop: 10 }}>
-          Zemine giriş açıksa önce bütün panjurlar T14 ile işlenir, sonra takım bir kez T4'e değişir. T4 her uçta dik dalmaz; mevcut eğimi end-3'ten end+1'e düz çizgi olarak sürdürüp Z0'a iner, ardından panjur genişliğini Z0'da keser.
+          Zemine giriş açıksa önce bütün panjurlar T14 ile işlenir, ardından T4 her panjurun ucunu eğimi sürdürerek zemine kadar keser.
         </div>
       </div>
 

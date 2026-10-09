@@ -73,15 +73,15 @@ const MODELS = {
   },
   '10 NUMARA': {
     description: 'TABLA panosu model 10: iç içe çerçeveler. T1 90° carving 57 mm (7 mm, köşeler 50 ye), T4 58.5 mm (5 mm), '
-      + 'T3 profil 60 ve 74 mm (7 mm), T6 77 mm düz + 78 mm R3 (7 mm, arayı temizler), T12 135° 81 mm (7 mm).',
+      + 'T3 profil 60 ve 74 mm (7 mm), T6 tarama 74 ile 81 arası (7 mm), T12 135° 81 mm (7 mm).',
     rows: [
       off(3, 60, 7, 6000, 'T3 profil (dış)'),
       off(3, 74, 7, 6000, 'T3 profil (iç)'),
       off(4, 58.5, 5, 8000, 'T4 kanal'),
       carving(1, 57, 7, 90, 8000, 'T1 90° carving'),
       off(12, 81, 7, 10000, 'T12 135° V iç çerçeve'),
-      off(6, 77, 7, 6000, 'T6 temizleme'),
-      off(6, 78, 7, 6000, 'T6 temizleme R3', { cornerRadius: 3 }),
+      { toolNo: '6', operation: 'tarama', stepOffset: 74, depth: 7, feed: 6000, name: 'T6 tarama (T3 74 ile T12 81 arası)',
+        tarama: { innerOffset: 81, toolDiameter: 6 } },
     ],
   },
   '11 NUMARA': {
@@ -125,7 +125,11 @@ const now = new Date().toISOString();
 for (const [name, def] of Object.entries(MODELS)) {
   const i = all.findIndex((p) => p.name === name);
   const prev = i >= 0 ? all[i] : {};
-  const doc = { ...base, _id: prev._id || `local_${Date.now()}_${name.replace(/\W/g, '')}`, name, ...def, createdAt: prev.createdAt || now, updatedAt: now };
+  // The geometry is rebuilt; the picture the shop attached to the model is kept.
+  const doc = {
+    ...base, _id: prev._id || `local_${Date.now()}_${name.replace(/\W/g, '')}`, name, ...def,
+    imageDataUrl: prev.imageDataUrl || '', createdAt: prev.createdAt || now, updatedAt: now,
+  };
   if (i >= 0) all[i] = doc; else all.push(doc);
 }
 

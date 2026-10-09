@@ -1,17 +1,27 @@
 import { useEffect, useState } from 'react';
-import Topnav from './components/Topnav.jsx';
+import Topnav, { MAIN_SCREENS, TOOL_SCREENS } from './components/Topnav.jsx';
 import Footer from './components/Footer.jsx';
-import Sidebar from './components/Sidebar.jsx';
-import MainMenu from './components/MainMenu.jsx';
-import KapakModule from './components/kapak/KapakModule.jsx';
+import TekOlcu from './components/kapak/TekOlcu.jsx';
+import TopluListe from './components/kapak/TopluListe.jsx';
+import NestingPanel from './components/kapak/NestingPanel.jsx';
+import DaireKesimi from './components/kapak/DaireKesimi.jsx';
+import DerzBolme from './components/kapak/DerzBolme.jsx';
+import AtolyePage from './components/kapak/AtolyePage.jsx';
 import CamModule from './components/cam/CamModule.jsx';
 import PanjurModule from './components/panjur/PanjurModule.jsx';
 import ReliefGenerator from './components/ReliefGenerator.jsx';
 import GcodeDxfConverter from './components/GcodeDxfConverter.jsx';
+import { useKapakWorkspace } from './hooks/useKapakWorkspace.js';
+import { usePersistentState } from './hooks/usePersistentState.js';
+import { usePresets } from './hooks/usePresets.js';
+
+const KNOWN = new Set([...MAIN_SCREENS, ...TOOL_SCREENS].map((s) => s.key).concat('atolye'));
 
 export default function App() {
-  const [activeModule, setActiveModule] = useState('kapak');
-  const [activeOp, setActiveOp] = useState('single');
+  const [screen, setScreen] = usePersistentState('empire-cnc-screen', 'kapak');
+  const current = KNOWN.has(screen) ? screen : 'kapak';
+  const workspace = useKapakWorkspace();
+  const { presets, loading } = usePresets('kapak');
   const [theme, setTheme] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('empire-cnc-theme'));
@@ -23,29 +33,28 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme.mode;
-    localStorage.setItem('empire-cnc-theme', JSON.stringify(theme));
+    try { localStorage.setItem('empire-cnc-theme', JSON.stringify(theme)); } catch { /* storage unavailable */ }
   }, [theme]);
 
-  function handleNavigate(mod, op) {
-    setActiveModule(mod);
-    if (mod === 'kapak' && op) setActiveOp(op);
-  }
-
+  const kapakProps = { workspace, presets, presetsLoading: loading };
   return (
     <div className="app-layout">
-      <Topnav onHome={() => setActiveModule('menu')} theme={theme} setTheme={setTheme} />
-      <div className="app-body">
-        <Sidebar activeModule={activeModule} activeOp={activeOp} onNavigate={handleNavigate} />
-        <main className="main-content">
-          {activeModule === 'menu' && <MainMenu onSelectModule={(mod) => handleNavigate(mod, 'single')} />}
-          {activeModule === 'kapak' && <KapakModule activeOp={activeOp} onBackToMenu={() => setActiveModule('menu')} />}
-          {activeModule === 'cam' && <CamModule onBackToMenu={() => setActiveModule('menu')} />}
-          {activeModule === 'panjur' && <PanjurModule onBackToMenu={() => setActiveModule('menu')} />}
-          {activeModule === 'relief' && <ReliefGenerator onBackToMenu={() => setActiveModule('menu')} />}
-          {activeModule === 'gcode-dxf' && <GcodeDxfConverter onBackToMenu={() => setActiveModule('menu')} />}
-          <Footer />
-        </main>
-      </div>
+      <Topnav screen={current} onNavigate={setScreen} theme={theme} setTheme={setTheme} />
+      <main className="main-content">
+        {current === 'kapak' && <TekOlcu {...kapakProps} />}
+        {current === 'batch' && <TopluListe {...kapakProps} />}
+        {current === 'nesting' && (
+          <NestingPanel cfg={workspace.cfg} plateCfg={workspace.plateCfg} defaultModelName={workspace.modelName(presets)} />
+        )}
+        {current === 'cam' && <CamModule />}
+        {current === 'panjur' && <PanjurModule />}
+        {current === 'relief' && <ReliefGenerator />}
+        {current === 'circle' && <DaireKesimi cfg={workspace.cfg} />}
+        {current === 'derz' && <DerzBolme cfg={workspace.cfg} />}
+        {current === 'gcode-dxf' && <GcodeDxfConverter />}
+        {current === 'atolye' && <AtolyePage workspace={workspace} />}
+        <Footer />
+      </main>
     </div>
   );
 }

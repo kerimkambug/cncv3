@@ -89,7 +89,8 @@ empire-cnc-mern/
 | Ctrl+Enter kısayolu | ✅ `useCtrlEnter` hook'u, her üretim ekranında |
 | Tarama (cep boşaltma), uzatma çizgisi, şablon (süsleme) | ✅ `features.js` — satırın `operation` alanı: `tarama` / `uzatma` / `sablon` |
 | Kulp yuvası | ⏳ ayrı bir iş — şimdilik sistemde yok (model 4'ün panodaki T10/T11 kulp yolları presete alınmadı) |
-| Derz: çerçeve içini eşit böl, sabit çizgi sayısı, ara çizgi, çizgi boyu (%), kulp kutusu | ✅ `derz.js` (`insideFrame`, `count`, `stagger`, `lineFromPct`/`lineToPct`, `stopBox`) |
+| Derz: çerçeve içini eşit böl, görünen şeritleri eşitle (çerçeve pahı + derz kanal genişliği), sabit çizgi sayısı, ara çizgi, çizgi boyu (%), kulp kutusu | ✅ `derz.js` + `kapak.js` (`insideFrame`, `frameBevel`/`bitAngle`, `count`, `stagger`, `lineFromPct`/`lineToPct`, `stopBox`) |
+| Peş peşe aynı bıçakla boşaltma pasoları tek tarama satırı (1, 8, 10, 11 NUMARA) | ✅ adacığa en yakın halka köşede yay çizer (adacık köşesi sivri kalır); halkalar arası en fazla r·√2 (köşede set kalmaz). 1 ve 8 NUMARA'nın ArtCAM'deki ayrı pasoları `numuneler/artcam/model1/8.preset.json` test kopyalarında |
 | Nesting her parçayı Tek Ölçü ile birebir aynı keser (döndürülen parça modeliyle birlikte döner) | ✅ `nesting.js` `partProgram` — G-code, DXF ve önizleme aynı programdan |
 | Nesting'de cam kapak (parça satırında Model = "Cam kapak"; göz, sütun, çıta… satırda seçilir) | ✅ `camTarama.js` `buildCamPartProgram` — plakada kapaklardan sonra: önce tüm cam taramaları, sonra iç kesimler, en son dış kesim. `cam.test.js` ArtCAM numunesiyle (`numuneler/cam/`) alan alan karşılaştırır |
 

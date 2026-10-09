@@ -35,7 +35,10 @@ export function buildTaramaPaths(width, height, row, thickness) {
   const inner = num(t.innerOffset, 0);
   const dia = Math.max(0.1, num(t.toolDiameter, 6));
   const r = dia / 2;
-  const step = Math.min(dia, Math.max(0.1, num(t.stepover, dia * 0.8)));
+  // Two rings with square corners leave an uncut nub on the diagonal unless they
+  // are at most r·√2 apart (each corner disk reaches r along the diagonal) — so
+  // the step is capped there whatever the setting says.
+  const step = Math.min(r * Math.SQRT2, Math.max(0.1, num(t.stepover, dia * 0.8)));
   const z = +(thickness - num(row.depth)).toFixed(3);
 
   // Tool-centre offsets: outermost pass hugs the outer boundary.
@@ -54,12 +57,38 @@ export function buildTaramaPaths(width, height, row, thickness) {
   // short diagonal through material that is cleared anyway, so the tool never
   // lifts inside the pocket.
   const path = [];
-  offsets.forEach((o) => {
+  const hasIsland = inner > outer;
+  offsets.forEach((o, idx) => {
     const x1 = o; const x2 = width - o; const y1 = o; const y2 = height - o;
     if (x2 - x1 < -1e-9 || y2 - y1 < -1e-9) return;
     if (Math.abs(x2 - x1) < 1e-6 || Math.abs(y2 - y1) < 1e-6) {
       // Degenerate ring at the centre: a single slot line.
       path.push({ x: x1, y: y2, z }, { x: x2, y: y1, z });
+      return;
+    }
+    if (hasIsland && idx === 0 && r > 0) {
+      // The ring that runs along the island turns its corners on an arc of the
+      // tool radius around the island corner, so the island keeps a SHARP corner
+      // (a square tool-centre path would round it by the radius). This is
+      // ArtCAM's last pass: 1 NUMARA 74 R3 (6 mm bit), 8 NUMARA 64.5 R4 (8 mm bit).
+      const ix1 = x1 + r; const ix2 = x2 - r; const iy1 = y1 + r; const iy2 = y2 - r;
+      const arc = (cx, cy, a0) => {
+        const pts = [];
+        for (let k = 0; k <= 6; k++) {
+          const a = a0 + (k / 6) * (Math.PI / 2);
+          pts.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a), z });
+        }
+        return pts;
+      };
+      // clockwise from the top-left, like the square rings: TL -> TR -> BR -> BL
+      // (arc centres are the island corners: x1 + r = the island's offset)
+      path.push(
+        ...arc(ix1, iy2, Math.PI / 2).reverse(),
+        ...arc(ix2, iy2, 0).reverse(),
+        ...arc(ix2, iy1, -Math.PI / 2).reverse(),
+        ...arc(ix1, iy1, Math.PI).reverse(),
+        { x: x1, y: iy2, z },
+      );
       return;
     }
     path.push(
@@ -85,6 +114,8 @@ export function buildTaramaPaths(width, height, row, thickness) {
  * a whole ornament follows the corner it sits in, while the free end of a straight
  * frame line follows the ornament it runs into, so on a bigger door the line
  * stretches and still meets it (TABLA model 13's L-shaped frame lines).
+ * Below the reference size the outer margin narrows first (max 20 mm), then the
+ * motif scales down uniformly.
  *
  * @param {number} width
  * @param {number} height
@@ -95,12 +126,33 @@ export function buildSablonPaths(width, height, row, thickness) {
   const s = row.sablon || {};
   const rw = num(s.refWidth, width);
   const rh = num(s.refHeight, height);
-  const mapX = (x, ax) => ((ax ?? (x <= rw / 2 ? 0 : 1)) === 0 ? x : width - (rw - x));
-  const mapY = (y, ay) => ((ay ?? (y <= rh / 2 ? 0 : 1)) === 0 ? y : height - (rh - y));
-  return (s.paths || []).map(decodeSablonPath).map((p) => p.map(([x, y, d, ax, ay]) => ({
-    x: mapX(x, ax),
-    y: mapY(y, ay),
-    z: +(thickness - num(d)).toFixed(3),
+  const paths = (s.paths || []).map(decodeSablonPath).map((p) => p.map(([x, y, d, ax, ay]) => ({
+    x, y, d: num(d), ax: ax ?? (x <= rw / 2 ? 0 : 1), ay: ay ?? (y <= rh / 2 ? 0 : 1),
+  })));
+  // Smaller than the reference door the corner ornaments would run into each other
+  // and the frame lines between them would flip. First the outer margin gives way
+  // (up to `maxMarginShrink`, default 20 mm, same on all sides); when that is not
+  // enough the motif itself is scaled down uniformly (depth too, so V-carved
+  // strokes keep their proportions) while the margin stays at its narrowest.
+  const all = paths.flat();
+  const edgeDist = (v, a, ref) => (a === 0 ? v : ref - v);
+  const mx = all.length ? Math.min(...all.map((p) => edgeDist(p.x, p.ax, rw))) : 0;
+  const my = all.length ? Math.min(...all.map((p) => edgeDist(p.y, p.ay, rh))) : 0;
+  const shrink = Math.max(0, Math.min(
+    num(s.maxMarginShrink, 20), mx, my,
+    Math.max((rw - width) / 2, (rh - height) / 2),
+  ));
+  const fit = (size, ref, m) => (ref - 2 * m > 0 ? (size - 2 * (m - shrink)) / (ref - 2 * m) : 1);
+  const k = Math.max(0.01, Math.min(1, fit(width, rw, mx), fit(height, rh, my)));
+  // distance from the anchored edge: the margin part shrinks, the motif part scales
+  const place = (v, a, ref, size, m) => {
+    const dist = (m - shrink) + (edgeDist(v, a, ref) - m) * k;
+    return a === 0 ? dist : size - dist;
+  };
+  return paths.map((p) => p.map((q) => ({
+    x: +place(q.x, q.ax, rw, width, mx).toFixed(4),
+    y: +place(q.y, q.ay, rh, height, my).toFixed(4),
+    z: +(thickness - q.d * k).toFixed(3),
   })));
 }
 

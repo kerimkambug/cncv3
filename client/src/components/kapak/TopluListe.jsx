@@ -2,13 +2,16 @@ import { useState } from 'react';
 import JSZip from 'jszip';
 import { buildKapakGcode, validateKapakSize, validateCarvingWarnings, parseBatchLine } from '../../lib/gcode/kapak.js';
 import { useCtrlEnter } from '../../hooks/useCtrlEnter.js';
+import { ActiveModelBar } from './ModelGallery.jsx';
 
-export default function TopluListe({ cfg }) {
+export default function TopluListe({ workspace, presets, presetsLoading }) {
+  const { cfg, canGenerate } = workspace;
   const [list, setList] = useState('');
   const [message, setMessage] = useState(null);
 
   async function generate() {
     setMessage(null);
+    if (!canGenerate) { setMessage({ type: 'err', text: 'Önce bir model seçin.' }); return; }
     const linesRaw = list.split('\n').map((l) => l.trim()).filter(Boolean);
     if (linesRaw.length === 0) { setMessage({ type: 'err', text: 'Liste boş.' }); return; }
 
@@ -24,7 +27,8 @@ export default function TopluListe({ cfg }) {
       if (err) { errors.push(`Satır ${idx + 1} ("${line}"): ${err}`); return; }
 
       const gcode = buildKapakGcode(parsed.width, parsed.height, cfg);
-      let fname = `${parsed.width}-${parsed.height}`;
+      const base = String(workspace.modelName(presets) || 'kapak').replace(/[^a-z0-9ığüşöçİĞÜŞÖÇ_-]+/gi, '_');
+      let fname = `${base}_${parsed.width}x${parsed.height}`;
       if (usedNames[fname] !== undefined) {
         usedNames[fname]++;
         fname = `${fname}_${usedNames[fname]}`;
@@ -55,14 +59,15 @@ export default function TopluListe({ cfg }) {
   return (
     <div className="card">
       <h2>Toplu Liste</h2>
-      <label>Ölçü listesi — her satır bir parça: GENİŞLİK-YÜKSEKLİK (fazladan sayılar yok sayılır)</label>
+      <ActiveModelBar workspace={workspace} presets={presets} loading={presetsLoading} />
+      <label>Ölçü listesi — her satıra bir kapak: GENİŞLİK-YÜKSEKLİK (ör. 450-700). Hepsi seçili modelle üretilir.</label>
       <textarea
         className="list-input"
         value={list}
         onChange={(e) => setList(e.target.value)}
         placeholder={'327-656\n351-720\n373-715\n760-702-2'}
       />
-      <button type="button" className="btn-accent2" onClick={generate}>Toplu Üret (.zip indir)</button>
+      <button type="button" className="btn-primary download-btn" onClick={generate} disabled={!canGenerate}>⬇ Hepsini indir (.zip)</button>
       {message && (
         <div className={message.type === 'err' ? 'err' : 'ok'} style={{ display: 'block', whiteSpace: 'pre-line' }}>
           {message.text}

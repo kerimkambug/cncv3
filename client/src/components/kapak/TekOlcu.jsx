@@ -1,255 +1,143 @@
-import { useState } from 'react';
-import { buildKapakGcode, validateKapakSize, validateCarvingWarnings } from '../../lib/gcode/kapak.js';
+import { useMemo, useState } from 'react';
+import { buildKapakGcode, validateKapakSize, validateCarvingWarnings, planNarrowDoor } from '../../lib/gcode/kapak.js';
 import { useCtrlEnter } from '../../hooks/useCtrlEnter.js';
+import { usePersistentState } from '../../hooks/usePersistentState.js';
+import ModelGallery from './ModelGallery.jsx';
+import PartPreview from './PartPreview.jsx';
 
-export default function TekOlcu({ cfg, plateCfg }) {
-  const [measurements, setMeasurements] = useState([
-    { id: 1, width: 500, height: 500 },
-  ]);
-  const [nextId, setNextId] = useState(2);
-  const [output, setOutput] = useState('');
-  const [message, setMessage] = useState(null);
+/**
+ * The main screen: pick a model, type the size, download the G-code.
+ * The program is rebuilt live on every change and drawn underneath, so what the
+ * operator sees is exactly what will be cut. Several doors side by side
+ * ("bitişik kapak") are still possible, as a secondary option.
+ */
+export default function TekOlcu({ workspace, presets, presetsLoading }) {
+  const { cfg, plateCfg, activeModel, canGenerate } = workspace;
+  const [measurements, setMeasurements] = usePersistentState('empire-cnc-tek-olcu', [{ id: 1, width: 500, height: 500 }]);
+  const [showCode, setShowCode] = useState(false);
+  const plateW = plateCfg?.width || 2100;
+  const plateH = plateCfg?.height || 2800;
 
-  const PLATE_WIDTH = plateCfg?.width || 2100;
-  const PLATE_HEIGHT = plateCfg?.height || 2800;
+  const update = (id, field, value) => setMeasurements(measurements.map((m) => (m.id === id ? { ...m, [field]: value === '' ? '' : parseFloat(value) } : m)));
+  const remove = (id) => measurements.length > 1 && setMeasurements(measurements.filter((m) => m.id !== id));
+  const add = () => setMeasurements([...measurements, { id: Math.max(...measurements.map((m) => m.id)) + 1, width: 500, height: 500 }]);
 
-  function updateMeasurement(id, field, value) {
-    setMeasurements(measurements.map(m =>
-      m.id === id ? { ...m, [field]: parseFloat(value) || 0 } : m
-    ));
-  }
-
-  function removeMeasurement(id) {
-    if (measurements.length > 1) {
-      setMeasurements(measurements.filter(m => m.id !== id));
-    }
-  }
-
-  function addMeasurement() {
-    setMeasurements([...measurements, {
-      id: nextId,
-      width: 500,
-      height: 500,
-    }]);
-    setNextId(nextId + 1);
-  }
-
-  function generate() {
-    setMessage(null);
-
-    // Tüm ölçüleri kontrol et
-    let allValid = true;
-    for (const m of measurements) {
-      if (!Number.isFinite(m.width) || !Number.isFinite(m.height) || m.width <= 0 || m.height <= 0) {
-        allValid = false;
-        break;
-      }
-    }
-
-    if (!allValid) {
-      setMessage({ type: 'err', text: 'Tüm ölçülerde geçerli genişlik/yükseklik değerleri gir.' });
-      return;
-    }
-
-    // Toplam X pozisyonunu kontrol et
-    let totalWidth = 0;
-    for (const m of measurements) {
-      totalWidth += m.width;
-    }
-    if (totalWidth > PLATE_WIDTH) {
-      setMessage({ type: 'err', text: `Toplam genişlik (${totalWidth}mm) plakayı aşıyor (${PLATE_WIDTH}mm).` });
-      return;
-    }
-
-    // Her ölçü için G-code oluştur ve birleştir
-    let combinedOutput = ['makro'];
-    let xOffset = 0;
-
+  // Build live: { gcode, doors, error, notes }
+  const result = useMemo(() => {
+    if (!canGenerate) return { error: 'Önce soldan bir model seçin.' };
+    const bad = measurements.find((m) => !(Number(m.width) > 0) || !(Number(m.height) > 0));
+    if (bad) return { error: 'Genişlik ve yükseklik girin.' };
+    const totalW = measurements.reduce((s, m) => s + m.width, 0);
+    if (totalW > plateW) return { error: `Toplam genişlik (${totalW} mm) plakayı aşıyor (${plateW} mm).` };
+    const tall = measurements.find((m) => m.height > plateH);
+    if (tall) return { error: `Yükseklik (${tall.height} mm) plakayı aşıyor (${plateH} mm).` };
+    const lines = ['makro'];
+    const doors = [];
+    const notes = [];
+    let x = 0;
     for (const m of measurements) {
       const err = validateKapakSize(m.width, m.height, cfg.rows, cfg.offsetMode, cfg.thickness);
-      if (err) {
-        setMessage({ type: 'err', text: `Ölçü ${m.width}×${m.height}: ${err}` });
-        return;
+      if (err) return { error: `${m.width}×${m.height}: ${err}` };
+      try {
+        buildKapakGcode(m.width, m.height, cfg, x, 0, true).split('\n').forEach((l) => l.trim() && lines.push(l));
+      } catch (e) {
+        return { error: `${m.width}×${m.height}: ${e.message}` };
       }
-
-      const gcode = buildKapakGcode(m.width, m.height, cfg, xOffset, 0, true);
-      const lines = gcode.split('\n');
-
-      for (const line of lines) {
-        if (line.trim()) {
-          combinedOutput.push(line);
-        }
+      const plan = planNarrowDoor(m.width, m.height, cfg);
+      if (plan) {
+        const parts = [];
+        if (plan.dx) parts.push(`yan kenarlarda çerçeve ${plan.dx.toFixed(0)} mm dışa alındı`);
+        if (plan.dy) parts.push(`üst/alt kenarlarda çerçeve ${plan.dy.toFixed(0)} mm dışa alındı`);
+        if (plan.dropped) parts.push('sığmayan iç çerçeve atılıp içi tarandı');
+        notes.push(`${m.width}×${m.height} dar kapak: ${parts.join(', ')}.`);
       }
-
-      xOffset += m.width;
+      doors.push({ x, y: 0, w: m.width, h: m.height });
+      x += m.width;
     }
+    const hz = Number(cfg.homeZ || 0).toFixed(2);
+    lines.push(`G0 X0.00 Y0.00 Z${hz}`, `G0Z${hz}`, 'X0.00Y0.00', 'M5', 'M16', 'M30');
+    validateCarvingWarnings(cfg.rows).forEach((w) => notes.push(w));
+    return { gcode: lines.join('\n'), doors, notes };
+  }, [measurements, cfg, canGenerate, plateW, plateH]);
 
-    // Program sonunu ekle
-    combinedOutput.push(`G0 X0.00 Y0.00 Z${cfg.homeZ.toFixed(2)}`);
-    combinedOutput.push(`G0Z${cfg.homeZ.toFixed(2)}`);
-    combinedOutput.push('X0.00Y0.00');
-    combinedOutput.push('M5');
-    combinedOutput.push('M16');
-    combinedOutput.push('M30');
-
-    setOutput(combinedOutput.join('\n'));
-    const warnings = validateCarvingWarnings(cfg.rows);
-    setMessage({
-      type: 'ok',
-      text: warnings.length
-        ? `G-code üretildi (${measurements.length} ölçü).\n\nUyarı:\n${warnings.join('\n')}`
-        : `G-code üretildi (${measurements.length} ölçü).`,
-    });
-  }
-
-  useCtrlEnter(generate);
-
+  const modelName = workspace.modelName(presets);
+  const fileName = () => {
+    const base = String(modelName || 'kapak').replace(/[^a-z0-9ığüşöçİĞÜŞÖÇ_-]+/gi, '_');
+    return `${base}_${measurements.map((m) => `${m.width}x${m.height}`).join('_')}.nc`;
+  };
   function download() {
-    if (!output.trim()) return;
-    const blob = new Blob([output], { type: 'text/plain' });
+    if (!result.gcode) return;
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'output.nc';
+    a.href = URL.createObjectURL(new Blob([result.gcode], { type: 'text/plain' }));
+    a.download = fileName();
     a.click();
+    URL.revokeObjectURL(a.href);
   }
-
-  // Toplam X pozisyonunu ve boyutları hesapla
-  let totalWidth = 0;
-  let maxHeight = 0;
-  let currentX = 0;
-  const measurementsWithPos = measurements.map(m => {
-    const x = currentX;
-    currentX += m.width;
-    totalWidth = currentX;
-    maxHeight = Math.max(maxHeight, m.height);
-    return { ...m, x };
-  });
-
-  const summaryValid = measurements.every(m => 
-    Number.isFinite(m.width) && Number.isFinite(m.height) && m.width > 0 && m.height > 0
-  );
+  useCtrlEnter(download);
 
   return (
-    <div className="card">
-      <div className="tool-header-row" style={{ marginBottom: 12 }}>
-        <div>
-          <h2 style={{ margin: 0 }}>Tek Kapak</h2>
-          <div className="hint" style={{ marginTop: 4 }}>
-            Tek kapak ölçüsünü girin. Yan yana üretim için bitişik kapak ekleyebilirsiniz.
-          </div>
-        </div>
-        <span className="badge">{measurements.length} kapak</span>
-      </div>
+    <div className="kapak-screen">
+      <section className="card kapak-models">
+        <h2>1 · Model</h2>
+        <ModelGallery
+          presets={presets}
+          loading={presetsLoading}
+          activeId={activeModel?.id}
+          onSelect={workspace.selectPreset}
+        />
+      </section>
 
-      <table className="tool-table">
-        <thead>
-          <tr>
-            <th>X Başlangıç</th>
-            <th>Genişlik X</th>
-            <th>Yükseklik Y</th>
-            <th>Boyut (X×Y)</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {measurementsWithPos.map((m) => (
-            <tr key={m.id}>
-              <td style={{ color: 'var(--muted)' }}>
-                {m.x.toFixed(0)} mm
-              </td>
-              <td>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={m.width}
-                  onChange={(e) => updateMeasurement(m.id, 'width', e.target.value)}
-                  style={{ width: 70 }}
-                />
-              </td>
-              <td>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={m.height}
-                  onChange={(e) => updateMeasurement(m.id, 'height', e.target.value)}
-                  style={{ width: 70 }}
-                />
-              </td>
-              <td style={{ fontWeight: 600, color: 'var(--accent)' }}>
-                {m.width.toFixed(0)} × {m.height.toFixed(0)} mm
-              </td>
-              <td>
-                <button 
-                  type="button" 
-                  className="icon-btn" 
-                  onClick={() => removeMeasurement(m.id)}
-                  disabled={measurements.length === 1}
-                >
-                  ✕
-                </button>
-              </td>
-            </tr>
+      <section className="card kapak-job">
+        <div className="kapak-job-model">
+          <span className="active-model-label">Seçili model</span>
+          <strong>{modelName || 'Model seçilmedi'}</strong>
+          {activeModel?.custom && <span className="badge" title="Bıçak sırası Atölye'de elle değiştirildi">özelleştirilmiş</span>}
+        </div>
+
+        <h2>2 · Ölçü</h2>
+        <div className="size-rows">
+          {measurements.map((m, i) => (
+            <div className="size-row" key={m.id}>
+              {measurements.length > 1 && <span className="size-index">{i + 1}.</span>}
+              <label><span>Genişlik (mm)</span>
+                <input type="number" min="1" step="0.5" value={m.width} onChange={(e) => update(m.id, 'width', e.target.value)} />
+              </label>
+              <span className="size-x">×</span>
+              <label><span>Yükseklik (mm)</span>
+                <input type="number" min="1" step="0.5" value={m.height} onChange={(e) => update(m.id, 'height', e.target.value)} />
+              </label>
+              {measurements.length > 1 && (
+                <button type="button" className="icon-btn" title="Bu kapağı kaldır" onClick={() => remove(m.id)}>✕</button>
+              )}
+            </div>
           ))}
-        </tbody>
-      </table>
-
-      <button type="button" className="btn-secondary add-row-btn" onClick={addMeasurement}>
-        + Bitişik Kapak Ekle
-      </button>
-
-      {summaryValid && (
-        <div style={{ 
-          marginTop: 12, 
-          padding: 12, 
-          background: 'var(--panel2)', 
-          borderRadius: 4,
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr 1fr',
-          gap: 12
-        }}>
-          <div>
-            <div style={{ fontSize: '0.85em', color: 'var(--muted)' }}>Toplam X</div>
-            <div style={{ fontSize: '1.1em', fontWeight: 600, color: totalWidth <= PLATE_WIDTH ? 'var(--success)' : 'var(--error)' }}>
-              {totalWidth.toFixed(0)} / {PLATE_WIDTH} mm
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: '0.85em', color: 'var(--muted)' }}>Max Y</div>
-            <div style={{ fontSize: '1.1em', fontWeight: 600, color: maxHeight <= PLATE_HEIGHT ? 'var(--success)' : 'var(--error)' }}>
-              {maxHeight.toFixed(0)} / {PLATE_HEIGHT} mm
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: '0.85em', color: 'var(--muted)' }}>Bıçak Sayısı</div>
-            <div style={{ fontSize: '1.1em', fontWeight: 600 }}>
-              {cfg.rows.length}
-            </div>
-          </div>
         </div>
-      )}
+        <button type="button" className="link-btn" onClick={add}>+ Yanına bitişik kapak ekle</button>
 
-      <button 
-        type="button" 
-        className="btn-primary" 
-        onClick={generate}
-        style={{ marginTop: 16 }}
-      >
-        G-code Üret
-      </button>
-      <div className="hint">Kısayol: Ctrl+Enter (Mac: ⌘+Enter)</div>
+        <h2>3 · Önizleme ve indir</h2>
+        {result.doors && <PartPreview gcode={result.gcode} doors={result.doors} />}
+        {result.error && <div className="err" style={{ display: 'block' }}>{result.error}</div>}
+        {result.notes?.length > 0 && <div className="hint notes">{result.notes.map((n) => <div key={n}>• {n}</div>)}</div>}
 
-      {message && <div className={message.type === 'err' ? 'err' : 'ok'} style={{ display: 'block' }}>{message.text}</div>}
+        <button type="button" className="btn-primary download-btn" onClick={download} disabled={!result.gcode}>
+          ⬇ G-code indir (.nc)
+        </button>
+        <div className="hint">Kısayol: Ctrl+Enter</div>
 
-      {output && (
-        <>
-          <h2 style={{ marginTop: 20 }}>Çıktı</h2>
-          <textarea value={output} readOnly spellCheck={false} />
-          <div className="out-actions">
-            <button type="button" className="btn-secondary" onClick={() => navigator.clipboard.writeText(output)}>Kopyala</button>
-            <button type="button" className="btn-secondary" onClick={download}>.nc indir</button>
+        {result.gcode && (
+          <div className="code-toggle">
+            <button type="button" className="link-btn" onClick={() => setShowCode((v) => !v)}>
+              {showCode ? 'G-code\'u gizle' : 'G-code\'u göster'}
+            </button>
+            {showCode && (
+              <>
+                <textarea value={result.gcode} readOnly spellCheck={false} />
+                <button type="button" className="btn-secondary" onClick={() => navigator.clipboard.writeText(result.gcode)}>Kopyala</button>
+              </>
+            )}
           </div>
-        </>
-      )}
+        )}
+      </section>
     </div>
   );
 }
