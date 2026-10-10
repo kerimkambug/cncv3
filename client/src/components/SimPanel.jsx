@@ -8,10 +8,11 @@ import { gridToStl } from '../lib/sim/millSim.js';
  * workshop's tool table), shows the machined part in 3D and offers it as STL.
  * Usable on any screen that produces a G-code.
  *
- * @param {{gcode?:string, getGcode?:()=>string, top?:number, tools?:object, name?:string}} props
+ * @param {{gcode?:string, getGcode?:()=>string, top?:number, tools?:object, name?:string, size?:{w:number,h:number,x0?:number,y0?:number}}} props
+ *        size: the real stock (door, plate…) in mm — without it the area the tools reach is used
  *        getGcode: for screens that build the program only on demand (nesting plates…)
  */
-export default function SimPanel({ gcode = null, getGcode = null, top = 18, tools = undefined, name = 'simulasyon' }) {
+export default function SimPanel({ gcode = null, getGcode = null, top = 18, tools = undefined, name = 'simulasyon', size = null }) {
   const [state, setState] = useState({ status: 'idle' }); // idle | running | done | error
   const [topVal, setTopVal] = useState(Number(top) || 18);
   useEffect(() => { setTopVal(Number(top) || 18); }, [top]);
@@ -29,7 +30,11 @@ export default function SimPanel({ gcode = null, getGcode = null, top = 18, tool
     if (!text) return;
     workerRef.current?.terminate();
     // grid size: 0.4 mm on a single part, coarser on a whole plate (≤ ~4 million columns)
-    const box = roughBox(text, topVal);
+    // the real stock when the screen knows it (the whole door, uncut margins included)
+    const stock = size && size.w > 0 && size.h > 0
+      ? { x0: size.x0 || 0, y0: size.y0 || 0, x1: (size.x0 || 0) + Number(size.w), y1: (size.y0 || 0) + Number(size.h) }
+      : null;
+    const box = stock ? { w: stock.x1 - stock.x0, h: stock.y1 - stock.y0 } : roughBox(text, topVal);
     const area = Math.max(1, box.w * box.h);
     const cell = Math.max(0.4, +Math.sqrt(area / 4e6).toFixed(2));
     const w = new Worker(new URL('../lib/sim/sim.worker.js', import.meta.url), { type: 'module' });
@@ -45,7 +50,7 @@ export default function SimPanel({ gcode = null, getGcode = null, top = 18, tool
       setState({ status: 'done', grid: e.data.grid, stats: e.data.stats, cell, seconds: (performance.now() - t0) / 1000 });
     };
     w.onerror = (e) => { setState({ status: 'error', message: e.message || 'Simülasyon çalışmadı.' }); w.terminate(); };
-    w.postMessage({ text, top: Number(topVal) || 18, cell, tools });
+    w.postMessage({ text, top: Number(topVal) || 18, cell, tools, box: stock });
   }
 
   function downloadStl() {
@@ -104,7 +109,8 @@ function SimView({ grid, top }) {
   useEffect(() => {
     const el = host.current;
     if (!el) return undefined;
-    const width = el.clientWidth || 800, height = Math.round(width * 0.62);
+    const size = () => { const w0 = el.clientWidth || 800; return [w0, Math.round(Math.min(w0 * 0.62, Math.max(320, window.innerHeight * 0.6)))]; };
+    const [width, height] = size();
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     renderer.setSize(width, height);
@@ -155,7 +161,7 @@ function SimView({ grid, top }) {
     controls.addEventListener('change', render);
     render();
     const onResize = () => {
-      const w2 = el.clientWidth || width, h2 = Math.round(w2 * 0.62);
+      const [w2, h2] = size();
       renderer.setSize(w2, h2); camera.aspect = w2 / h2; camera.updateProjectionMatrix(); render();
     };
     window.addEventListener('resize', onResize);

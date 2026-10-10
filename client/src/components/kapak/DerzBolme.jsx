@@ -108,7 +108,7 @@ export default function DerzBolme({ cfg }) {
             <button type="button" className="btn-secondary" onClick={() => navigator.clipboard.writeText(output)}>Kopyala</button>
             <button type="button" className="btn-secondary" onClick={download}>.nc indir</button>
           </div>
-          <SimPanel gcode={output} top={cfg.thickness} name="derz" />
+          <SimPanel gcode={output} top={cfg.thickness} size={{ w: width, h: height }} name="derz" />
         </>
       )}
     </div>

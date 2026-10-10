@@ -1,3 +1,4 @@
+import SimPanel from '../SimPanel.jsx';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import JSZip from 'jszip';
 import { parseDxf } from '../../lib/cerezlik/dxf.js';
@@ -13,6 +14,25 @@ import FigureTrayPanel from './FigureTrayPanel.jsx';
 import TextCarvePanel from './TextCarvePanel.jsx';
 
 const RECIPE_KEY = 'empire-cnc-cerezlik-recipe';
+
+/** The recipe's own tools for the simulation (numbers and sizes as set on this screen). */
+function simTools(r) {
+  const t = {};
+  const put = (no, type, dia, label) => {
+    if (no === undefined || no === '') return;
+    t[Number(no)] = { type, dia: Number(dia), name: `T${no} ${label}` };
+  };
+  put(r.pocket?.tool, 'flat', r.pocket?.dia || 6, 'tarama');
+  put(r.round?.tool, 'roundover', r.round?.dia || 20, 'yuvarlama');
+  put(r.groove?.tool, 'ball', r.groove?.dia || 10, 'oluk');
+  const d3 = r.d3 || {};
+  put(d3.rough?.tool, 'flat', d3.rough?.dia || 10, 'kaba');
+  put(d3.bowl?.tool, 'ball', d3.bowl?.dia || 30, 'bölme tabanı');
+  put(d3.semi?.tool, 'ball', d3.semi?.dia || 10, 'ara bitirme');
+  put(d3.relief?.tool, 'ball', d3.relief?.dia || 6, 'rölyef');
+  put(r.cut?.tool, 'flat', r.cut?.dia || 6, 'kesim');
+  return t;
+}
 const KIND_LABELS = [
   ['rough', 'Kaba boşaltma'], ['pocket', 'Bölme taraması'], ['bowl', 'Bölme tabanı'],
   ['semi', 'Figür ara bitirme'], ['relief', 'Figür detay'], ['round', 'Kenar yuvarlama'], ['groove', 'Oluk'],
@@ -523,6 +543,13 @@ export default function CerezlikModule() {
                 <button type="button" className="btn-secondary" onClick={() => download(fileName(plateIdx), programsFor()[plateIdx].gcode)}>⬇ Plaka {plateIdx + 1} ({recipe.ext})</button>
                 <button type="button" className="btn-accent2 cz-zip" onClick={downloadZip}>⬇ Hepsini indir (.zip)</button>
               </div>
+              <SimPanel
+                getGcode={() => programsFor()[plateIdx].gcode}
+                top={recipe.thickness}
+                tools={simTools(recipe)}
+                size={{ w: Number(plate.width), h: Number(plate.height) }}
+                name={`cerezlik-plaka-${plateIdx + 1}`}
+              />
             </div>
           ) : (
             <div className="card cz-empty">

@@ -127,7 +127,14 @@ export default function TekOlcu({ workspace, presets, presetsLoading }) {
           ⬇ G-code indir (.nc)
         </button>
         <div className="hint">Kısayol: Ctrl+Enter</div>
-        {result.gcode && <SimPanel gcode={result.gcode} top={cfg.thickness} name="kapak" />}
+        {result.gcode && (
+          <SimPanel
+            gcode={result.gcode}
+            top={cfg.thickness}
+            size={result.doors?.length ? { w: Math.max(...result.doors.map((d) => d.x + d.w)), h: Math.max(...result.doors.map((d) => d.y + d.h)) } : null}
+            name="kapak"
+          />
+        )}
 
         {result.gcode && (
           <div className="code-toggle">

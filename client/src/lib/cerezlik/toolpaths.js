@@ -30,7 +30,7 @@ export const DEFAULT_RECIPE = {
   climb: true,
   minWall: 6,
   pocket: { tool: 6, dia: 6, depth: 10, stepdown: 5, stepoverPct: 45, feed: 5000, plunge: 2000 },
-  round: { enabled: true, tool: 3, dia: 20, gap: 1, depth: 6, feed: 5000, plunge: 2000 },
+  round: { enabled: true, tool: 3, dia: 14.5, gap: 1, depth: 6, feed: 5000, plunge: 2000 },
   cut: { tool: 6, dia: 6, stepdown: 6, feed: 5000, plunge: 2000, tabs: 4, tabLen: 10, tabHeight: 2 },
   groove: { tool: 2, dia: 10, depth: 3, feed: 4000, plunge: 1500 },
   vline: { tool: 1, depth: 2, feed: 4000, plunge: 2000 },

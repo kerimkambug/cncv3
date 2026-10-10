@@ -80,6 +80,7 @@ export default function TopluListe({ workspace, presets, presetsLoading }) {
           <SimPanel
             getGcode={() => { const p = simLines[Math.min(simIdx, simLines.length - 1)]; return buildKapakGcode(p.width, p.height, cfg); }}
             top={cfg.thickness}
+            size={(() => { const p = simLines[Math.min(simIdx, simLines.length - 1)]; return { w: p.width, h: p.height }; })()}
             name="kapak"
           />
         </div>

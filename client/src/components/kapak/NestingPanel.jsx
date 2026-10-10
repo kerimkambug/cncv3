@@ -839,6 +839,7 @@ export default function NestingPanel({ cfg, plateCfg, defaultModelName }) {
             <SimPanel
               getGcode={() => buildNestingPlateGcode(result.plates[selectedPlateIndex] || result.plates[0], getActiveConfig(), resultPresetMap)}
               top={getActiveConfig().thickness}
+              size={{ w: result.plateW, h: result.plateH }}
               name={`plaka_${result.plates[selectedPlateIndex]?.number || 1}`}
             />
           )}

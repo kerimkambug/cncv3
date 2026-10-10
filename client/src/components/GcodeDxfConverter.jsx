@@ -115,7 +115,7 @@ export default function GcodeDxfConverter({ onBackToMenu }) {
             placeholder={'G21\nG90\nG0 X0 Y0\nG1 X500 Y0 F6000\nG1 X500 Y500\nG1 X0 Y500\nG1 X0 Y0'}
             spellCheck="false"
           />
-          {gcode.trim() && <SimPanel gcode={gcode} top={18} name={(fileName || 'gcode').replace(/.[^.]+$/, '')} />}
+          {gcode.trim() && <SimPanel gcode={gcode} top={18} name={(fileName || 'gcode').replace(/\.[^.]+$/, '')} />}
 
           <h2 className="converter-section-title">Dönüşüm ayarları</h2>
           <div className="row2">

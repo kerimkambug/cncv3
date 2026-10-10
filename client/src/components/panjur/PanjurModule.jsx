@@ -535,7 +535,14 @@ function downloadFile() {
             <button type="button" className="btn-secondary" onClick={copyCode}>Kopyala</button>
             <button type="button" className="btn-secondary" onClick={downloadFile}>.nc indir</button>
           </div>
-          <SimPanel gcode={output} top={currentConfig.thickness ?? 18} name="panjur" />
+          <SimPanel
+            gcode={output}
+            top={currentConfig.thickness ?? 18}
+            size={covers.length > 1
+              ? { w: covers.reduce((s, cv) => s + (cv.width || 0), 0) + coverGap * (covers.length - 1), h: Math.max(...covers.map((cv) => cv.height || 0)) }
+              : { w: currentConfig.width, h: currentConfig.height }}
+            name="panjur"
+          />
         </div>
       )}
       </div>

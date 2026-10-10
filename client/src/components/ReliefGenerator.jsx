@@ -774,7 +774,7 @@ export default function ReliefGenerator({ onBackToMenu }) {
                     💾 G-Code İndir (.nc)
                   </button>
                 </div>
-                <SimPanel gcode={output} top={cfg.thickness} name="rolyef" />
+                <SimPanel gcode={output} top={cfg.thickness} size={{ w: cfg.width, h: cfg.height }} name="rolyef" />
               </div>
             )}
           </div>

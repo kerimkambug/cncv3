@@ -9,18 +9,20 @@ import { parseGcode } from '../gcode/gcodeToDxf.js';
 
 /** The workshop's tools (see the tool table): profile type and size. */
 export const TOOL_TABLE = {
-  1: { type: 'v', dia: 20, angle: 90, name: 'T1 90° V' },
+  // V bits: the cone keeps widening at the same angle up the whole cutting length
+  1: { type: 'v', dia: 60, angle: 90, name: 'T1 90° V' },
   2: { type: 'ball', dia: 10, name: 'T2 Ø10 küre' },
-  3: { type: 'roundover', dia: 20, name: 'T3 sivri yuvarlama' },
+  3: { type: 'roundover', dia: 14.5, name: 'T3 sivri yuvarlama' },
   4: { type: 'flat', dia: 4, name: 'T4 Ø4 düz' },
-  5: { type: 'ball', dia: 10, name: 'T5 yuvarlama' },
+  // point-cutting roundover bits: concave quarter-round flank; T5 has a ~1 mm flat at the tip
+  5: { type: 'roundover', dia: 14.5, flat: 1, name: 'T5 düz uçlu yuvarlama' },
   6: { type: 'flat', dia: 6, name: 'T6 Ø6 düz' },
   7: { type: 'ball', dia: 30, name: 'T7 Ø30 küre' },
   8: { type: 'flat', dia: 8, name: 'T8 Ø8 düz' },
   9: { type: 'flat', dia: 22, name: 'T9 tabla bıçağı' },
   10: { type: 'flat', dia: 10, name: 'T10 Ø10 düz' },
   11: { type: 'flat', dia: 10, name: 'T11 kulp' },
-  12: { type: 'v', dia: 20, angle: 135, name: 'T12 135° V' },
+  12: { type: 'v', dia: 80, angle: 135, name: 'T12 135° V' },
   13: { type: 'ball', dia: 6, name: 'T13 rölyef' },
   14: { type: 'taper', dia: 12, tipDia: 2, angle: 8.8, name: 'T14 konik (panjur)' },
 };
@@ -38,10 +40,34 @@ export function profile(tool, d) {
       if (d <= r) return r - Math.sqrt(Math.max(0, r * r - d * d));
       return r + (d - r) / Math.tan(((tool.angle || 10) / 2) * Math.PI / 180);
     }
-    // pointed roundover: concave quarter-round flank, sharp tip
-    case 'roundover': return Math.sqrt(Math.max(0, R * R - (R - d) * (R - d)));
+    // roundover: quarter-round flank starting at the tip (sharp, or a small flat of `flat` mm)
+    case 'roundover': {
+      const f = (tool.flat || 0) / 2, Rr = R - f;
+      if (d <= f) return 0;
+      const u = d - f;
+      return Math.sqrt(Math.max(0, Rr * Rr - (Rr - u) * (Rr - u)));
+    }
     default: return 0; // flat end mill
   }
+}
+
+/** Distance from the axis where the tool's lower surface rises `depth` above its tip (≤ its radius). */
+function reach(tool, depth) {
+  const Rmax = tool.dia / 2;
+  if (!(depth > 0)) return 0;
+  if (profile(tool, Rmax) <= depth) return Rmax;
+  let lo = 0, hi = Rmax;
+  for (let k = 0; k < 30; k++) { const m = (lo + hi) / 2; if (profile(tool, m) <= depth) lo = m; else hi = m; }
+  return hi;
+}
+
+/** Profile as a lookup table over d² (no sqrt / trig per cell): fast and accurate to ~0.001 mm. */
+function profileTable(tool) {
+  const R = tool.dia / 2, R2 = R * R, N = 4096;
+  const t = new Float32Array(N + 2);
+  for (let k = 0; k <= N + 1; k++) t[k] = profile(tool, Math.sqrt(Math.min(1, k / N) * R2));
+  const s = N / R2;
+  return (d2) => { const f = d2 * s, k = f | 0; return k >= N ? (k === N ? t[N] : Infinity) : t[k] + (t[k + 1] - t[k]) * (f - k); };
 }
 
 /**
@@ -73,35 +99,48 @@ export function simulate(text, { top, cell = 0.4, tools = {}, box = null } = {})
   const z = new Float32Array(w * h).fill(top);
   const stats = { cuttingMm: 0, rapidCuts: 0, belowTable: 0, byTool: {} };
   let started = false;
+  const tables = new Map();
   for (const s of segs) {
     // the first move starts from an unknown position (the parser assumes 0,0,0): not a cut
     if (!started) { started = true; if (!s.from.x && !s.from.y && !s.from.z) continue; }
     const zMin = Math.min(s.from.z, s.to.z);
     if (zMin >= top) continue; // in the air
     const tool = toolOf(s.tool);
+    if (!tables.has(tool)) tables.set(tool, profileTable(tool));
+    const hOf = tables.get(tool);
     if (s.type === 'G0') stats.rapidCuts++;
     if (zMin < 0) stats.belowTable++;
     const L = Math.hypot(s.to.x - s.from.x, s.to.y - s.from.y, s.to.z - s.from.z);
     stats.cuttingMm += L;
     const key = tool.name;
     stats.byTool[key] = (stats.byTool[key] || 0) + L;
-    const steps = Math.max(1, Math.ceil(Math.hypot(s.to.x - s.from.x, s.to.y - s.from.y) / (cell * 0.5)));
-    for (let k = 0; k <= steps; k++) {
-      const t = k / steps;
-      const x = s.from.x + (s.to.x - s.from.x) * t, y = s.from.y + (s.to.y - s.from.y) * t, tz = s.from.z + (s.to.z - s.from.z) * t;
-      if (tz >= top) continue;
-      // the tool is stamped at its EXACT position (not snapped to the grid): on a steep
-      // wall a 0.2 mm snap would show as a millimetre of false gouge or false stock
-      const R = tool.dia / 2, R2 = R * R;
-      const i0 = Math.max(0, Math.floor((x - R - b.x0) / cell)), i1 = Math.min(w - 1, Math.ceil((x + R - b.x0) / cell));
-      const j0 = Math.max(0, Math.floor((y - R - b.y0) / cell)), j1 = Math.min(h - 1, Math.ceil((y + R - b.y0) / cell));
+    // Swept cut: the move is split into pieces (one piece when Z is constant, 1 mm pieces
+    // when it changes); every column near a piece is cut once, by the tool at the point of
+    // the piece closest to it — exact for level moves, within hundredths on sloped ones.
+    // only the part of the tool that reaches below the material top can cut: for a long
+    // V cone that is far less than its full width (keeps the sweep fast)
+    const zLow = Math.min(s.from.z, s.to.z);
+    const R = reach(tool, top - zLow) + cell, R2 = R * R;
+    const dzTotal = Math.abs(s.to.z - s.from.z);
+    const lenXY = Math.hypot(s.to.x - s.from.x, s.to.y - s.from.y);
+    const pieces = dzTotal < 1e-6 ? 1 : Math.max(1, Math.ceil(Math.max(lenXY, dzTotal) / Math.max(cell, 0.5)));
+    for (let p = 0; p < pieces; p++) {
+      const t0 = p / pieces, t1 = (p + 1) / pieces;
+      const ax = s.from.x + (s.to.x - s.from.x) * t0, ay = s.from.y + (s.to.y - s.from.y) * t0, az = s.from.z + (s.to.z - s.from.z) * t0;
+      const bx = s.from.x + (s.to.x - s.from.x) * t1, by = s.from.y + (s.to.y - s.from.y) * t1, bz = s.from.z + (s.to.z - s.from.z) * t1;
+      if (Math.min(az, bz) >= top) continue;
+      const ux = bx - ax, uy = by - ay, uu = ux * ux + uy * uy;
+      const i0 = Math.max(0, Math.floor((Math.min(ax, bx) - R - b.x0) / cell)), i1 = Math.min(w - 1, Math.ceil((Math.max(ax, bx) + R - b.x0) / cell));
+      const j0 = Math.max(0, Math.floor((Math.min(ay, by) - R - b.y0) / cell)), j1 = Math.min(h - 1, Math.ceil((Math.max(ay, by) + R - b.y0) / cell));
       for (let j = j0; j <= j1; j++) {
-        const dy = b.y0 + (j + 0.5) * cell - y, dy2 = dy * dy;
-        if (dy2 > R2) continue;
+        const py = b.y0 + (j + 0.5) * cell - ay;
         for (let i = i0; i <= i1; i++) {
-          const dx = b.x0 + (i + 0.5) * cell - x, d2 = dx * dx + dy2;
+          const px = b.x0 + (i + 0.5) * cell - ax;
+          let t = uu > 0 ? (px * ux + py * uy) / uu : 0;
+          if (t < 0) t = 0; else if (t > 1) t = 1;
+          const dx = px - ux * t, dy = py - uy * t, d2 = dx * dx + dy * dy;
           if (d2 > R2) continue;
-          const v = tz + profile(tool, Math.sqrt(d2));
+          const v = az + (bz - az) * t + hOf(d2);
           const idx = j * w + i;
           if (v < z[idx]) z[idx] = v;
         }
