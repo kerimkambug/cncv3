@@ -2,6 +2,7 @@ import { usePersistentState } from '../../hooks/usePersistentState.js';
 import MachineSettingsPanel from './MachineSettingsPanel.jsx';
 import PresetPanel from './PresetPanel.jsx';
 import ToolRows from './ToolRows.jsx';
+import UsersPanel, { PasswordPanel } from '../UsersPanel.jsx';
 
 /**
  * Atölye (workshop) — everything the person who sets the machine up needs and
@@ -9,8 +10,17 @@ import ToolRows from './ToolRows.jsx';
  * (create / edit / delete / import / export). The production screens only read
  * what is chosen here.
  */
-export default function AtolyePage({ workspace }) {
-  const [tab, setTab] = usePersistentState('empire-cnc-atolye-tab', 'modeller');
+export default function AtolyePage({ workspace, me = null }) {
+  const [tab0, setTab] = usePersistentState('empire-cnc-atolye-tab', 'modeller');
+  // no account (development server) = full access; otherwise models and users are the admin's
+  const isAdmin = !me || me.user?.role === 'admin';
+  const tabs = [
+    isAdmin && ['modeller', 'Modeller'],
+    ['makine', 'Makine'],
+    isAdmin && me && ['kullanicilar', 'Kullanıcılar'],
+    me && ['hesap', 'Hesabım'],
+  ].filter(Boolean);
+  const tab = tabs.some(([k]) => k === tab0) ? tab0 : tabs[0][0];
   const { machineCfg, setMachineCfg, plateCfg, setPlateCfg, rows, setRows } = workspace;
   return (
     <div className="atolye">
@@ -19,13 +29,17 @@ export default function AtolyePage({ workspace }) {
         <div className="hint">Makine ve model ayarları. Üretim ekranları buradaki seçimleri kullanır.</div>
       </div>
       <div className="tabs">
-        <button type="button" className={`tab${tab === 'modeller' ? ' active' : ''}`} onClick={() => setTab('modeller')}>Modeller</button>
-        <button type="button" className={`tab${tab === 'makine' ? ' active' : ''}`} onClick={() => setTab('makine')}>Makine</button>
+        {tabs.map(([k, label]) => (
+          <button key={k} type="button" className={`tab${tab === k ? ' active' : ''}`} onClick={() => setTab(k)}>{label}</button>
+        ))}
       </div>
 
       {tab === 'makine' && (
         <MachineSettingsPanel cfg={machineCfg} setCfg={setMachineCfg} plateCfg={plateCfg} setPlateCfg={setPlateCfg} />
       )}
+
+      {tab === 'kullanicilar' && <UsersPanel me={me?.user} />}
+      {tab === 'hesap' && <PasswordPanel />}
 
       {tab === 'modeller' && (
         <div className="atolye-models">

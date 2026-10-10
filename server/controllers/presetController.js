@@ -5,8 +5,22 @@ import { fileStore } from '../store/fileStore.js';
 // Normalizes a Mongoose document to the same plain-object shape the file
 // store returns, so the frontend never has to care which backend is active.
 function serializeMongoDoc(doc) {
-  const obj = doc.toObject({ versionKey: false });
+  const obj = dropNulls(doc.toObject({ versionKey: false }));
   return { ...obj, _id: String(obj._id) };
+}
+
+// Fields the schema declares but a model never set come back as null. The
+// generators treat "missing" and null differently (Number(null) is 0: a row
+// spindle speed of null was written as "M3 S0"), so a stored model must read
+// back exactly like the same model in presets.json: absent, not null.
+function dropNulls(v) {
+  if (Array.isArray(v)) return v.map(dropNulls);
+  if (v && typeof v === 'object' && !(v instanceof Date) && v.constructor === Object) {
+    const out = {};
+    for (const [k, x] of Object.entries(v)) if (x !== null && x !== undefined) out[k] = dropNulls(x);
+    return out;
+  }
+  return v;
 }
 
 export async function listPresets(req, res) {

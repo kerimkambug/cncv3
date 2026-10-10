@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { handleAuthError } from './useAuth.js';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api/presets';
 const STORAGE_KEY = 'empire-cnc-presets';
@@ -130,6 +131,7 @@ export function usePresets(moduleName) {
       // localStorage copy: a 500/400/401 means the backend is broken or the
       // request was rejected, and showing stale local data would hide that.
       if (!res.ok) {
+        if (handleAuthError(res)) return;
         const err = new Error(
           res.status >= 500
             ? `Preset sunucusu hata verdi (HTTP ${res.status}). Yerel kopya GÖSTERİLMİYOR — sunucu düzeltilmeli.`
@@ -177,6 +179,7 @@ export function usePresets(moduleName) {
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
+        if (handleAuthError(res)) return;
         const body = await res.json().catch(() => ({}));
         const err = new Error(body.error || (id ? 'Preset güncellenemedi.' : 'Preset oluşturulamadı.'));
         err.status = res.status;

@@ -15,6 +15,7 @@ import GcodeDxfConverter from './components/GcodeDxfConverter.jsx';
 import { useKapakWorkspace } from './hooks/useKapakWorkspace.js';
 import { usePersistentState } from './hooks/usePersistentState.js';
 import { usePresets } from './hooks/usePresets.js';
+import { useAuth } from './hooks/useAuth.js';
 
 const KNOWN = new Set([...MAIN_SCREENS, ...TOOL_SCREENS].map((s) => s.key).concat('atolye'));
 
@@ -23,6 +24,7 @@ export default function App() {
   const current = KNOWN.has(screen) ? screen : 'kapak';
   const workspace = useKapakWorkspace();
   const { presets, loading } = usePresets('kapak');
+  const me = useAuth();
   const [theme, setTheme] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('empire-cnc-theme'));
@@ -40,7 +42,7 @@ export default function App() {
   const kapakProps = { workspace, presets, presetsLoading: loading };
   return (
     <div className="app-layout">
-      <Topnav screen={current} onNavigate={setScreen} theme={theme} setTheme={setTheme} />
+      <Topnav screen={current} onNavigate={setScreen} theme={theme} setTheme={setTheme} me={me} />
       <main className="main-content">
         {current === 'kapak' && <TekOlcu {...kapakProps} />}
         {current === 'batch' && <TopluListe {...kapakProps} />}
@@ -54,7 +56,7 @@ export default function App() {
         {current === 'circle' && <DaireKesimi cfg={workspace.cfg} />}
         {current === 'derz' && <DerzBolme cfg={workspace.cfg} />}
         {current === 'gcode-dxf' && <GcodeDxfConverter />}
-        {current === 'atolye' && <AtolyePage workspace={workspace} />}
+        {current === 'atolye' && <AtolyePage workspace={workspace} me={me} />}
         <Footer />
       </main>
     </div>

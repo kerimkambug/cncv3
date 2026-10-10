@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Empire CNC — Giriş</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --panel2:#1e222c; --border:#2a2f3a; --text:#e6e8ec; --muted:#9aa2b1; --accent:#4f8cff; --ok:#2fd08a; --err:#ff5c5c; }
+  @media (prefers-color-scheme: light) { :root { --bg:#eef1f5; --panel:#fff; --panel2:#f3f5f8; --border:#d5dbe4; --text:#1c2430; --muted:#647084; --accent:#2367d1; --ok:#16855a; --err:#c43e4b; } }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:16px;
+    background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
+  .box { width:100%; max-width:380px; background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:26px; }
+  .brand { display:flex; align-items:center; gap:8px; font-weight:700; font-size:18px; margin-bottom:18px; }
+  .tabs { display:flex; gap:6px; margin-bottom:16px; }
+  .tabs button { flex:1; padding:9px; border-radius:8px; border:1px solid var(--border); background:var(--panel2); color:var(--muted); cursor:pointer; font-size:13px; }
+  .tabs button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  label { display:block; font-size:12px; color:var(--muted); margin:12px 0 5px; }
+  input { width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--border); background:var(--panel2); color:var(--text); font-size:14px; outline:none; }
+  input:focus { border-color:var(--accent); }
+  .go { width:100%; margin-top:18px; padding:11px; border:none; border-radius:8px; background:var(--accent); color:#fff; font-size:14px; font-weight:600; cursor:pointer; }
+  .go:disabled { opacity:.6; cursor:default; }
+  .msg { margin-top:14px; font-size:13px; line-height:1.45; white-space:pre-line; }
+  .msg.err { color:var(--err); } .msg.ok { color:var(--ok); }
+  .who { font-size:13px; color:var(--muted); margin-bottom:12px; }
+  .intro { font-size:13px; line-height:1.45; background:var(--panel2); border:1px solid var(--accent); border-radius:8px; padding:10px 12px; margin-bottom:6px; }
+  .switch { margin-top:16px; font-size:13px; color:var(--muted); text-align:center; }
+  .link { background:none; border:none; color:var(--accent); cursor:pointer; padding:0; font-size:13px; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="brand">⚙ Empire CNC</div>
+
+  <div id="blocked" hidden>
+    <div class="who" id="who"></div>
+    <div class="msg err" id="why"></div>
+    <button class="go" id="logout2" type="button">Çıkış yap</button>
+  </div>
+
+  <div id="forms">
+    <div class="intro" id="intro" hidden>Henüz hiç hesap yok. <b>İlk hesabı siz oluşturun:</b> bu hesap yönetici olur, sonraki kayıtları siz onaylarsınız.</div>
+    <div class="tabs" id="tabs">
+      <button type="button" id="tLogin" class="on">Giriş</button>
+      <button type="button" id="tReg">Kayıt ol</button>
+    </div>
+    <form id="form" autocomplete="on">
+      <div id="nameRow" hidden>
+        <label for="name">Ad soyad</label>
+        <input id="name" name="name" autocomplete="name">
+      </div>
+      <label for="email">E-posta</label>
+      <input id="email" name="email" type="email" required autocomplete="username">
+      <label for="password">Şifre</label>
+      <input id="password" name="password" type="password" required minlength="8" autocomplete="current-password">
+      <button class="go" id="submit" type="submit">Giriş yap</button>
+    </form>
+    <div class="msg" id="msg"></div>
+    <div class="switch" id="switch"></div>
+  </div>
+</div>
+<script>
+  let mode = 'login';
+  const $ = (id) => document.getElementById(id);
+  const show = (text, ok) => { $('msg').textContent = text || ''; $('msg').className = 'msg ' + (ok ? 'ok' : 'err'); };
+  function setMode(m) {
+    mode = m;
+    $('tLogin').classList.toggle('on', m === 'login');
+    $('tReg').classList.toggle('on', m === 'register');
+    $('nameRow').hidden = m !== 'register';
+    $('submit').textContent = m === 'login' ? 'Giriş yap' : 'Kayıt ol';
+    $('password').autocomplete = m === 'login' ? 'current-password' : 'new-password';
+    $('switch').innerHTML = m === 'login'
+      ? 'Hesabınız yok mu? <button type="button" class="link" id="goOther">Kayıt olun</button>'
+      : 'Hesabınız var mı? <button type="button" class="link" id="goOther">Giriş yapın</button>';
+    $('goOther').onclick = () => setMode(m === 'login' ? 'register' : 'login');
+    show('');
+  }
+  $('tLogin').onclick = () => setMode('login');
+  $('tReg').onclick = () => setMode('register');
+
+  async function api(path, body) {
+    const r = await fetch('/api/auth/' + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || 'İşlem yapılamadı.');
+    return data;
+  }
+
+  $('form').onsubmit = async (e) => {
+    e.preventDefault();
+    $('submit').disabled = true;
+    try {
+      const body = { email: $('email').value, password: $('password').value, name: $('name').value };
+      const data = await api(mode, body);
+      if (mode === 'register' && data.user.status !== 'active') { show(data.message, true); setMode('login'); show(data.message, true); }
+      else if (data.problem) { blocked(data.user, data.problem); }
+      else location.reload();
+    } catch (err) { show(err.message); }
+    $('submit').disabled = false;
+  };
+
+  function blocked(user, why) {
+    $('forms').hidden = true;
+    $('blocked').hidden = false;
+    $('who').textContent = (user.name ? user.name + ' · ' : '') + user.email;
+    $('why').textContent = why;
+  }
+  $('logout2').onclick = async () => { await api('logout'); location.reload(); };
+
+  setMode('login');
+  // very first visit: no account yet → straight to creating the admin account
+  fetch('/api/auth/status').then((r) => r.json()).then((d) => {
+    if (d.hasUsers) return;
+    setMode('register');
+    $('intro').hidden = false;
+    $('tabs').hidden = true;
+    $('switch').hidden = true;
+    $('submit').textContent = 'Yönetici hesabını oluştur';
+  }).catch(() => {});
+
+  // signed in but without access (pending, expired, disabled)
+  fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => { if (d && d.problem) blocked(d.user, d.problem); }).catch(() => {});
+</script>
+</body>
+</html>

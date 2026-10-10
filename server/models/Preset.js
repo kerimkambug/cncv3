@@ -105,6 +105,10 @@ const PresetSchema = new mongoose.Schema(
     description: { type: String, default: '' },
     previewWidth: { type: Number, default: 600 },
     previewHeight: { type: Number, default: 600 },
+    // the size the model was designed on (narrow-door adaptation scales from it);
+    // without these fields Mongo would drop them and narrow doors would cut differently
+    refWidth: { type: Number },
+    refHeight: { type: Number },
     thickness: { type: Number, default: 18 },
     spindleSpeed: { type: Number, default: 18000 },
     safeZ: { type: Number, default: 61 },

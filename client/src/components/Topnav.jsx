@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { logout } from '../hooks/useAuth.js';
 
 // Production screens, left to right in the top menu.
 export const MAIN_SCREENS = [
@@ -21,7 +22,7 @@ export const TOOL_SCREENS = [
  * One top bar for the whole app: the production screens, an "Araçlar" menu for
  * the occasional helpers, and "Atölye" (machine + model settings) on the right.
  */
-export default function Topnav({ screen, onNavigate, theme, setTheme }) {
+export default function Topnav({ screen, onNavigate, theme, setTheme, me = null }) {
   const [toolsOpen, setToolsOpen] = useState(false);
   const toolsRef = useRef(null);
   useEffect(() => {
@@ -65,6 +66,13 @@ export default function Topnav({ screen, onNavigate, theme, setTheme }) {
         </div>
       </nav>
       <div className="topnav-right">
+        {me?.user && (
+          <span className="topnav-user" title={me.user.email}>
+            {me.user.name || me.user.email}
+            {me.user.role !== 'admin' && me.user.accessUntil && <small> · {new Date(me.user.accessUntil).toLocaleDateString('tr-TR')} tarihine kadar</small>}
+            <button type="button" className="link-btn" onClick={logout}>Çıkış</button>
+          </span>
+        )}
         <button type="button" className={`nav-btn atolye-btn${screen === 'atolye' ? ' active' : ''}`} onClick={() => go('atolye')}>
           ⚙ Atölye
         </button>

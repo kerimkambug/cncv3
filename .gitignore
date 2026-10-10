@@ -20,3 +20,8 @@ karsilastirma-ham-veri.txt
 venv/
 __pycache__/
 *.pyc
+
+# accounts (password hashes) and the session key: never in git
+server/data/users.json
+server/data/.session-secret
+server/.env.local
