@@ -15,8 +15,10 @@ export async function connectDB() {
     return;
   }
   try {
-    await mongoose.connect(uri, { serverSelectionTimeoutMS: 3000 });
-    console.log(`[db] connected: ${uri}`);
+    // Atlas from a cold free-tier server can take several seconds to answer
+    await mongoose.connect(uri, { serverSelectionTimeoutMS: 15000 });
+    // never print the password into the host's logs
+    console.log(`[db] connected: ${uri.replace(/\/\/([^:/@]+):[^@]*@/, '//$1:****@')}`);
   } catch (err) {
     console.warn(`[db] MongoDB connection failed (${err.message}) — falling back to local file storage.`);
   }
