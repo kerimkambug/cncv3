@@ -8,6 +8,7 @@
 // junction detail seen in real ArtCAM output (hand-drawn fillets before
 // the offset toolpath is computed) is not replicated. Functionally
 // equivalent (same depth, same coverage), just not the same aesthetic.
+import { guardZ } from './zGuard.js';
 import ClipperLib from 'clipper-lib';
 import { fmt3 } from './common.js';
 import { camComputeOpenings } from './cam.js';
@@ -106,7 +107,7 @@ export function buildCamPartProgram(width, height, cfg) {
     lines.push(`G1 Y${f2(y2)} F${feed}`, `G1 X${f2(x1)}`, `G1 Y${f2(y1)}`, `G1 X${f2(x2)}`);
     lines.push(`G0 Z${safeZ}`);
   });
-  return lines.join('\n');
+  return guardZ(lines.join('\n'));
 }
 
 export function buildCamTaramaGcode(cfg) {
@@ -140,5 +141,5 @@ export function buildCamTaramaGcode(cfg) {
   lines.push('M5');
   lines.push('M16');
   lines.push('M30');
-  return lines.join('\n');
+  return guardZ(lines.join('\n'));
 }

@@ -5,6 +5,7 @@
 // the outermost lines sit to the edge than the plain margin would place
 // them — needed so a round-over bit's point doesn't land exactly on a
 // corner).
+import { guardZ } from './zGuard.js';
 import { fmt } from './common.js';
 
 /**
@@ -165,5 +166,5 @@ export function buildDerzGcode(opts, cfg) {
   lines.push('M5');
   lines.push('M16');
   lines.push('M30');
-  return lines.join('\n');
+  return guardZ(lines.join('\n'));
 }

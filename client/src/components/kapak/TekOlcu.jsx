@@ -1,3 +1,6 @@
+import SimPanel from '../SimPanel.jsx';
+import { guardZ } from '../../lib/gcode/zGuard.js';
+import { mergeToolBlocks } from '../../lib/gcode/toolOrder.js';
 import { useMemo, useState } from 'react';
 import { buildKapakGcode, validateKapakSize, validateCarvingWarnings, planNarrowDoor } from '../../lib/gcode/kapak.js';
 import { useCtrlEnter } from '../../hooks/useCtrlEnter.js';
@@ -57,7 +60,8 @@ export default function TekOlcu({ workspace, presets, presetsLoading }) {
     const hz = Number(cfg.homeZ || 0).toFixed(2);
     lines.push(`G0 X0.00 Y0.00 Z${hz}`, `G0Z${hz}`, 'X0.00Y0.00', 'M5', 'M16', 'M30');
     validateCarvingWarnings(cfg.rows).forEach((w) => notes.push(w));
-    return { gcode: lines.join('\n'), doors, notes };
+    // side-by-side doors: each tool once for all of them
+    return { gcode: guardZ(mergeToolBlocks(lines.join('\n'))), doors, notes };
   }, [measurements, cfg, canGenerate, plateW, plateH]);
 
   const modelName = workspace.modelName(presets);
@@ -123,6 +127,7 @@ export default function TekOlcu({ workspace, presets, presetsLoading }) {
           ⬇ G-code indir (.nc)
         </button>
         <div className="hint">Kısayol: Ctrl+Enter</div>
+        {result.gcode && <SimPanel gcode={result.gcode} top={cfg.thickness} name="kapak" />}
 
         {result.gcode && (
           <div className="code-toggle">

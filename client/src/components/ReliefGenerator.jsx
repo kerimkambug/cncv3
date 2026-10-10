@@ -1,3 +1,4 @@
+import SimPanel from './SimPanel.jsx';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   DEFAULT_RELIEF_CONFIG,
@@ -773,6 +774,7 @@ export default function ReliefGenerator({ onBackToMenu }) {
                     💾 G-Code İndir (.nc)
                   </button>
                 </div>
+                <SimPanel gcode={output} top={cfg.thickness} name="rolyef" />
               </div>
             )}
           </div>

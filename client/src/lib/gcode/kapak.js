@@ -1,5 +1,7 @@
 // kapak.js
 // Rectangular multi-tool pocket cutting (cabinet doors / "tabla")
+import { guardZ } from './zGuard.js';
+import { mergeToolBlocks } from './toolOrder.js';
 import { fmt, computeCumOffsets } from './common.js';
 import { numOr, toFiniteNumber, validateDepthAgainstThickness } from '../../../../shared/gcode/validation.js';
 import { computeDerzPositions, trimDerzLine, derzBoxLine } from './derz.js';
@@ -777,11 +779,15 @@ function remapNarrowLine(line, plan, offsetX, offsetY) {
  */
 export function buildKapakGcode(width, height, cfg, offsetX = 0, offsetY = 0, isCombined = false) {
   const plan = planNarrowDoor(width, height, cfg);
-  if (!plan) return buildKapakGcodeCore(width, height, cfg, offsetX, offsetY, isCombined);
-  return buildKapakGcodeCore(plan.vw, plan.vh, plan.cfg, 0, 0, isCombined)
-    .split('\n')
-    .map((l) => remapNarrowLine(l, plan, offsetX, offsetY))
-    .join('\n');
+  const text = !plan
+    ? buildKapakGcodeCore(width, height, cfg, offsetX, offsetY, isCombined)
+    : buildKapakGcodeCore(plan.vw, plan.vh, plan.cfg, 0, 0, isCombined)
+      .split('\n')
+      .map((l) => remapNarrowLine(l, plan, offsetX, offsetY))
+      .join('\n');
+  // One tool change per tool. A combined program is merged by its caller
+  // (several doors / a nesting plate), together with everything else on the plate.
+  return guardZ(isCombined ? text : mergeToolBlocks(text));
 }
 
 /**

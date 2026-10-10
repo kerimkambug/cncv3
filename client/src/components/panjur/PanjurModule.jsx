@@ -1,3 +1,4 @@
+import SimPanel from '../SimPanel.jsx';
 import { useState, useEffect, useMemo } from 'react';
 import { generatePanjurGcode, panjurGroups } from '../../lib/gcode/panjur.js';
 import { useCtrlEnter } from '../../hooks/useCtrlEnter.js';
@@ -534,6 +535,7 @@ function downloadFile() {
             <button type="button" className="btn-secondary" onClick={copyCode}>Kopyala</button>
             <button type="button" className="btn-secondary" onClick={downloadFile}>.nc indir</button>
           </div>
+          <SimPanel gcode={output} top={currentConfig.thickness ?? 18} name="panjur" />
         </div>
       )}
       </div>

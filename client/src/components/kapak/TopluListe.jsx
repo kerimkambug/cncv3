@@ -1,3 +1,4 @@
+import SimPanel from '../SimPanel.jsx';
 import { useState } from 'react';
 import JSZip from 'jszip';
 import { buildKapakGcode, validateKapakSize, validateCarvingWarnings, parseBatchLine } from '../../lib/gcode/kapak.js';
@@ -55,6 +56,8 @@ export default function TopluListe({ workspace, presets, presetsLoading }) {
   }
 
   useCtrlEnter(generate);
+  const [simIdx, setSimIdx] = useState(0);
+  const simLines = list.split(/\r?\n/).map((l) => parseBatchLine(l.trim())).filter(Boolean);
 
   return (
     <div className="card">
@@ -68,6 +71,19 @@ export default function TopluListe({ workspace, presets, presetsLoading }) {
         placeholder={'327-656\n351-720\n373-715\n760-702-2'}
       />
       <button type="button" className="btn-primary download-btn" onClick={generate} disabled={!canGenerate}>⬇ Hepsini indir (.zip)</button>
+      {canGenerate && simLines.length > 0 && (
+        <div className="sim-pick">
+          <label>Simülasyon için kapak</label>
+          <select value={Math.min(simIdx, simLines.length - 1)} onChange={(e) => setSimIdx(Number(e.target.value))}>
+            {simLines.map((p, i) => <option key={i} value={i}>{p.width} × {p.height}</option>)}
+          </select>
+          <SimPanel
+            getGcode={() => { const p = simLines[Math.min(simIdx, simLines.length - 1)]; return buildKapakGcode(p.width, p.height, cfg); }}
+            top={cfg.thickness}
+            name="kapak"
+          />
+        </div>
+      )}
       {message && (
         <div className={message.type === 'err' ? 'err' : 'ok'} style={{ display: 'block', whiteSpace: 'pre-line' }}>
           {message.text}

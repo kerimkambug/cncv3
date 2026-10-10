@@ -8,7 +8,9 @@ import { cssVar, drawPart, drawPaths, fitView, setupCanvas } from './draw.js';
  * the part's toolpaths, and with `onToggleComp` a click on a bowl toggles it
  * between pocket and through hole.
  */
-export default function PartCanvas({ part, size, recipe, onToggleComp }) {
+export default function PartCanvas({ part, size, recipe, onToggleComp, machined = null }) {
+  // `machined`: the part as it will be cut (e.g. dished bowls) — drawn instead; clicks still use `part`
+  const shown = machined || part;
   const ref = useRef(null);
   const viewRef = useRef(null);
   const ops = useMemo(() => (recipe ? partToolpaths(part, recipe) : null), [part, recipe]);
@@ -26,9 +28,9 @@ export default function PartCanvas({ part, size, recipe, onToggleComp }) {
     const pad = thumb ? 4 : 30;
     const view = fitView(box, w, h, pad);
     viewRef.current = view;
-    drawPart(ctx, part, view.map, { bg: cssVar('--panel', '#171a21'), toolLine: thumb ? 0.6 : 1 });
+    drawPart(ctx, shown, view.map, { bg: cssVar('--panel', '#171a21'), toolLine: thumb ? 0.6 : 1 });
     if (ops) drawPaths(ctx, ops.flatMap((op) => op.passes.map((pts) => ({ kind: op.kind, pts }))), view.map, 0.7);
-  }, [part, ops, w, h, thumb]);
+  }, [part, shown, ops, w, h, thumb]);
 
   function onClick(e) {
     if (!onToggleComp || !viewRef.current) return;

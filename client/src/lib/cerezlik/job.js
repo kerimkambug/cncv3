@@ -55,7 +55,7 @@ export function toolpathLibrary(parts, recipe) {
   return new Map(parts.map((p) => [p.id, { ops: partToolpaths(p, recipe), area: p.area }]));
 }
 
-export function platePrograms(result, parts, recipe) {
+export function platePrograms(result, parts, recipe, kinds = null) {
   const lib = toolpathLibrary(parts, recipe);
-  return result.plates.map((pl) => buildPlateProgram(pl, lib, recipe));
+  return result.plates.map((pl) => buildPlateProgram(pl, lib, recipe, kinds));
 }

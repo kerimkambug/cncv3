@@ -7,6 +7,7 @@ import { bbox, signedArea, offset, intersectionArea, transform, polylineDistance
 import { sampleDrawing, dxfDoc, circle, lwpoly, crescentPoints } from './sampleDxf.js';
 
 const recipe = structuredClone(DEFAULT_RECIPE);
+recipe.bowlStyle = 'duz'; // the 2D tests below check flat pockets; dished bowls have their own tests
 const sample = () => buildParts(parseDxf(sampleDrawing()), 'ornek');
 
 describe('DXF reading', () => {
@@ -202,9 +203,150 @@ describe('built-in catalog', async () => {
           expect(intersectionArea([a.pts], [b.pts])).toBeLessThan(0.01);
           expect(polylineDistance(a.pts, b.pts)).toBeGreaterThan(5);
         }
+        // a ball-nose groove (Ø10) stays clear of the edge and of every compartment
+        for (const g of part.grooves || []) {
+          expect(polylineDistance(g.pts, part.outline)).toBeGreaterThan(8);
+          for (const c of part.comps) expect(polylineDistance(g.pts, c.pts)).toBeGreaterThan(8);
+        }
         const ops = partToolpaths(part, recipe);
         expect(ops.find((o) => o.kind === 'cut').passes.length).toBeGreaterThan(0);
       }
     });
+  }
+
+  it('yin-yang: surface stays full height — only the cup is cleared, plus one T2 groove pass', () => {
+    const m = CATALOG.find((x) => x.id === 'sunum-yinyang');
+    const part = catalogPart(m, {});
+    expect(part.comps).toHaveLength(1); // the cup seat
+    const ops = partToolpaths(part, recipe);
+    expect(ops.map((o) => o.kind)).toEqual(['pocket', 'round', 'groove', 'cut']);
+    const pocketZ = Math.min(...ops[0].passes.flat().map((q) => q[2]));
+    expect(pocketZ).toBe(18 - 5);
+    const groove = ops.find((o) => o.kind === 'groove');
+    expect(groove.tool).toBe(2);
+    expect(groove.passes).toHaveLength(1);
+    expect(groove.passes[0].every((q) => q[2] === 18 - 3)).toBe(true);
+  });
+
+  it('juice groove board: the groove is one T2 pass, not a pocket', () => {
+    const part = catalogPart(CATALOG.find((x) => x.id === 'kesme-oluklu'), {});
+    const ops = partToolpaths(part, recipe);
+    expect(ops.some((o) => o.kind === 'pocket')).toBe(false);
+    expect(ops.find((o) => o.kind === 'groove').passes[0].every((q) => q[2] === 18 - 5)).toBe(true);
+  });
+});
+
+describe('figure tray (3D)', async () => {
+  const { sampleShell } = await import('./figure.js');
+  const { figureTrayPart } = await import('./figureTray.js');
+  const { buildPlateProgram } = await import('./gcode.js');
+  const part = figureTrayPart(sampleShell(260), { cell: 0.6 }, 18);
+  const ops = partToolpaths(part, recipe);
+  const g = part.surface.grid;
+  const target = (x, y) => {
+    const i = Math.floor((x - g.x0) / g.cell), j = Math.floor((y - g.y0) / g.cell);
+    return i < 0 || j < 0 || i >= g.w || j >= g.h ? 18 : 18 - g.z[j * g.w + i];
+  };
+
+  it('six dished bowls around the figure recess', () => {
+    expect(part.comps.filter((c) => !c.figure)).toHaveLength(6);
+    expect(part.comps.filter((c) => c.figure)).toHaveLength(1);
+    expect(part.warnings).toEqual([]);
+  });
+
+  it('tool order: T10 rough, T7 bowls, T2 semi, relief bit, T3, T6', () => {
+    expect(ops.map((o) => [o.kind, o.tool])).toEqual([['rough', 10], ['bowl', 7], ['semi', 2], ['relief', 13], ['round', 3], ['cut', 6]]);
+  });
+
+  it('figure top sits at the material top, its floor at top − (figTop + figH)', () => {
+    let deepest = 0, shallowFig = Infinity;
+    const rm = part.surface.recessMask;
+    for (let k = 0; k < g.z.length; k++) if (rm[k]) { deepest = Math.max(deepest, g.z[k]); shallowFig = Math.min(shallowFig, g.z[k]); }
+    expect(deepest).toBeCloseTo(10, 1);
+    expect(shallowFig).toBeLessThan(0.3);
+  });
+
+  it('no finishing or roughing point below the surface', () => {
+    for (const op of ops.filter((o) => ['bowl', 'semi', 'relief'].includes(o.kind))) {
+      // points between cell centres: the surface is sampled at the centres, so allow the
+      // height a small ball may legitimately sit below a neighbouring centre (≤ 0.05 mm)
+      for (const pass of op.passes) for (const [x, y, z] of pass) expect(z).toBeGreaterThanOrEqual(target(x, y) - 0.05);
+    }
+    const rough = ops.find((o) => o.kind === 'rough');
+    // the end mill never goes below the surface (flat floors are cut at their exact depth)
+    for (const pass of rough.passes) for (const [x, y, z] of pass) expect(z).toBeGreaterThanOrEqual(target(x, y) - 0.01);
+  });
+
+  it('plate program: one tool change per tool, nothing below the table', () => {
+    const lib = new Map([['f', { ops, area: part.area }]]);
+    const prog = buildPlateProgram({ placements: [{ id: 'f', angle: 0, dx: 50, dy: 50 }] }, lib, recipe);
+    const lines = prog.gcode.trim().split('\n');
+    expect(lines.filter((l) => l.startsWith('M6T'))).toEqual(['M6T10', 'M6T7', 'M6T2', 'M6T13', 'M6T3', 'M6T6']);
+    const zs = lines.map((l) => /Z(-?[\d.]+)/.exec(l)).filter(Boolean).map((m) => +m[1]);
+    expect(Math.min(...zs)).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('V-carved text', async () => {
+  const { carveFromMask, placeCarve, thin, traceSkeleton } = await import('./textCarve.js');
+  const { CATALOG, catalogPart } = await import('./catalog.js');
+  // a 40 × 6 mm bar at 10 px/mm
+  const w = 420, h = 80, mask = new Uint8Array(w * h);
+  for (let y = 10; y < 70; y++) for (let x = 10; x < 410; x++) mask[y * w + x] = 1;
+  const bar = { mask, w, h, mmPerPx: 0.1 };
+
+  it('a bar thins to one centre line', () => {
+    const paths = traceSkeleton(thin(mask, w, h), w, h);
+    expect(paths.length).toBeLessThanOrEqual(5); // centre line + tiny corner spurs
+    expect(Math.max(...paths.map((p) => p.length))).toBeGreaterThan(300);
+  });
+
+  it('depth = half stroke width / tan(half angle), capped', () => {
+    const deep = (paths) => Math.max(...paths.flat().map((q) => q[2]));
+    expect(deep(carveFromMask(bar, { angle: 90, maxDepth: 10 }))).toBeCloseTo(3, 0);
+    expect(deep(carveFromMask(bar, { angle: 135, maxDepth: 10 }))).toBeCloseTo(3 / Math.tan((67.5 * Math.PI) / 180), 0);
+    expect(deep(carveFromMask(bar, { angle: 90, maxDepth: 2 }))).toBeLessThanOrEqual(2);
+  });
+
+  it('placed bottom right, inside the margin and clear of the hanging hole', () => {
+    const part = catalogPart(CATALOG.find((m) => m.id === 'kesme-delikli'), {});
+    const { paths, fits } = placeCarve(part, carveFromMask(bar, { angle: 90 }), { anchor: 'sag-alt', margin: 18 });
+    expect(fits).toBe(true);
+    const xs = paths.flat().map((q) => q[0]), ys = paths.flat().map((q) => q[1]);
+    expect(Math.max(...xs)).toBeLessThanOrEqual(part.width - 18 + 0.01);
+    expect(Math.min(...ys)).toBeGreaterThanOrEqual(18 - 0.01);
+    expect(Math.max(...xs)).toBeGreaterThan(part.width - 40); // really at the right
+    const ops = partToolpaths({ ...part, carve: paths, text: { tool: 1, angle: 90 } }, recipe);
+    expect(ops.find((o) => o.kind === 'vcarve').tool).toBe(1);
+  });
+});
+
+describe('dished bowls (kase) on every catalog model', async () => {
+  const { CATALOG, catalogPart } = await import('./catalog.js');
+  const { preparePart } = await import('./toolpaths.js');
+  const { buildPlateProgram } = await import('./gcode.js');
+  const { repeatedTools } = await import('../gcode/toolOrder.js');
+  const { minZ } = await import('../gcode/zGuard.js');
+  const kase = { ...structuredClone(DEFAULT_RECIPE), bowlStyle: 'kase' };
+  for (const m of CATALOG.filter((x) => catalogPart(x, {}).comps.some((c) => c.kind === 'cep'))) {
+    it(m.name, () => {
+      const part = catalogPart(m, {});
+      const dished = preparePart(part, kase);
+      const bowls = dished.comps.filter((c) => c.kind === 'cep3d');
+      expect(bowls.length).toBeGreaterThan(0);
+      const ops = partToolpaths(part, kase);
+      expect(ops.some((o) => o.kind === 'pocket')).toBe(false);
+      // one T7 ring per bowl: the floor radius equals the ball radius
+      const bowl = ops.find((o) => o.kind === 'bowl');
+      expect(bowl.tool).toBe(7);
+      expect(bowl.passes.length).toBeLessThanOrEqual(bowls.length);
+      // never below the surface (cell-centre sampling tolerance)
+      const g = dished.surface.grid;
+      const target = (x, y) => { const i = Math.floor((x - g.x0) / g.cell), j = Math.floor((y - g.y0) / g.cell); return i < 0 || j < 0 || i >= g.w || j >= g.h ? 18 : 18 - g.z[j * g.w + i]; };
+      for (const op of ops.filter((o) => ['rough', 'bowl'].includes(o.kind))) for (const p of op.passes) for (const [x, y, z] of p) expect(z).toBeGreaterThanOrEqual(target(x, y) - 0.05);
+      const prog = buildPlateProgram({ placements: [{ id: 'p', angle: 0, dx: 20, dy: 20 }] }, new Map([['p', { ops, area: part.area }]]), kase);
+      expect(minZ(prog.gcode)).toBeGreaterThanOrEqual(0);
+      expect(repeatedTools(prog.gcode, '6')).toEqual([]);
+    }, 60000);
   }
 });

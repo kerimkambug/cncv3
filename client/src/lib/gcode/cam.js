@@ -3,6 +3,7 @@
 // rectangles for a 2-column-by-N-row grid, and generates the "kesim"
 // (through-cut) gcode for them. Validated against real production files —
 // see camTarama.js for the routing ("tarama") pass.
+import { guardZ } from './zGuard.js';
 import { fmt3 } from './common.js';
 
 /**
@@ -77,5 +78,5 @@ export function buildCamKesimGcode(cfg) {
   lines.push('M5');
   lines.push('M16');
   lines.push('M30');
-  return lines.join('\n');
+  return guardZ(lines.join('\n'));
 }

@@ -1,3 +1,4 @@
+import SimPanel from '../SimPanel.jsx';
 import { useState } from 'react';
 import { buildCircleGcode, resolveCircleParams } from '../../lib/gcode/circle.js';
 import { useCtrlEnter } from '../../hooks/useCtrlEnter.js';
@@ -86,6 +87,7 @@ export default function DaireKesimi({ cfg }) {
             <button type="button" className="btn-secondary" onClick={() => navigator.clipboard.writeText(output)}>Kopyala</button>
             <button type="button" className="btn-secondary" onClick={download}>.nc indir</button>
           </div>
+          <SimPanel gcode={output} top={cfg.thickness} name="daire" />
         </>
       )}
     </div>

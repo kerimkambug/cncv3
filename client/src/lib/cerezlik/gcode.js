@@ -1,8 +1,8 @@
 // G-code for one nested plate, in the workshop machine's dialect (same header,
 // tool change and footer as the ArtCAM files in numuneler/): tool by tool,
-// pocket → rounding → V lines → through cuts (small parts first).
+// pocket → rounding → ball-nose grooves → V lines → through cuts (small parts first).
 
-const KIND_ORDER = ['pocket', 'round', 'vline', 'cut'];
+const KIND_ORDER = ['rough', 'pocket', 'bowl', 'semi', 'relief', 'round', 'groove', 'vline', 'vcarve', 'cut'];
 const RAPID = 10000; // mm/min, for the time estimate only
 const TOOL_CHANGE_S = 15;
 
@@ -25,7 +25,7 @@ export function placeOps(ops, { angle, dx, dy }) {
  * @param {Map<string, {ops:Array, area:number}>} lib  toolpaths per part id (part coordinates)
  * @param {object} recipe
  */
-export function buildPlateProgram(plate, lib, recipe) {
+export function buildPlateProgram(plate, lib, recipe, kinds = null) {
   const top = Number(recipe.thickness);
   const safeZ = top + (Number(recipe.safeAbove) || 28);
   const clearZ = top + (Number(recipe.clearAbove) || 5);
@@ -57,6 +57,16 @@ export function buildPlateProgram(plate, lib, recipe) {
     }
     jobs.push(...list.map((j) => j.op));
   }
+  if (kinds) jobs.splice(0, jobs.length, ...jobs.filter((j) => kinds.has(j.kind)));
+  // One tool change per tool: every job of a tool runs together (tools in order
+  // of first use); the through cuts stay last whatever their tool.
+  const byTool = new Map();
+  for (const op of jobs.filter((j) => j.kind !== 'cut')) {
+    const k = String(op.tool);
+    if (!byTool.has(k)) byTool.set(k, []);
+    byTool.get(k).push(op);
+  }
+  jobs.splice(0, jobs.length, ...[...byTool.values()].flat(), ...jobs.filter((j) => j.kind === 'cut'));
 
   const out = ['makro'];
   let tool = null, feedNow = null, justChanged = false;
@@ -104,7 +114,7 @@ export function buildPlateProgram(plate, lib, recipe) {
 
   // feeds differ per op; use each op's own feed for its length
   const minutes = estimateMinutes(jobs, { rapidLen, toolChanges });
-  return { gcode: out.join('\n') + '\n', minutes, preview, stats: { feedLen, plungeLen, rapidLen, toolChanges } };
+  return { gcode: guardZ(out.join('\n') + '\n'), minutes, preview, stats: { feedLen, plungeLen, rapidLen, toolChanges } };
 }
 
 function estimateMinutes(jobs, { rapidLen, toolChanges }) {
@@ -117,4 +127,5 @@ function estimateMinutes(jobs, { rapidLen, toolChanges }) {
     }
   }
   return m;
-}
+}import { guardZ } from '../gcode/zGuard.js';
+

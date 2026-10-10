@@ -465,7 +465,7 @@ export function generatePanjurGcode(c, offsetX = 0, offsetY = 0, isCombined = fa
   // --- YENİ EKLENEN KISIM BİTİŞİ ---
 
   return {
-    gcode: lines.join('\n'),
+    gcode: guardZ(lines.join('\n')),
     nextN: n,
     groups: g.groups,
     panjurData: g,
@@ -545,6 +545,7 @@ export function buildPanjurGcode(opts) {
   push('M30');
   lines.push('%');
 
-  return { gcode: lines.join('\n'), stepsPerBlade: numSteps, actualYStep };
+  return { gcode: guardZ(lines.join('\n')), stepsPerBlade: numSteps, actualYStep };
 }
+import { guardZ } from './zGuard.js';
 

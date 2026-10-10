@@ -1,3 +1,4 @@
+import SimPanel from '../SimPanel.jsx';
 import { Fragment, useRef, useState, useEffect } from 'react';
 import JSZip from 'jszip';
 import {
@@ -834,6 +835,13 @@ export default function NestingPanel({ cfg, plateCfg, defaultModelName }) {
           <div className="nesting-preview">
             <canvas ref={canvasRef} id="nestCanvas" width="900" height="450" />
           </div>
+          {result?.plates?.length > 0 && (
+            <SimPanel
+              getGcode={() => buildNestingPlateGcode(result.plates[selectedPlateIndex] || result.plates[0], getActiveConfig(), resultPresetMap)}
+              top={getActiveConfig().thickness}
+              name={`plaka_${result.plates[selectedPlateIndex]?.number || 1}`}
+            />
+          )}
 
           {showToolpaths && (
             <div className="hint" style={{ marginTop: 8 }}>

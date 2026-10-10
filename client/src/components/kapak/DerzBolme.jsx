@@ -1,3 +1,4 @@
+import SimPanel from '../SimPanel.jsx';
 import { useState } from 'react';
 import { buildDerzGcode, computeDerzPositions } from '../../lib/gcode/derz.js';
 import { useCtrlEnter } from '../../hooks/useCtrlEnter.js';
@@ -107,6 +108,7 @@ export default function DerzBolme({ cfg }) {
             <button type="button" className="btn-secondary" onClick={() => navigator.clipboard.writeText(output)}>Kopyala</button>
             <button type="button" className="btn-secondary" onClick={download}>.nc indir</button>
           </div>
+          <SimPanel gcode={output} top={cfg.thickness} name="derz" />
         </>
       )}
     </div>

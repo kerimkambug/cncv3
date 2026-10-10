@@ -5,12 +5,25 @@
 //   1. pocket  — compartments cleared ring by ring, inside out, in depth steps
 //   2. round   — T3 rounding: `gap` mm outside the outline / islands, `gap` mm
 //                inside every compartment, so no step is left on the wall
-//   3. vline   — open drawing lines engraved with the V bit
-//   4. cut     — through holes first, then the outline with holding tabs
+//   3. groove  — ball-nose (T2) passes along a line: juice grooves, decorative
+//                rings that run a little inside the edge
+//   4. vline   — open drawing lines engraved with the V bit
+//   5. cut     — through holes first, then the outline with holding tabs
+//
+// 3D parts (figure trays, part.surface) replace the pocket step with:
+//   rough  — flat end mill (T10) z-level rings over the whole surface, leaving a skin
+//   bowl   — large ball nose (T7) parallel finishing of the dished compartments
+//   semi   — T2 ball nose over the figure (takes the load off the small bit)
+//   relief — the small relief ball nose, figure only
 import { offset, pathLength, signedArea, simplifyLoop } from './geom.js';
+import { ballRaster, contourFinish, roughLevels, wallWaterline } from './surface.js';
+import { dishPart } from './dish.js';
 
 export const DEFAULT_RECIPE = {
   thickness: 18,
+  // compartments: 'kase' = dished, made to fit the finishing ball (T10 floor + one T7 ring);
+  // 'duz' = flat floor, vertical walls, cleared by the pocket bit
+  bowlStyle: 'kase',
   spindle: 18000,
   safeAbove: 28, // rapid height above the material top
   clearAbove: 5, // short hop height between passes of the same part
@@ -18,8 +31,15 @@ export const DEFAULT_RECIPE = {
   minWall: 6,
   pocket: { tool: 6, dia: 6, depth: 10, stepdown: 5, stepoverPct: 45, feed: 5000, plunge: 2000 },
   round: { enabled: true, tool: 3, dia: 20, gap: 1, depth: 6, feed: 5000, plunge: 2000 },
-  cut: { tool: 6, dia: 6, stepdown: 6, overcut: 0, feed: 5000, plunge: 2000, tabs: 4, tabLen: 10, tabHeight: 2 },
+  cut: { tool: 6, dia: 6, stepdown: 6, feed: 5000, plunge: 2000, tabs: 4, tabLen: 10, tabHeight: 2 },
+  groove: { tool: 2, dia: 10, depth: 3, feed: 4000, plunge: 1500 },
   vline: { tool: 1, depth: 2, feed: 4000, plunge: 2000 },
+  d3: {
+    rough: { tool: 10, dia: 10, stepdown: 3, stepoverPct: 45, leave: 0.5, feed: 5000, plunge: 2000 },
+    bowl: { tool: 7, dia: 30, stepover: 2, feed: 5000, plunge: 2000 },
+    semi: { enabled: true, tool: 2, dia: 10, stepover: 1.2, leave: 2, feed: 4500, plunge: 1500 },
+    relief: { tool: 13, dia: 6, stepover: 0.6, feed: 3500, plunge: 1000 },
+  },
 };
 
 /** How far the tools reach outside a part's outline (drives the gap between parts). */
@@ -82,20 +102,98 @@ function pocketPasses(comp, recipe) {
   const top = Number(recipe.thickness);
   const passes = [];
   for (const d of levels(Math.min(Number(comp.depth ?? p.depth) || 0, top), p.stepdown)) {
-    const z = +(top - d).toFixed(3);
-    let pass = null, last = null;
-    for (let i = rings.length - 1; i >= 0; i--) {
-      for (const loop0 of rings[i]) {
-        const loop = startNear(orient(loop0, signedArea(loop0) < 0, recipe.climb), last);
-        const linkOk = pass && last && Math.hypot(loop[0][0] - last[0], loop[0][1] - last[1]) <= step * 1.2 + 0.05;
-        if (!linkOk) { if (pass) passes.push(pass); pass = []; }
-        pass.push(...close3(loop, z, 0.03));
-        last = loop[0];
-      }
-    }
-    if (pass) passes.push(pass);
+    passes.push(...ringPasses(rings, +(top - d).toFixed(3), step, recipe.climb));
   }
   return passes;
+}
+
+/** Concentric rings (outermost first in `rings`) cut inside out at height z. */
+function ringPasses(rings, z, step, climb) {
+  const passes = [];
+  let pass = null, last = null;
+  for (let i = rings.length - 1; i >= 0; i--) {
+    for (const loop0 of rings[i]) {
+      const loop = startNear(orient(loop0, signedArea(loop0) < 0, climb), last);
+      const linkOk = pass && last && Math.hypot(loop[0][0] - last[0], loop[0][1] - last[1]) <= step * 1.2 + 0.05;
+      if (!linkOk) { if (pass) passes.push(pass); pass = []; }
+      pass.push(...close3(loop, z, 0.03));
+      last = loop[0];
+    }
+  }
+  if (pass) passes.push(pass);
+  return passes;
+}
+
+/** Height map of a 3D part for the current material: depth below top → machine Z. */
+function heights(surface, top) {
+  const g = surface.grid;
+  const z = new Float32Array(g.z.length);
+  for (let k = 0; k < z.length; k++) z[k] = top - g.z[k];
+  return { ...g, z };
+}
+
+const cache3d = new WeakMap();
+
+/** Rough + finish ops of a 3D part (cached per part and recipe). */
+function surfaceOps(part, recipe) {
+  const d3 = { ...DEFAULT_RECIPE.d3, ...(recipe.d3 || {}) };
+  const key = JSON.stringify(['v7', recipe.thickness, recipe.climb, d3]);
+  const hit = cache3d.get(part.surface);
+  if (hit && hit.key === key) return hit.ops;
+  const top = Number(recipe.thickness);
+  const H = heights(part.surface, top);
+  const ops = [];
+  // rough: z levels, rings inside the region the tool centre may visit
+  const rg = d3.rough;
+  const r = (Number(rg.dia) || 10) / 2;
+  const step = Math.max(0.5, ((Number(rg.stepoverPct) || 45) / 100) * 2 * r);
+  const roughPasses = [];
+  for (const lv of roughLevels(H, { r, stepdown: Number(rg.stepdown) || 5, leave: Number(rg.leave) || 0, top })) {
+    for (const sh of lv.shapes) {
+      const loops = [sh.outer, ...sh.holes].map((l) => simplifyLoop(l, 0.1)).filter((l) => l.length >= 3);
+      const rings = [];
+      let cur = offset(loops, -0.01, { keepOrientation: true });
+      while (cur.length && rings.length < 4000) {
+        rings.push(cur);
+        cur = offset(cur, -step, { keepOrientation: true, arcTol: 0.1 });
+      }
+      roughPasses.push(...ringPasses(rings, lv.z, step, recipe.climb));
+    }
+  }
+  if (roughPasses.length) ops.push({ kind: 'rough', tool: rg.tool, feed: rg.feed, plunge: rg.plunge, passes: roughPasses });
+  // finishing
+  const bw = d3.bowl;
+  // each compartment on its own: rings along the wall, evenly spaced over the curve
+  const bowlPasses = part.comps
+    .filter((c) => c.kind === 'cep3d' && !c.figure)
+    .flatMap((c) => contourFinish(H, [c.pts, ...(c.islands || [])], { R: (Number(bw.dia) || 30) / 2, stepover: Number(bw.stepover) || 2, top, climb: recipe.climb, step: 1.5, simplifyTol: 0.015 }));
+  // a compartment deeper than the ball radius has a vertical wall above the
+  // floor ring's reach: waterline rings at the same offset finish it
+  const Rb = (Number(bw.dia) || 30) / 2;
+  for (const c of part.comps.filter((x) => x.kind === 'cep3d' && !x.figure)) {
+    const D = Number(c.depth ?? part.figureParams?.depth ?? 0);
+    if (!(D > 0)) continue;
+    bowlPasses.push(...wallWaterline(H, [c.pts, ...(c.islands || [])], { R: Rb, stepdown: Number(bw.stepover) || 2, top, zMin: top - D + Rb, climb: recipe.climb, step: 1.5 }));
+  }
+  if (bowlPasses.length) ops.push({ kind: 'bowl', tool: bw.tool, feed: bw.feed, plunge: bw.plunge, passes: bowlPasses });
+  if (d3.semi.enabled) {
+    // T2 semi-finish stays `leave` mm above the figure: the relief bit then
+    // finishes the whole figure, always cutting that even layer
+    const sm = d3.semi;
+    const semi = ballRaster(H, part.surface.recessMask, { R: (Number(sm.dia) || 10) / 2, stepover: Number(sm.stepover) || 1.2, top, leave: Number(sm.leave ?? 2) });
+    if (semi.length) ops.push({ kind: 'semi', tool: sm.tool, feed: sm.feed, plunge: sm.plunge, passes: semi });
+  }
+  const rl = d3.relief;
+  const relief = ballRaster(H, part.surface.recessMask, { R: (Number(rl.dia) || 6) / 2, stepover: Number(rl.stepover) || 0.6, top });
+  // the figure's surrounding wall: waterline rings over its full height (a raster
+  // crossing a steep wall leaves it ribbed and the top of it untouched)
+  for (const c of part.comps.filter((x) => x.kind === 'cep3d' && x.figure)) {
+    const recessDepth = Number(part.figureParams?.figTop || 0) + Number(part.figureParams?.figH || 0);
+    if (recessDepth > 0) relief.push(...wallWaterline(H, [c.pts], { R: (Number(rl.dia) || 6) / 2, stepdown: Math.max(0.2, Number(rl.stepover) || 0.6), top, zMin: top - recessDepth, climb: recipe.climb }));
+  }
+  if (relief.length) ops.push({ kind: 'relief', tool: rl.tool, feed: rl.feed, plunge: rl.plunge, passes: relief });
+  cache3d.set(part.surface, { key, ops });
+  return ops;
 }
 
 /** Holding tabs on a closed 3D pass: the stretches inside a tab rise to `tabZ`. */
@@ -134,12 +232,33 @@ function addTabs(pass, count, len, tabZ) {
  * All operations of one part. Each op: {kind, tool, feed, plunge, passes}.
  * Part coordinates are local (outline bbox at the origin).
  */
-export function partToolpaths(part, recipe) {
+const dishCache = new WeakMap();
+
+/**
+ * The part as it will be machined: with dished compartments ('kase') every
+ * flat pocket of a catalog model or a DXF drawing becomes a bowl made for the
+ * finishing ball. Cached per part and recipe.
+ */
+export function preparePart(part, recipe) {
+  if (recipe.bowlStyle !== 'kase' || part.surface || !part.comps.some((c) => c.kind === 'cep')) return part;
+  const ballR = (Number(recipe.d3?.bowl?.dia) || DEFAULT_RECIPE.d3.bowl.dia) / 2;
+  const depth = Math.min(Number(recipe.pocket.depth) || 0, Number(recipe.thickness) - 3);
+  const key = JSON.stringify([ballR, depth]);
+  const hit = dishCache.get(part);
+  if (hit && hit.key === key) return hit.part;
+  const dished = dishPart(part, { depth, ballR });
+  dishCache.set(part, { key, part: dished });
+  return dished;
+}
+
+export function partToolpaths(part0, recipe) {
+  const part = preparePart(part0, recipe);
   const top = Number(recipe.thickness);
   const ops = [];
   const climb = recipe.climb;
 
-  // 1. pockets
+  // 1. pockets (3D parts: rough + finishing from the height map)
+  if (part.surface) ops.push(...surfaceOps(part, recipe));
   const pocketPassesAll = part.comps.filter((c) => c.kind === 'cep').flatMap((c) => pocketPasses(c, recipe));
   if (pocketPassesAll.length) ops.push({ kind: 'pocket', tool: recipe.pocket.tool, feed: recipe.pocket.feed, plunge: recipe.pocket.plunge, passes: pocketPassesAll });
 
@@ -151,22 +270,44 @@ export function partToolpaths(part, recipe) {
     const loops = [];
     for (const l of offset([part.outline], gap)) loops.push(orient(l, true, climb));
     for (const c of part.comps) {
+      if (c.kind === 'cep3d' && !c.roundable) continue; // a dished bowl has no vertical edge to round
       for (const l of offset([c.pts], -gap)) loops.push(orient(l, false, climb));
       if (c.kind === 'cep') for (const isl of c.islands) for (const l of offset([isl], gap)) loops.push(orient(l, true, climb));
     }
     if (loops.length) ops.push({ kind: 'round', tool: rd.tool, feed: rd.feed, plunge: rd.plunge, passes: loops.map((l) => close3(l, z)) });
   }
 
-  // 3. engraving lines
+  // 3. ball-nose grooves (closed loops or open lines; depth per groove, else the recipe's)
+  const gr = recipe.groove || DEFAULT_RECIPE.groove;
+  if (part.grooves && part.grooves.length) {
+    const passes = part.grooves.map((g) => {
+      const z = +(top - (Number(g.depth ?? gr.depth) || 0)).toFixed(3);
+      return g.closed ? close3(g.pts, z) : g.pts.map(([x, y]) => [x, y, z]);
+    });
+    ops.push({ kind: 'groove', tool: gr.tool, feed: gr.feed, plunge: gr.plunge, passes });
+  }
+
+  // 4. engraving lines
   if (part.lines.length) {
     const z = +(top - (Number(recipe.vline.depth) || 0)).toFixed(3);
     ops.push({ kind: 'vline', tool: recipe.vline.tool, feed: recipe.vline.feed, plunge: recipe.vline.plunge, passes: part.lines.map((l) => l.map(([x, y]) => [x, y, z])) });
   }
 
-  // 4. through cuts: holes, then the outline (with tabs on the passes below the tab top)
+  // 4b. V-carved text: depth follows the stroke width (computed when the text was set)
+  if (part.carve && part.carve.length) {
+    ops.push({
+      kind: 'vcarve',
+      tool: part.text?.tool ?? recipe.vline.tool,
+      feed: recipe.vline.feed,
+      plunge: recipe.vline.plunge,
+      passes: part.carve.map((p) => p.map(([x, y, d]) => [x, y, +(top - d).toFixed(3)])),
+    });
+  }
+
+  // 5. through cuts: holes, then the outline (with tabs on the passes below the tab top)
   const c = recipe.cut;
   const rc = (Number(c.dia) || 6) / 2;
-  const bottom = -(Number(c.overcut) || 0);
+  const bottom = 0; // through cuts stop at the table: never below Z0
   const cutDepths = levels(top - bottom, c.stepdown).map((d) => +(top - d).toFixed(3));
   const holePasses = [];
   for (const comp of part.comps.filter((k) => k.kind === 'delik')) {

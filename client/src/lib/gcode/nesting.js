@@ -6,6 +6,8 @@
 //    - Aşama 2 (İşleme): Tanımlı bıçak sırası (T7, T2, T9 vs.) ile kapak motifi/profili işlenir.
 //    - Aşama 3 (Final Kesim - İşleme Sonrası): 6mm kesim bıçağıyla Z0'a kadar inilerek parça plakadan ayrılır.
 // 3. Sıralama: Sağ en üstteki parçadan sola doğru, satır satır yukarıdan aşağıya (sağdan sola).
+import { guardZ } from './zGuard.js';
+import { mergeToolBlocks } from './toolOrder.js';
 import { fmt, emitRectCutPath } from './common.js';
 import { numOr, toFiniteNumber, validateNestingGap, validateDepthAgainstThickness } from '../../../../shared/gcode/validation.js';
 import { parseNestImportText } from '../../../../shared/nest/csvImport.js';
@@ -528,9 +530,14 @@ function splitToolBlocks(programLines) {
  * every part is cut before block k+1 of any part. Each part's block starts with
  * a full X/Y/Z approach, so no move depends on where the previous part ended.
  */
-function emitPartProgramsByTool(lines, parts, cfg) {
+function emitPartProgramsByTool(lines, parts, cfg, throughCuts = null) {
   if (!hasToolpaths(cfg) || !parts.length) return;
   const perPart = parts.map((part) => splitToolBlocks(partProgram(part, cfg).split('\n')));
+  // Glass doors: the opening is cut through and frees a loose scrap, so it joins
+  // the final cuts at the end of the plate instead of the machining stage.
+  if (cfg.cam && throughCuts) {
+    perPart.forEach((blocks) => { const cut = blocks.pop(); if (cut) throughCuts.push(cut); });
+  }
   // Key = tool + its occurrence index, so a tool used twice (T6 ... T1 ... T6)
   // keeps two separate blocks. Order = first appearance over all parts.
   const order = [];
@@ -699,9 +706,11 @@ export function buildNestingPlateGcode(plate, cfg, presetMap = {}) {
   // loose scraps, so every other part is machined before that happens.
   const profileGroups = groupNestingPartsByPreset(plate.parts, cfg, presetMap);
   const ordered = [...profileGroups.filter((g) => !g.cfg.cam), ...profileGroups.filter((g) => g.cfg.cam)];
+  const throughCuts = [];
   ordered.forEach((group) => {
-    emitPartProgramsByTool(lines, group.parts, { ...group.cfg, ...getMachineParams(group.cfg) });
+    emitPartProgramsByTool(lines, group.parts, { ...group.cfg, ...getMachineParams(group.cfg) }, throughCuts);
   });
+  throughCuts.forEach((b) => { lines.push(...b.head, ...b.body, `G0Z${fmt(toolChangeZ)}`, 'M5'); });
 
   // 3. AŞAMA: İŞLEME SONRASI FİNAL KESİM / EBATLAMA (Z0'A KADAR)
   if (doOuterCut) {
@@ -719,7 +728,9 @@ export function buildNestingPlateGcode(plate, cfg, presetMap = {}) {
   lines.push('M5');
   lines.push('M16');
   lines.push('M30');
-  return lines.join('\n');
+  // One tool change per tool over the whole plate: every part's work with a tool
+  // (and the pre-cut) is done in one go; only the final cut's tool comes back at the end.
+  return guardZ(mergeToolBlocks(lines.join('\n'), { finalTool: doOuterCut ? String(cutToolNo) : null }));
 }
 
 /**

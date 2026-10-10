@@ -2,16 +2,6 @@ import { useEffect, useRef } from 'react';
 import { transform, bbox } from '../../lib/cerezlik/geom.js';
 import { cssVar, drawPart, drawPaths, fitView, setupCanvas } from './draw.js';
 
-const placePart = (part, pc) => {
-  const t = (pts) => transform(pts, pc.angle, pc.dx, pc.dy);
-  return {
-    ...part,
-    outline: t(part.outline),
-    comps: part.comps.map((c) => ({ ...c, pts: t(c.pts), islands: (c.islands || []).map(t) })),
-    lines: part.lines.map(t),
-  };
-};
-
 /** The plate with its placed parts (numbered) and, optionally, the toolpaths. */
 export default function PlateCanvas({ plate, placements, parts, preview, edge }) {
   const ref = useRef(null);
@@ -39,15 +29,20 @@ export default function PlateCanvas({ plate, placements, parts, preview, edge })
     }
     const byId = new Map(parts.map((p) => [p.id, p]));
     const bg = cssVar('--panel2', '#1e222c');
-    const placed = placements.map((pc) => byId.get(pc.id) && placePart(byId.get(pc.id), pc)).filter(Boolean);
-    for (const p of placed) drawPart(ctx, p, view.map, { bg, toolLine: 0.8 });
+    // each part is drawn in its own coordinates through "placement, then view",
+    // so shaded 3D surfaces turn and move exactly like the outline
+    const placed = placements.map((pc) => ({ part: byId.get(pc.id), pc })).filter((x) => x.part);
+    for (const { part, pc } of placed) {
+      const map = (pt) => view.map(transform([pt], pc.angle, pc.dx, pc.dy)[0]);
+      drawPart(ctx, part, map, { bg, toolLine: 0.8 });
+    }
     if (preview) drawPaths(ctx, preview, view.map, 0.6);
     // numbers: order of the parts on this plate
     ctx.font = '600 13px system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    placed.forEach((p, i) => {
-      const b = bbox([p.outline]);
+    placed.forEach(({ part, pc }, i) => {
+      const b = bbox([transform(part.outline, pc.angle, pc.dx, pc.dy)]);
       const [cx, cy] = view.map([(b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2]);
       ctx.fillStyle = 'rgba(0,0,0,.55)';
       ctx.beginPath(); ctx.arc(cx, cy, 11, 0, Math.PI * 2); ctx.fill();

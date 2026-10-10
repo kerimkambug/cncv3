@@ -2,15 +2,22 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import JSZip from 'jszip';
 import { parseDxf } from '../../lib/cerezlik/dxf.js';
 import { buildParts, checkPart } from '../../lib/cerezlik/parts.js';
-import { DEFAULT_RECIPE } from '../../lib/cerezlik/toolpaths.js';
+import { DEFAULT_RECIPE, preparePart } from '../../lib/cerezlik/toolpaths.js';
 import { DEFAULT_PLATE, nestInput, platePrograms, spacing } from '../../lib/cerezlik/job.js';
 import { sampleDrawing } from '../../lib/cerezlik/sampleDxf.js';
 import { area as polyArea } from '../../lib/cerezlik/geom.js';
 import PartCanvas from './PartCanvas.jsx';
 import PlateCanvas from './PlateCanvas.jsx';
 import CatalogPicker from './CatalogPicker.jsx';
+import FigureTrayPanel from './FigureTrayPanel.jsx';
+import TextCarvePanel from './TextCarvePanel.jsx';
 
 const RECIPE_KEY = 'empire-cnc-cerezlik-recipe';
+const KIND_LABELS = [
+  ['rough', 'Kaba boşaltma'], ['pocket', 'Bölme taraması'], ['bowl', 'Bölme tabanı'],
+  ['semi', 'Figür ara bitirme'], ['relief', 'Figür detay'], ['round', 'Kenar yuvarlama'], ['groove', 'Oluk'],
+  ['vline', 'V çizgi'], ['vcarve', 'Yazı'], ['cut', 'Kesim'],
+];
 const PLATE_KEY = 'empire-cnc-cerezlik-plate';
 
 /** localStorage-backed state; nested objects are merged over the defaults. */
@@ -66,6 +73,7 @@ export default function CerezlikModule() {
   const [running, setRunning] = useState(null); // progress text while nesting
   const [error, setError] = useState('');
   const [showPaths, setShowPaths] = useState(true);
+  const [excluded, setExcluded] = useState([]); // operation kinds left out of the downloaded file
   const [dragOver, setDragOver] = useState(false);
   const [source, setSource] = useState('katalog');
   const fileInput = useRef(null);
@@ -73,7 +81,7 @@ export default function CerezlikModule() {
 
   const parts = useMemo(() => files.flatMap((f) => f.parts), [files]);
   const gapInfo = spacing(recipe, plate);
-  const inputKey = JSON.stringify([recipe, plate, parts.map((p) => [p.id, p.qty, p.comps.map((c) => c.kind)])]);
+  const inputKey = JSON.stringify([recipe, plate, parts.map((p) => [p.id, p.qty, p.comps.map((c) => c.kind), p.text])]);
   const stale = result && result.key !== inputKey;
   const partWarnings = useMemo(() => new Map(parts.map((p) => [p.id, checkPart(p, recipe)])), [parts, recipe]);
   const totalQty = parts.reduce((s, p) => s + (Number(p.qty) || 0), 0);
@@ -110,13 +118,16 @@ export default function CerezlikModule() {
     if (added.length) setFiles((f) => [...f, ...added]);
   }
 
-  function addCatalogPart(part, qty) {
+  function addCatalogPart(part, qty, groupId = 'katalog', groupName = 'Katalogdan') {
     setFiles((fs) => {
-      const cat = fs.find((f) => f.id === 'katalog') || { id: 'katalog', name: 'Katalogdan', warnings: [], parts: [] };
+      const cat = fs.find((f) => f.id === groupId) || { id: groupId, name: groupName, warnings: [], parts: [] };
       const next = { ...cat, parts: [...cat.parts, { ...part, id: `k${++fileSeq}`, qty }] };
-      return fs.some((f) => f.id === 'katalog') ? fs.map((f) => (f.id === 'katalog' ? next : f)) : [next, ...fs];
+      return fs.some((f) => f.id === groupId) ? fs.map((f) => (f.id === groupId ? next : f)) : [next, ...fs];
     });
   }
+  const setD3 = (sec, k, v) => setRecipe((r) => ({ ...r, d3: { ...r.d3, [sec]: { ...r.d3[sec], [k]: v } } }));
+  const has3d = parts.some((p) => p.surface) || source === 'figur'
+    || (recipe.bowlStyle !== 'duz' && parts.some((p) => p.comps.some((c) => c.kind === 'cep')));
 
   const removePart = (id) => {
     setFiles((fs) => fs.map((f) => ({ ...f, parts: f.parts.filter((p) => p.id !== id) })).filter((f) => f.parts.length));
@@ -145,7 +156,8 @@ export default function CerezlikModule() {
       setTimeout(() => {
         try {
           const programs = platePrograms(msg.result, list, recipe);
-          setResult({ nest: msg.result, programs, key, parts: list });
+          // shown as they will be machined (dished bowls shaded)
+          setResult({ nest: msg.result, programs, key, parts: list.map((p) => preparePart(p, recipe)) });
           setPlateIdx(0);
           setSelected(null);
         } catch (err) {
@@ -164,12 +176,18 @@ export default function CerezlikModule() {
     setRunning(null);
   }
 
-  const fileName = (i) => `plaka-${i + 1}${recipe.ext || '.nc'}`;
+  // operations present on the plates, and the ones left out of the file (e.g. a finishing-only re-run)
+  const resultKinds = result ? KIND_LABELS.filter(([k]) => result.programs.some((p) => p.preview.some((q) => q.kind === k))) : [];
+  const partial = resultKinds.some(([k]) => excluded.includes(k));
+  const programsFor = () => (partial
+    ? platePrograms(result.nest, result.parts, recipe, new Set(resultKinds.map(([k]) => k).filter((k) => !excluded.includes(k))))
+    : result.programs);
+  const fileName = (i) => `plaka-${i + 1}${partial ? '-secili' : ''}${recipe.ext || '.nc'}`;
   async function downloadZip() {
     const zip = new JSZip();
     const dir = zip.folder(safeName(recipe.material));
-    result.programs.forEach((p, i) => dir.file(fileName(i), p.gcode));
-    download(`cerezlik-${safeName(recipe.material)}.zip`, await zip.generateAsync({ type: 'blob' }));
+    programsFor().forEach((p, i) => dir.file(fileName(i), p.gcode));
+    download(`cerezlik-${safeName(recipe.material)}${partial ? '-secili' : ''}.zip`, await zip.generateAsync({ type: 'blob' }));
   }
 
   const plateArea = plate.width * plate.height;
@@ -195,9 +213,11 @@ export default function CerezlikModule() {
             <h2>1 · Parçalar</h2>
             <div className="cz-source">
               <button type="button" className={`tab${source === 'katalog' ? ' active' : ''}`} onClick={() => setSource('katalog')}>Hazır modeller</button>
+              <button type="button" className={`tab${source === 'figur' ? ' active' : ''}`} onClick={() => setSource('figur')}>Figürlü tepsi</button>
               <button type="button" className={`tab${source === 'dxf' ? ' active' : ''}`} onClick={() => setSource('dxf')}>DXF yükle</button>
             </div>
             {source === 'katalog' && <CatalogPicker onAdd={addCatalogPart} />}
+            {source === 'figur' && <FigureTrayPanel thickness={Number(recipe.thickness) || 18} ballR={(Number(recipe.d3?.bowl?.dia) || 30) / 2} reliefDia={Number(recipe.d3?.relief?.dia) || 6} onAdd={(p, q) => addCatalogPart(p, q, 'figur', 'Figürlü tepsiler')} />}
             {source === 'dxf' && (<>
             <div
               className={`cz-drop${dragOver ? ' over' : ''}`}
@@ -232,11 +252,11 @@ export default function CerezlikModule() {
                       </button>
                       <div className="cz-part-info" onClick={() => setSelected(selected === p.id ? null : p.id)}>
                         <strong>{p.name}</strong>
-                        <span>{p.width.toFixed(0)} × {p.height.toFixed(0)} mm · {p.comps.length} bölme{p.lines.length ? ` · ${p.lines.length} çizgi` : ''}</span>
+                        <span>{p.width.toFixed(0)} × {p.height.toFixed(0)} mm · {p.comps.length} bölme{p.grooves?.length ? ` · ${p.grooves.length} oluk` : ''}{p.lines.length ? ` · ${p.lines.length} çizgi` : ''}{p.carve?.length ? ' · yazılı' : ''}</span>
                         {warns.length > 0 && <span className="cz-warn">⚠ {warns[0]}{warns.length > 1 ? ` (+${warns.length - 1})` : ''}</span>}
                       </div>
                       <div className="cz-qty">
-                        <label>Adet{f.id === 'katalog' && <button type="button" className="cz-x" title="Kaldır" onClick={() => removePart(p.id)}>✕</button>}</label>
+                        <label>Adet{(f.id === 'katalog' || f.id === 'figur') && <button type="button" className="cz-x" title="Kaldır" onClick={() => removePart(p.id)}>✕</button>}</label>
                         <input type="number" min="0" step="1" value={p.qty} onChange={(e) => updatePart(p.id, (x) => ({ ...x, qty: Math.max(0, Math.floor(Number(e.target.value) || 0)) }))} />
                       </div>
                     </div>
@@ -253,7 +273,47 @@ export default function CerezlikModule() {
               <Num label="Kalınlık" suffix="mm" value={recipe.thickness} onChange={(v) => set('thickness', v)} />
             </div>
 
-            <h3>Bölme taraması</h3>
+            {has3d && (
+              <>
+                <h3>3D işleme (figürlü tepsi)</h3>
+                <div className="cz-d3">
+                  {[
+                    ['rough', 'Kaba boşaltma', [['tool', 'Bıçak', 'T'], ['dia', 'Çap', 'mm'], ['stepdown', 'Kademe', 'mm'], ['leave', 'Bırakılan pay', 'mm'], ['feed', 'İlerleme', 'mm/dk']]],
+                    ['bowl', 'Bölme tabanı (küre uç)', [['tool', 'Bıçak', 'T'], ['dia', 'Çap', 'mm'], ['stepover', 'Paso aralığı', 'mm'], ['feed', 'İlerleme', 'mm/dk']]],
+                    ['semi', 'Figür ara bitirme', [['tool', 'Bıçak', 'T'], ['dia', 'Çap', 'mm'], ['leave', 'Bırakılan pay', 'mm'], ['stepover', 'Paso aralığı', 'mm'], ['feed', 'İlerleme', 'mm/dk']]],
+                    ['relief', 'Figür detay (rölyef bıçağı)', [['tool', 'Bıçak', 'T'], ['dia', 'Çap', 'mm'], ['stepover', 'Paso aralığı', 'mm'], ['feed', 'İlerleme', 'mm/dk']]],
+                  ].map(([sec, title, fields]) => (
+                    <div key={sec} className="cz-d3-row">
+                      <div className="cz-d3-title">
+                        {recipe.d3[sec]?.enabled !== undefined
+                          ? <label className="cz-check"><input type="checkbox" checked={recipe.d3[sec].enabled} onChange={(e) => setD3(sec, 'enabled', e.target.checked)} /> {title}</label>
+                          : title}
+                      </div>
+                      <div className="row3">
+                        {fields.map(([k, label, unit]) => (
+                          <Num key={k} label={label} suffix={unit} value={recipe.d3[sec]?.[k]} step={k === 'tool' ? '1' : 'any'} onChange={(v) => setD3(sec, k, v)} />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="hint">Kaba boşaltma bütün yüzeyi pay bırakarak boşaltır; küçük rölyef bıçağı yalnızca figürün üzerinde çalışır. Hepsi aynı yüzey hesabından çıktığı için figür gömülü ya da taşkın kalmaz.</div>
+              </>
+            )}
+
+            <h3>Bölme tabanı</h3>
+            <div className="row2">
+              <div>
+                <label>Bölme tipi</label>
+                <select value={recipe.bowlStyle || 'kase'} onChange={(e) => set('bowlStyle', e.target.value)}>
+                  <option value="kase">Kase (T10 düz taban + T7 tek tur kavis)</option>
+                  <option value="duz">Düz taban, dik duvar (tarama bıçağı)</option>
+                </select>
+              </div>
+            </div>
+            <div className="hint">Kase: bölmenin tabanı düz kalır ve duvara bitirme topunun yarıçapında kavisle bağlanır; köşeler de top sığacak kadar yuvarlanır. Bütün hazır modellerde ve DXF bölmelerinde geçerlidir.</div>
+
+            <h3>Bölme taraması {recipe.bowlStyle !== 'duz' && <span className="cz-sub">(kase seçiliyken sadece derinlik kullanılır)</span>}</h3>
             <div className="row3">
               <Num label="Bıçak" suffix="T" value={recipe.pocket.tool} step="1" onChange={(v) => set('pocket.tool', v)} />
               <Num label="Çap" suffix="mm" value={recipe.pocket.dia} onChange={(v) => set('pocket.dia', v)} />
@@ -287,9 +347,17 @@ export default function CerezlikModule() {
               <Num label="Köprü sayısı" value={recipe.cut.tabs} step="1" min="0" onChange={(v) => set('cut.tabs', v)} />
               <Num label="Köprü boyu" suffix="mm" value={recipe.cut.tabLen} onChange={(v) => set('cut.tabLen', v)} />
               <Num label="Köprü yüksekliği" suffix="mm" value={recipe.cut.tabHeight} onChange={(v) => set('cut.tabHeight', v)} />
-              <Num label="Alt taşma" suffix="mm" value={recipe.cut.overcut} onChange={(v) => set('cut.overcut', v)} />
               <Num label="İlerleme" suffix="mm/dk" value={recipe.cut.feed} onChange={(v) => set('cut.feed', v)} />
             </div>
+
+            <h3>Oluk (küre uç)</h3>
+            <div className="row3">
+              <Num label="Bıçak" suffix="T" value={recipe.groove.tool} step="1" onChange={(v) => set('groove.tool', v)} />
+              <Num label="Çap" suffix="mm" value={recipe.groove.dia} onChange={(v) => set('groove.dia', v)} />
+              <Num label="Derinlik" suffix="mm" value={recipe.groove.depth} onChange={(v) => set('groove.depth', v)} />
+              <Num label="İlerleme" suffix="mm/dk" value={recipe.groove.feed} onChange={(v) => set('groove.feed', v)} />
+            </div>
+            <div className="hint">Hazır modellerde oluk derinliği modelin kendi ayarından gelir. DXF'te "OLUK" katmanındaki çizgiler oluk olarak işlenir.</div>
 
             <h3>Çizgi oyma (V)</h3>
             <div className="row3">
@@ -322,6 +390,7 @@ export default function CerezlikModule() {
               <div>
                 <label>Döndürme</label>
                 <select value={plate.angleStep} onChange={(e) => setP('angleStep', Number(e.target.value))}>
+                  <option value={180}>Lif yönünde (0° / 180°)</option>
                   <option value={90}>90° (4 yön)</option>
                   <option value={45}>45° (8 yön)</option>
                   <option value={30}>30° (12 yön)</option>
@@ -370,22 +439,35 @@ export default function CerezlikModule() {
               </div>
               <PartCanvas
                 part={selPart}
+                machined={preparePart(selPart, recipe)}
                 recipe={recipe}
                 size={560}
-                onToggleComp={(ci) => updatePart(selPart.id, (p) => ({ ...p, comps: p.comps.map((c, k) => (k === ci ? { ...c, kind: c.kind === 'cep' ? 'delik' : 'cep' } : c)) }))}
+                onToggleComp={selPart.surface ? undefined : (ci) => updatePart(selPart.id, (p) => ({ ...p, comps: p.comps.map((c, k) => (k === ci ? { ...c, kind: c.kind === 'cep' ? 'delik' : 'cep' } : c)) }))}
               />
+              {!selPart.surface && (
+                <div className="cz-legend">
+                  <span><i className="sw cep" /> Bölme (taranır)</span>
+                  <span><i className="sw delik" /> Boydan boya delik</span>
+                  <span><i className="sw line" /> V çizgi</span>
+                </div>
+              )}
               <div className="cz-legend">
-                <span><i className="sw cep" /> Bölme (taranır)</span>
-                <span><i className="sw delik" /> Boydan boya delik</span>
-                <span><i className="sw line" /> V çizgi</span>
-              </div>
-              <div className="cz-legend">
-                <span><i className="sw pocket" /> Tarama T{recipe.pocket.tool}</span>
+                {selPart.surface ? (
+                  <>
+                    <span><i className="sw pocket" /> Kaba T{recipe.d3.rough.tool}</span>
+                    <span><i className="sw bowl" /> Taban T{recipe.d3.bowl.tool}</span>
+                    {recipe.d3.semi.enabled && <span><i className="sw semi" /> Ara bitirme T{recipe.d3.semi.tool}</span>}
+                    <span><i className="sw relief" /> Rölyef T{recipe.d3.relief.tool}</span>
+                  </>
+                ) : <span><i className="sw pocket" /> Tarama T{recipe.pocket.tool}</span>}
                 {recipe.round.enabled && <span><i className="sw round" /> Yuvarlama T{recipe.round.tool}</span>}
+                {(selPart.grooves || []).length > 0 && <span><i className="sw groove" /> Oluk T{recipe.groove.tool}</span>}
                 {selPart.lines.length > 0 && <span><i className="sw vline" /> V çizgi T{recipe.vline.tool}</span>}
+                {selPart.carve?.length > 0 && <span><i className="sw vcarve" /> Yazı T{selPart.text?.tool}</span>}
                 <span><i className="sw cut" /> Kesim T{recipe.cut.tool}</span>
               </div>
-              <div className="hint">Bir bölmeye tıklayarak taranacak bölme ile boydan boya kesilecek delik arasında değiştirin.</div>
+              <TextCarvePanel key={selPart.id} part={selPart} onApply={(patch) => updatePart(selPart.id, (p) => ({ ...p, ...patch }))} />
+              {!selPart.surface && <div className="hint">Bir bölmeye tıklayarak taranacak bölme ile boydan boya kesilecek delik arasında değiştirin.</div>}
               {(partWarnings.get(selPart.id) || []).map((w) => <div key={w} className="hint hint-warn">⚠ {w}</div>)}
             </div>
           ) : result ? (
@@ -415,13 +497,30 @@ export default function CerezlikModule() {
                 <div className="hint hint-warn">{result.nest.unplaced.length} parça plakadan büyük olduğu için yerleştirilemedi.</div>
               )}
               <div className="cz-legend">
-                <span><i className="sw pocket" /> Tarama T{recipe.pocket.tool}</span>
+                <span><i className="sw pocket" /> Tarama / kaba</span>
+                {result.parts.some((p) => p.surface) && (
+                  <>
+                    <span><i className="sw bowl" /> Taban T{recipe.d3.bowl.tool}</span>
+                    {recipe.d3.semi.enabled && <span><i className="sw semi" /> Ara bitirme T{recipe.d3.semi.tool}</span>}
+                    <span><i className="sw relief" /> Rölyef T{recipe.d3.relief.tool}</span>
+                  </>
+                )}
                 {recipe.round.enabled && <span><i className="sw round" /> Yuvarlama T{recipe.round.tool}</span>}
+                <span><i className="sw groove" /> Oluk T{recipe.groove.tool}</span>
                 <span><i className="sw vline" /> V çizgi T{recipe.vline.tool}</span>
                 <span><i className="sw cut" /> Kesim T{recipe.cut.tool}</span>
               </div>
+              <div className="cz-include">
+                <span>Dosyaya dahil:</span>
+                {resultKinds.map(([k, label]) => (
+                  <label key={k} className="cz-check">
+                    <input type="checkbox" checked={!excluded.includes(k)} onChange={(e) => setExcluded((x) => (e.target.checked ? x.filter((y) => y !== k) : [...x, k]))} /> {label}
+                  </label>
+                ))}
+              </div>
+              {partial && <div className="hint hint-warn">Seçili işlemlerden oluşan dosya iner. Aynı parçanın üzerine çalıştırırken sıfır noktası aynı kalmalı.</div>}
               <div className="row2">
-                <button type="button" className="btn-secondary" onClick={() => download(fileName(plateIdx), result.programs[plateIdx].gcode)}>⬇ Plaka {plateIdx + 1} ({recipe.ext})</button>
+                <button type="button" className="btn-secondary" onClick={() => download(fileName(plateIdx), programsFor()[plateIdx].gcode)}>⬇ Plaka {plateIdx + 1} ({recipe.ext})</button>
                 <button type="button" className="btn-accent2 cz-zip" onClick={downloadZip}>⬇ Hepsini indir (.zip)</button>
               </div>
             </div>

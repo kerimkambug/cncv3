@@ -1,6 +1,6 @@
 // Built-in parametric models: common, generic board / tray / snack-dish forms
 // drawn from parameters (no DXF needed). Every model returns a part in the same
-// form as a DXF part: { outline, comps: [{pts, kind, islands, depth?}], lines }.
+// form as a DXF part: { outline, comps: [{pts, kind, islands, depth?}], lines, grooves }.
 import { area, bbox, difference, ensureCCW, offset, roundShape, transform, union } from './geom.js';
 
 const TAU = Math.PI * 2;
@@ -96,6 +96,30 @@ function withHandle(body, bodyRight, cy, hLen, hW, holeD, fillet) {
 
 const P = (k, label, def, min, max, step = 1) => ({ k, label, def, min, max, step });
 
+export const ellipsePts = (cx, cy, rx, ry) => {
+  const n = Math.max(72, Math.ceil(circlePts(0, 0, Math.max(rx, ry)).length));
+  return Array.from({ length: n }, (_, k) => { const a = (2 * Math.PI * k) / n; return [cx + rx * Math.cos(a), cy + ry * Math.sin(a)]; });
+};
+
+/** Optional juice groove `m` mm inside a closed loop (gd = depth, 0 = none). */
+const grooveIn = (loop, m, gd) => {
+  if (!(gd > 0)) return [];
+  const g = offset([loop], -m).sort((a, b) => area(b) - area(a))[0];
+  return g ? [{ pts: g, closed: true, depth: gd }] : [];
+};
+
+/** Rotate a part's geometry 90° so a handle drawn along +X points up (+Y). */
+const upright = (r) => {
+  const rot = (pts) => pts.map(([x, y]) => [-y, x]);
+  return {
+    outline: rot(r.outline),
+    comps: (r.comps || []).map((c) => ({ ...c, pts: rot(c.pts), islands: (c.islands || []).map(rot) })),
+    grooves: (r.grooves || []).map((g) => ({ ...g, pts: rot(g.pts) })),
+  };
+};
+
+const GROOVE = [P('m', 'Oluk kenardan', 18, 12, 40), P('gd', 'Oluk derinliği (0 = yok)', 0, 0, 8, 0.5)];
+
 export const CATALOG = [
   // ---------------- cutting boards ----------------
   {
@@ -110,14 +134,13 @@ export const CATALOG = [
   },
   {
     id: 'kesme-oluklu', group: 'Kesme tahtası', name: 'Oluklu kesme tahtası',
-    params: [P('L', 'Boy', 450, 250, 700), P('W', 'En', 300, 150, 450), P('r', 'Köşe yarıçapı', 20, 0, 80), P('m', 'Oluk kenardan', 18, 10, 40), P('gw', 'Oluk eni', 10, 6, 20), P('gd', 'Oluk derinliği', 5, 2, 10, 0.5), P('sl', 'Tutma yuvası boyu', 100, 0, 160)],
+    params: [P('L', 'Boy', 450, 250, 700), P('W', 'En', 300, 150, 450), P('r', 'Köşe yarıçapı', 20, 0, 80), P('m', 'Oluk kenardan', 20, 14, 45), P('gd', 'Oluk derinliği', 5, 2, 8, 0.5), P('sl', 'Tutma yuvası boyu', 100, 0, 160)],
     build: (p) => {
+      // juice groove: one ball-nose pass along a line `m` mm inside the edge
       const outline = roundRect(0, 0, p.L, p.W, p.r);
-      const outer = offset([outline], -p.m)[0];
-      const inner = offset([outline], -(p.m + p.gw))[0];
-      const comps = [{ pts: outer, islands: [inner], kind: 'cep', depth: p.gd }];
-      if (p.sl > 0) comps.push(slot(p.m + p.gw + 36, p.W / 2, 28, Math.min(p.sl, p.W - 2 * (p.m + p.gw) - 30)));
-      return { outline, comps };
+      const comps = [];
+      if (p.sl > 0) comps.push(slot(p.m + 32, p.W / 2, 28, Math.min(p.sl, p.W - 2 * p.m - 40)));
+      return { outline, comps, grooves: [{ pts: offset([outline], -p.m)[0], closed: true, depth: p.gd }] };
     },
   },
   {
@@ -138,6 +161,113 @@ export const CATALOG = [
       // on the axis, a point t from the tip is t·sin(θ) from the straight sides (sin θ = R / d)
       const t = (p.hd / 2 + 15) / (R / d);
       return { outline, comps: p.hd > 0 ? [hole(tipX - Math.max(t, 30 + p.hd / 2), R, p.hd)] : [] };
+    },
+  },
+  {
+    id: 'kesme-peynir', group: 'Kesme tahtası', name: 'Omuzlu saplı tahta',
+    params: [P('L', 'Gövde boyu', 300, 150, 600), P('W', 'En', 200, 100, 400), P('r', 'Köşe yarıçapı', 30, 0, 80), P('hl', 'Sap boyu', 120, 50, 250), P('hw', 'Sap eni', 40, 28, 80), P('sh', 'Omuz kavisi', 55, 15, 120), P('hd', 'Delik çapı', 16, 0, 30)],
+    build: (p) => upright(withHandle(roundRect(0, 0, p.L, p.W, p.r), p.L, p.W / 2, p.hl, p.hw, p.hd, p.sh)),
+  },
+  {
+    id: 'kesme-kemer', group: 'Kesme tahtası', name: 'Kemerli tahta',
+    params: [P('W', 'En', 240, 120, 450), P('L', 'Boy', 360, 180, 650), P('a', 'Kemer yüksekliği', 60, 10, 200), P('r', 'Alt köşe yarıçapı', 20, 0, 60), P('hd', 'Askı deliği çapı', 18, 0, 35), ...GROOVE],
+    build: (p) => {
+      const a = Math.min(p.a, p.W / 2, p.L / 2);
+      const outline = outlineOf([roundRect(0, 0, p.W, p.L - a, p.r), ellipsePts(p.W / 2, p.L - a, p.W / 2, a)], 0);
+      const comps = p.hd > 0 ? [hole(p.W / 2, p.L - 22 - p.hd / 2, p.hd)] : [];
+      const grooves = p.gd > 0 ? grooveIn(roundRect(0, 0, p.W, p.L - a - p.hd - 10, p.r), p.m, p.gd) : [];
+      return { outline, comps, grooves };
+    },
+  },
+  {
+    id: 'kesme-tutmali', group: 'Kesme tahtası', name: 'Tutma yuvalı tahta',
+    params: [P('W', 'En', 280, 150, 500), P('L', 'Boy', 400, 200, 650), P('r', 'Köşe yarıçapı', 22, 0, 80), P('sw', 'Yuva boyu', 100, 60, 160), P('sh', 'Yuva eni', 28, 20, 40), ...GROOVE],
+    build: (p) => {
+      const outline = roundRect(0, 0, p.W, p.L, p.r);
+      const sy = p.L - 22 - p.sh / 2;
+      const comps = [slot(p.W / 2, sy, Math.min(p.sw, p.W - 60), p.sh)];
+      // the groove stays below the grip slot
+      const grooves = p.gd > 0 ? grooveIn(roundRect(0, 0, p.W, sy - p.sh / 2 - 14 + p.m, p.r), p.m, p.gd) : [];
+      return { outline, comps, grooves };
+    },
+  },
+  {
+    id: 'kesme-iki-kulp', group: 'Kesme tahtası', name: 'İki kulplu yuvarlak tahta',
+    params: [P('D', 'Çap', 320, 180, 550), P('lw', 'Kulp eni', 80, 50, 140), P('ll', 'Kulp boyu', 40, 25, 70), P('sw', 'Kulp deliği boyu', 50, 30, 100), ...GROOVE],
+    build: (p) => {
+      const R = p.D / 2;
+      const lug = (sgn) => roundRect(R - p.lw / 2, sgn > 0 ? p.D - 20 : -p.ll, p.lw, p.ll + 20, 14);
+      const outline = outlineOf([circlePts(R, R, R), lug(1), lug(-1)], 14);
+      const sw = Math.min(p.sw, p.lw - 26);
+      const comps = [slot(R, p.D + p.ll / 2 - 6, sw, 14), slot(R, -p.ll / 2 + 6, sw, 14)];
+      return { outline, comps, grooves: grooveIn(circlePts(R, R, R), p.m, p.gd) };
+    },
+  },
+  {
+    id: 'kesme-sekizgen', group: 'Kesme tahtası', name: 'Sekizgen tahta',
+    params: [P('D', 'Köşeden köşeye', 320, 180, 550), P('r', 'Köşe yarıçapı', 8, 0, 40), P('hd', 'Askı deliği çapı', 0, 0, 30), ...GROOVE],
+    build: (p) => {
+      const R = p.D / 2;
+      const outline = biggest(roundShape(regularPolygon(8, R, Math.PI / 8), [], p.r)).outer.map(([x, y]) => [x + R, y + R]);
+      const comps = p.hd > 0 ? [hole(R, p.D - 26 - p.hd / 2, p.hd)] : [];
+      return { outline, comps, grooves: p.hd > 0 && p.gd > 0 ? [] : grooveIn(outline, p.m, p.gd) };
+    },
+  },
+  {
+    id: 'kesme-oval', group: 'Kesme tahtası', name: 'Oval tahta',
+    params: [P('L', 'Boy', 380, 200, 650), P('W', 'En', 250, 120, 450), P('hd', 'Askı deliği çapı', 18, 0, 35), ...GROOVE],
+    build: (p) => {
+      const outline = ellipsePts(p.W / 2, p.L / 2, p.W / 2, p.L / 2);
+      const comps = p.hd > 0 ? [hole(p.W / 2, p.L - 22 - p.hd / 2, p.hd)] : [];
+      return { outline, comps, grooves: p.hd > 0 && p.gd > 0 ? grooveIn(ellipsePts(p.W / 2, p.L / 2 - 22, p.W / 2, p.L / 2 - 22), p.m, p.gd) : grooveIn(outline, p.m, p.gd) };
+    },
+  },
+  {
+    id: 'kesme-kapsul', group: 'Kesme tahtası', name: 'Kapsül tahta',
+    params: [P('W', 'En', 150, 90, 300), P('L', 'Boy', 380, 200, 650), P('hd', 'Delik çapı', 12, 0, 30)],
+    build: (p) => ({
+      outline: roundRect(0, 0, p.W, p.L, p.W / 2),
+      comps: p.hd > 0 ? [hole(p.W / 2, p.L - 20 - p.hd / 2, p.hd), hole(p.W / 2, 20 + p.hd / 2, p.hd)] : [],
+    }),
+  },
+  {
+    id: 'kesme-capraz', group: 'Kesme tahtası', name: 'Çapraz tutmalı tahta',
+    params: [P('W', 'En', 260, 150, 450), P('L', 'Boy', 360, 200, 600), P('c', 'Köşe kesiği', 90, 40, 160), P('r', 'Köşe yarıçapı', 14, 0, 50)],
+    build: (p) => {
+      const c = Math.min(p.c, p.W * 0.6, p.L * 0.6);
+      const poly = [[0, 0], [p.W, 0], [p.W, p.L - c], [p.W - c, p.L], [0, p.L]];
+      const outline = biggest(roundShape(poly, [], p.r)).outer;
+      // grip slot parallel to the cut corner
+      const mx = p.W - c / 2 - 26, my = p.L - c / 2 - 26;
+      const len = Math.min(c * 1.1, 130), u = [Math.SQRT1_2, -Math.SQRT1_2];
+      const a = [mx - (u[0] * len) / 2, my - (u[1] * len) / 2], b = [mx + (u[0] * len) / 2, my + (u[1] * len) / 2];
+      const slotPoly = offset([[a, b, [b[0] + 0.01, b[1] + 0.01], [a[0] + 0.01, a[1] + 0.01]]], 12).sort((x, y) => area(y) - area(x))[0];
+      return { outline, comps: [{ pts: slotPoly, islands: [], kind: 'delik' }] };
+    },
+  },
+  {
+    id: 'kesme-fici', group: 'Kesme tahtası', name: 'Fıçı tahta',
+    params: [P('W', 'En', 260, 150, 450), P('L', 'Boy', 380, 200, 650), P('b', 'Yan şişkinlik', 25, 5, 60), P('r', 'Köşe yarıçapı', 14, 0, 40), P('sw', 'Tutma yuvası boyu', 90, 0, 140)],
+    build: (p) => {
+      const pts = [];
+      const n = 60;
+      for (let i = 0; i <= n; i++) { const t = i / n; pts.push([p.W + p.b * Math.sin(Math.PI * t), p.L * t]); }
+      for (let i = 0; i <= n; i++) { const t = 1 - i / n; pts.push([-p.b * Math.sin(Math.PI * t), p.L * t]); }
+      const outline = biggest(roundShape(pts, [], p.r)).outer.map(([x, y]) => [x + p.b, y]);
+      const comps = p.sw > 0 ? [slot(p.W / 2 + p.b, p.L - 22 - 14, Math.min(p.sw, p.W - 40), 28)] : [];
+      return { outline, comps };
+    },
+  },
+  {
+    id: 'kesme-satir', group: 'Kesme tahtası', name: 'Satır tahta',
+    params: [P('L', 'Boy', 380, 220, 600), P('W', 'En', 200, 120, 320), P('r', 'Köşe yarıçapı', 16, 0, 50), P('hl', 'Sap boyu', 120, 60, 200), P('hw', 'Sap eni', 40, 28, 70), P('hd', 'Delik çapı', 16, 0, 30)],
+    build: (p) => {
+      // body lying along X, handle rising from the top right corner
+      const hx = p.L - p.hw / 2 - 18;
+      const handle = roundRect(hx - p.hw / 2, p.W - 20, p.hw, p.hl + 20, p.hw / 2);
+      const outline = outlineOf([roundRect(0, 0, p.L, p.W, p.r), handle], 22);
+      const comps = p.hd > 0 ? [hole(hx, p.W + p.hl - p.hw / 2, p.hd)] : [];
+      return { outline, comps };
     },
   },
   {
@@ -194,7 +324,7 @@ export const CATALOG = [
   },
   {
     id: 'sunum-yinyang', group: 'Sunumluk', name: 'Yin-yang sunumluk (yarım)',
-    params: [P('D', 'Takım çapı', 360, 220, 600), P('g', 'İki yarı arası boşluk', 6, 0, 20), P('cup', 'Fincan yuvası çapı', 80, 0, 120), P('cd', 'Fincan yuvası derinliği', 5, 2, 10, 0.5), P('rim', 'Kenar eni', 14, 10, 30), P('wall', 'Ara duvar', 10, 6, 25), P('d', 'Derinlik', 8, 3, 15, 0.5)],
+    params: [P('D', 'Takım çapı', 360, 220, 600), P('g', 'İki yarı arası boşluk', 6, 0, 20), P('cup', 'Fincan yuvası çapı', 80, 0, 120), P('cd', 'Fincan yuvası derinliği', 5, 2, 10, 0.5), P('gi', 'Oluk kenardan', 16, 10, 40), P('gd', 'Oluk derinliği', 3, 1, 6, 0.5)],
     build: (p) => {
       // one half of the yin-yang disc; the other half is the same piece turned 180°
       const R = p.D / 2;
@@ -203,15 +333,12 @@ export const CATALOG = [
       const bite = circlePts(0, -R / 2, R / 2);
       const comma = biggest(difference(union([halfDisc, head]).map((sh) => sh.outer), [bite])).outer;
       const piece = biggest(roundShape(offset([comma], -p.g / 2)[0] || comma, [], 8)).outer;
-      const comps = [];
-      const cupR = Math.min(p.cup / 2, R / 2 - p.rim - p.g / 2 - 4);
-      let walls = [];
-      if (p.cup > 0 && cupR > 15) {
-        comps.push({ pts: circlePts(0, R / 2, cupR), islands: [], kind: 'cep', depth: p.cd });
-        walls = [circlePts(0, R / 2, cupR + p.wall)];
-      }
-      comps.push(...bowls(piece, p.rim, walls, 9, p.d));
-      return { outline: piece, comps };
+      // the surface stays at full thickness: only the cup seat is cleared, and a
+      // ball-nose groove runs `gi` mm inside the edge (the cup keeps clear of it)
+      const groove = offset([piece], -p.gi).sort((a, b) => area(b) - area(a))[0];
+      const cupR = Math.min(p.cup / 2, R / 2 - p.g / 2 - p.gi - 12);
+      const comps = p.cup > 0 && cupR > 15 ? [{ pts: circlePts(0, R / 2, cupR), islands: [], kind: 'cep', depth: p.cd }] : [];
+      return { outline: piece, comps, grooves: groove ? [{ pts: groove, closed: true, depth: p.gd }] : [] };
     },
   },
   {
@@ -342,6 +469,7 @@ export function catalogPart(model, params) {
     outline: shift(outline),
     comps,
     lines: (raw.lines || []).map(shift),
+    grooves: (raw.grooves || []).map((g) => ({ ...g, pts: shift(g.pts) })),
     width: b.w,
     height: b.h,
     area: area(outline) - holeArea,

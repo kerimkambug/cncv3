@@ -6,6 +6,7 @@
 import { area, bbox, cleanLoop, ensureCCW, offset, pointInPolygon, polygonInside, polylineDistance } from './geom.js';
 
 const HOLE_LAYER = /del[iı]k|hole|through|bo[sş]luk|kesim|cut/i;
+const GROOVE_LAYER = /oluk|groove|k[uü]re|ball/i;
 
 /**
  * @param {{loops:Array<{layer:string, pts:number[][]}>, chains:Array<{layer:string, pts:number[][]}>}} drawing
@@ -45,7 +46,10 @@ export function buildParts(drawing, baseName = 'parça') {
       kind: HOLE_LAYER.test(c.layer) ? 'delik' : 'cep',
       islands: loops.filter((l) => l.depth === 2 && l.parent === c).map((l) => l.pts),
     }));
-    const lines = drawing.chains.filter((ch) => ch.pts.every((p) => pointInPolygon(p, o.pts))).map((ch) => ch.pts);
+    const onPart = drawing.chains.filter((ch) => ch.pts.every((p) => pointInPolygon(p, o.pts)));
+    // open lines on an "OLUK" layer are ball-nose grooves, the rest V-carved lines
+    const lines = onPart.filter((ch) => !GROOVE_LAYER.test(ch.layer)).map((ch) => ch.pts);
+    const grooves = onPart.filter((ch) => GROOVE_LAYER.test(ch.layer)).map((ch) => ({ pts: ch.pts, closed: false }));
     const b = o.box;
     const shift = (pts) => pts.map(([x, y]) => [x - b.minX, y - b.minY]);
     return {
@@ -53,12 +57,13 @@ export function buildParts(drawing, baseName = 'parça') {
       outline: shift(o.pts),
       comps: comps.map((c) => ({ ...c, pts: shift(c.pts), islands: c.islands.map(shift) })),
       lines: lines.map(shift),
+      grooves: grooves.map((g) => ({ ...g, pts: shift(g.pts) })),
       width: b.w,
       height: b.h,
       area: o.area - cavities.filter((c) => HOLE_LAYER.test(c.layer)).reduce((s, c) => s + c.area, 0),
     };
   });
-  if (parts.reduce((s, p) => s + p.lines.length, 0) < drawing.chains.length) {
+  if (parts.reduce((s, p) => s + p.lines.length + p.grooves.length, 0) < drawing.chains.length) {
     warnings.push('Hiçbir parçanın üzerinde olmayan açık çizgiler atlandı.');
   }
   return { parts, warnings: [...new Set(warnings)] };
@@ -83,6 +88,10 @@ export function checkPart(part, recipe) {
     if (thinEdge) out.push(`Kenar duvarı ${minWall} mm'den ince.`);
     if (thinBetween) out.push(`Bölmeler arası duvar ${minWall} mm'den ince.`);
   }
+  // a bowl deeper than the material would go right through (Z never goes below 0, but the part is ruined)
+  const top = Number(recipe.thickness) || 18;
+  const deepest = Math.max(0, ...part.comps.filter((c) => c.kind === 'cep').map((c) => Number(c.depth ?? recipe.pocket.depth) || 0), ...(part.grooves || []).map((g) => Number(g.depth ?? recipe.groove?.depth) || 0));
+  if (deepest > top - 3) out.push(`Bölme/oluk derinliği (${deepest} mm) ${top} mm malzemeye göre fazla; altta ${Math.max(0, top - deepest).toFixed(1)} mm kalıyor.`);
   const r = (Number(recipe.pocket.dia) || 6) / 2;
   const small = part.comps.filter((c) => c.kind === 'cep' && !offset([c.pts, ...c.islands], -r).length).length;
   if (small) out.push(`${small} bölme tarama bıçağına (Ø${2 * r}) göre çok küçük, taranamaz.`);

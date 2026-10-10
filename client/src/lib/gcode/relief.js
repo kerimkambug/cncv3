@@ -1,6 +1,7 @@
 // relief.js
 // Empire CNC — Profesyonel 3D Bas-Rölyef (3D Relief) G-Code Üretim Motoru
 // Küre uçlu (Ballnose) takım telafisi, çift yönlü pürüzsüzleştirme ve çok açılı işleme.
+import { guardZ } from './zGuard.js';
 import { fmt, fmt3 } from './common.js';
 import { numOr, validateDepthAgainstThickness } from '../../../../shared/gcode/validation.js';
 import { reliefMachineZ } from '../../../../shared/gcode/reliefConvention.js';
@@ -428,7 +429,7 @@ export function buildReliefGcodeFromDepthGrid(depthGrid, gridCols, gridRows, cfg
   lines.push(`M30`);
 
   return {
-    gcode: lines.join('\n'),
+    gcode: guardZ(lines.join('\n')),
     pointCount: totalPoints,
     lineCount: lines.length,
   };

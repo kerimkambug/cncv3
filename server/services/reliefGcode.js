@@ -2,6 +2,7 @@
 // Empire CNC — Server-side Relief G-Code Processing Service
 import { emitRectCutPath } from '../../shared/gcode/common.js';
 import { reliefMachineZ } from '../../shared/gcode/reliefConvention.js';
+import { guardZ } from '../../shared/gcode/zGuard.js';
 
 function fmt(n) {
   return Number(n).toFixed(2);
@@ -34,7 +35,7 @@ export function generateReliefGcodeFromGrid(depthGrid, cfg) {
   appendOuterCut(lines, options);
 
   finalizeProgram(lines, homeZ);
-  return lines.join('\n');
+  return guardZ(lines.join('\n'));
 }
 
 function normalizeConfig(cfg = {}) {

@@ -1,3 +1,4 @@
+import SimPanel from '../SimPanel.jsx';
 import { useState } from 'react';
 import { buildCamKesimGcode } from '../../lib/gcode/cam.js';
 
@@ -38,6 +39,7 @@ export default function CamKesimPanel({ cfg }) {
             <button type="button" className="btn-secondary" onClick={() => navigator.clipboard.writeText(output)}>Kopyala</button>
             <button type="button" className="btn-secondary" onClick={download}>.nc indir</button>
           </div>
+          <SimPanel gcode={output} top={cfg.thickness} name="cam-kesim" />
         </>
       )}
     </div>

@@ -7,6 +7,7 @@
 //  2. In ring mode, the INNER circle is cut before the OUTER one, so the
 //     part stays anchored to the surrounding stock while the hole is cut
 //     (cutting the outer perimeter first frees the part and lets it shift).
+import { guardZ } from './zGuard.js';
 import { fmt } from './common.js';
 import { toFiniteNumber, validateCircleGeometry } from '../../../../shared/gcode/validation.js';
 
@@ -69,5 +70,5 @@ export function buildCircleGcode(p, cfg) {
   lines.push('M5');
   lines.push('M16');
   lines.push('M30');
-  return lines.join('\n');
+  return guardZ(lines.join('\n'));
 }
