@@ -142,8 +142,28 @@ function SimView({ grid, top }) {
     const mesh = new THREE.Mesh(geo, mat);
     scene.add(mesh);
 
+    // closed block: the four sides from the surface edge down to the table, and the bottom
+    const ring = [];
+    for (let i = 0; i < W; i++) ring.push(i);
+    for (let j = 1; j < H; j++) ring.push(j * W + W - 1);
+    for (let i = W - 2; i >= 0; i--) ring.push((H - 1) * W + i);
+    for (let j = H - 2; j > 0; j--) ring.push(j * W);
+    const sides = [];
+    const v = (p, z) => [pos[p * 3], pos[p * 3 + 1], z ?? pos[p * 3 + 2]];
+    for (let r = 0; r < ring.length; r++) {
+      const a = ring[r], b = ring[(r + 1) % ring.length];
+      sides.push(...v(a), ...v(a, 0), ...v(b, 0), ...v(a), ...v(b, 0), ...v(b));
+    }
+    const c0 = 0, c1 = W - 1, c2 = H * W - 1, c3 = (H - 1) * W;
+    sides.push(...v(c0, 0), ...v(c2, 0), ...v(c1, 0), ...v(c0, 0), ...v(c3, 0), ...v(c2, 0));
+    const sideGeo = new THREE.BufferGeometry();
+    sideGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(sides), 3));
+    sideGeo.computeVertexNormals();
+    const sideMat = new THREE.MeshStandardMaterial({ color: 0xcdbb98, roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
+    scene.add(new THREE.Mesh(sideGeo, sideMat));
+
     // low, grazing light shows every ridge; a soft fill keeps the shadows readable
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x404048, 0.55));
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8274, 0.55));
     const sun = new THREE.DirectionalLight(0xffffff, 1.6);
     const cx = grid.x0 + (grid.w * grid.cell) / 2, cy = grid.y0 + (grid.h * grid.cell) / 2;
     const span = Math.max(grid.w, grid.h) * grid.cell;
@@ -167,7 +187,7 @@ function SimView({ grid, top }) {
     window.addEventListener('resize', onResize);
     return () => {
       window.removeEventListener('resize', onResize);
-      controls.dispose(); geo.dispose(); mat.dispose(); renderer.dispose();
+      controls.dispose(); geo.dispose(); mat.dispose(); sideGeo.dispose(); sideMat.dispose(); renderer.dispose();
       el.removeChild(renderer.domElement);
     };
   }, [grid, top]);
