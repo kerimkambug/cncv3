@@ -144,7 +144,7 @@ export default function MutfakModule({ presets = [] }) {
 
       <section className="card mutfak-view">
         <div className="mutfak-toolbar">
-          {[['genel', 'Genel'], ['alt', 'Alt dolaplar'], ['ust', 'Üst dolaplar'], ['yan', 'Yandan'], ['oda', 'Odaya dön'], ['disari', 'Dışarıdan']].map(([k, label]) => (
+          {[['genel', 'Genel'], ['alt', 'Alt dolaplar'], ['ust', 'Üst dolaplar'], ['yan', 'Yandan']].map(([k, label]) => (
             <button key={k} type="button" className="btn-secondary btn-small" onClick={() => kitchen.current?.view(k)}>{label}</button>
           ))}
           <span className="mutfak-status">{busy > 0 ? `Kapak yüzeyleri hesaplanıyor… (${busy})` : `${altModel?.name || '—'}${ustModel && ustModel !== altModel ? ` · üst: ${ustModel.name}` : ''}`}</span>

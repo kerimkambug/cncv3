@@ -82,14 +82,12 @@ export function createKitchen(host) {
   camera.up.set(0, 1, 0);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.maxPolarAngle = Math.PI * 0.495;
-  controls.minDistance = 300; controls.maxDistance = 7000;
+  controls.minDistance = 300; controls.maxDistance = 5200;
   const VIEWS = {
     genel: [[1800, 1650, 4700], [1800, 1050, 300]],
     alt: [[1500, 1000, 1900], [1500, 600, 300]],
     ust: [[1800, 1400, 2000], [1800, 1850, 200]],
     yan: [[4100, 1600, 3200], [1300, 1000, 600]],
-    oda: [[1800, 1600, 700], [1800, 700, 4300]],
-    disari: [[1800, 5200, 11000], [1800, 900, 2600]],
   };
   function view(name) {
     const [p, t] = VIEWS[name] || VIEWS.genel;
@@ -328,7 +326,14 @@ export function createKitchen(host) {
   }
 
   function render() { renderer.render(scene, camera); }
-  controls.addEventListener('change', render);
+  // the camera never leaves the room: not through a wall, the ceiling, the floor or into the cabinets
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  function keepInside() {
+    const p = camera.position, t = controls.target, m = 150;
+    p.set(clamp(p.x, ROOM.x0 + m, ROOM.x1 - m), clamp(p.y, 150, ROOM.h - m), clamp(p.z, 700, ROOM.z1 - m));
+    t.set(clamp(t.x, ROOM.x0 + m, ROOM.x1 - m), clamp(t.y, 0, ROOM.h - m), clamp(t.z, 0, ROOM.z1 - m));
+  }
+  controls.addEventListener('change', () => { keepInside(); render(); });
   const onResize = () => { renderer.setSize(width(), height()); camera.aspect = width() / height(); camera.updateProjectionMatrix(); render(); };
   window.addEventListener('resize', onResize);
   view('genel');
