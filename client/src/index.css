@@ -939,3 +939,27 @@ details.collapsible[open] > summary{margin-bottom:10px}
 .users-actions .danger{color:var(--danger)}
 .users-expired{display:block;color:var(--danger)!important;margin-top:3px}
 @media(max-width:900px){.users-row{grid-template-columns:1fr 1fr}.users-head{display:none}}
+/* Atölye → Bıçaklar: magazine slots + tool library */
+.mag-count{display:flex;align-items:center;gap:6px;margin:0;font-size:11px;font-weight:400}
+.mag-count input{width:64px;padding:5px 6px;font-size:12px}
+.mag-actions{display:flex;gap:6px;flex-wrap:wrap}
+.mag-slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.mag-slot{display:grid;grid-template-columns:auto 48px 1fr;grid-template-rows:auto auto;align-items:center;gap:4px 8px;background:var(--panel2);border:1px solid var(--border);border-radius:9px;padding:8px 10px}
+.mag-slot.empty{border-style:dashed;opacity:.8}
+.mag-slot.bad{border-color:var(--danger)}
+.mag-slot select{padding:6px 6px;font-size:12px;min-width:0}
+.mag-slot small{grid-column:1/-1;font-size:10.5px;color:var(--muted)}
+.mag-no{font:700 15px var(--mono);color:var(--accent);min-width:30px}
+.mag-glyph{width:48px;height:36px;display:block}
+.mag-glyph path{fill:var(--accent2);fill-opacity:.35;stroke:var(--accent2);stroke-width:1}
+.mag-lib-wrap{overflow-x:auto}
+.mag-lib td:first-child{width:56px}
+.mag-lib td.name-cell input{min-width:120px}
+.mag-lib input[type=number]{width:72px}
+.mag-glyph.big{width:160px;height:120px;background:var(--panel2);border-radius:8px}
+.mag-custom-row td{text-align:left!important;padding:6px 8px 12px!important}
+.mag-custom{display:flex;align-items:center;gap:14px;font-size:11.5px;color:var(--muted)}
+.mag-dia{font:12px var(--mono)}
+.mag-glyph.drawn path.env{fill:none;stroke:var(--accent2);stroke-width:2;vector-effect:non-scaling-stroke}
+.mag-glyph.drawn path.line{fill:var(--accent2);fill-opacity:.12;stroke:var(--muted);stroke-width:1;vector-effect:non-scaling-stroke}
+.mag-glyph.drawn line.axis{stroke:var(--muted);stroke-width:.4;stroke-dasharray:1.5 1.5}

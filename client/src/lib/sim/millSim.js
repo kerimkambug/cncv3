@@ -47,6 +47,16 @@ export function profile(tool, d) {
       const u = d - f;
       return Math.sqrt(Math.max(0, Rr * Rr - (Rr - u) * (Rr - u)));
     }
+    // drawn shape (kulp, tabla…): [[distance from axis, height above tip], …] by distance
+    case 'custom': {
+      const P = tool.profile;
+      if (!P || !P.length) return 0;
+      if (d >= P[P.length - 1][0]) return P[P.length - 1][1];
+      let lo = 0, hi = P.length - 1;
+      while (hi - lo > 1) { const m = (lo + hi) >> 1; if (P[m][0] <= d) lo = m; else hi = m; }
+      const [d0, h0] = P[lo], [d1, h1] = P[hi];
+      return d1 > d0 ? h0 + ((h1 - h0) * (d - d0)) / (d1 - d0) : Math.min(h0, h1);
+    }
     default: return 0; // flat end mill
   }
 }
@@ -55,6 +65,7 @@ export function profile(tool, d) {
 function reach(tool, depth) {
   const Rmax = tool.dia / 2;
   if (!(depth > 0)) return 0;
+  if (tool.type === 'custom') return Rmax; // a drawn shape need not rise steadily outwards
   if (profile(tool, Rmax) <= depth) return Rmax;
   let lo = 0, hi = Rmax;
   for (let k = 0; k < 30; k++) { const m = (lo + hi) / 2; if (profile(tool, m) <= depth) lo = m; else hi = m; }
@@ -97,7 +108,7 @@ export function simulate(text, { top, cell = 0.4, tools = {}, box = null } = {})
   }
   const w = Math.ceil((b.x1 - b.x0) / cell), h = Math.ceil((b.y1 - b.y0) / cell);
   const z = new Float32Array(w * h).fill(top);
-  const stats = { cuttingMm: 0, rapidCuts: 0, belowTable: 0, byTool: {} };
+  const stats = { cuttingMm: 0, rapidCuts: 0, belowTable: 0, byTool: {}, emptySlots: [] };
   let started = false;
   const tables = new Map();
   for (const s of segs) {
@@ -113,6 +124,7 @@ export function simulate(text, { top, cell = 0.4, tools = {}, box = null } = {})
     const L = Math.hypot(s.to.x - s.from.x, s.to.y - s.from.y, s.to.z - s.from.z);
     stats.cuttingMm += L;
     const key = tool.name;
+    if (tool.empty && !stats.emptySlots.includes(key)) stats.emptySlots.push(key);
     stats.byTool[key] = (stats.byTool[key] || 0) + L;
     // Swept cut: the move is split into pieces (one piece when Z is constant, 1 mm pieces
     // when it changes); every column near a piece is cut once, by the tool at the point of

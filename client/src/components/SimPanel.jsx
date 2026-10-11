@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { gridToStl } from '../lib/sim/millSim.js';
+import { toSimTools } from '../lib/sim/toolMagazine.js';
+import { useToolMagazine } from '../hooks/useToolMagazine.js';
 
 /**
  * "Simüle et": cuts the program into a virtual stock (tool shapes from the
- * workshop's tool table), shows the machined part in 3D and offers it as STL.
+ * magazine set in Atölye → Bıçaklar; a screen's own `tools` win over it), shows the machined part in 3D and offers it as STL.
  * Usable on any screen that produces a G-code.
  *
  * @param {{gcode?:string, getGcode?:()=>string, top?:number, tools?:object, name?:string, size?:{w:number,h:number,x0?:number,y0?:number}}} props
@@ -19,10 +21,16 @@ export default function SimPanel({ gcode = null, getGcode = null, top = 18, tool
   const [stale, setStale] = useState(false);
   const workerRef = useRef(null);
   const lastRun = useRef(null);
+  const [magazine] = useToolMagazine();
+  const simTools = useMemo(() => ({ ...toSimTools(magazine), ...(tools || {}) }), [magazine, tools]);
+  const lastTools = useRef(null);
 
   useEffect(() => () => workerRef.current?.terminate(), []);
   // a new program makes the shown result out of date
   useEffect(() => { if (lastRun.current && lastRun.current !== gcode) setStale(true); }, [gcode]);
+  // so does a change of the loaded tools
+  const toolsKey = JSON.stringify(simTools);
+  useEffect(() => { if (lastTools.current && lastTools.current !== toolsKey) setStale(true); }, [toolsKey]);
 
   function run() {
     let text = gcode;
@@ -46,11 +54,12 @@ export default function SimPanel({ gcode = null, getGcode = null, top = 18, tool
       workerRef.current = null;
       if (e.data.type === 'error') { setState({ status: 'error', message: e.data.message }); return; }
       lastRun.current = gcode || text;
+      lastTools.current = toolsKey;
       setStale(false);
       setState({ status: 'done', grid: e.data.grid, stats: e.data.stats, cell, seconds: (performance.now() - t0) / 1000 });
     };
     w.onerror = (e) => { setState({ status: 'error', message: e.message || 'Simülasyon çalışmadı.' }); w.terminate(); };
-    w.postMessage({ text, top: Number(topVal) || 18, cell, tools, box: stock });
+    w.postMessage({ text, top: Number(topVal) || 18, cell, tools: simTools, box: stock });
   }
 
   function downloadStl() {
@@ -78,7 +87,10 @@ export default function SimPanel({ gcode = null, getGcode = null, top = 18, tool
         )}
       </div>
       {state.status === 'error' && <div className="err" style={{ display: 'block' }}>{state.message}</div>}
-      {stale && state.status === 'done' && <div className="hint hint-warn">Program değişti; güncel hali için yeniden simüle edin.</div>}
+      {stale && state.status === 'done' && <div className="hint hint-warn">Program veya takılı bıçaklar değişti; güncel hali için yeniden simüle edin.</div>}
+      {state.status === 'done' && state.stats.emptySlots?.length > 0 && (
+        <div className="hint hint-warn">⚠ Programın kullandığı yuvada bıçak yok ya da ölçüsü eksik: {state.stats.emptySlots.join(', ')} — Ø6 düz bıçak varsayıldı. Atölye → Bıçaklar'dan takın.</div>
+      )}
       {state.status === 'done' && (
         <>
           <SimView grid={state.grid} top={Number(topVal) || 18} />

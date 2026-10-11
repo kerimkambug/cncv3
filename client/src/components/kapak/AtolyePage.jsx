@@ -2,6 +2,7 @@ import { usePersistentState } from '../../hooks/usePersistentState.js';
 import MachineSettingsPanel from './MachineSettingsPanel.jsx';
 import PresetPanel from './PresetPanel.jsx';
 import ToolRows from './ToolRows.jsx';
+import ToolMagazinePanel from './ToolMagazinePanel.jsx';
 import UsersPanel, { PasswordPanel } from '../UsersPanel.jsx';
 
 /**
@@ -17,6 +18,7 @@ export default function AtolyePage({ workspace, me = null }) {
   const tabs = [
     isAdmin && ['modeller', 'Modeller'],
     ['makine', 'Makine'],
+    ['bicaklar', 'Bıçaklar'],
     isAdmin && me && ['kullanicilar', 'Kullanıcılar'],
     me && ['hesap', 'Hesabım'],
   ].filter(Boolean);
@@ -37,6 +39,8 @@ export default function AtolyePage({ workspace, me = null }) {
       {tab === 'makine' && (
         <MachineSettingsPanel cfg={machineCfg} setCfg={setMachineCfg} plateCfg={plateCfg} setPlateCfg={setPlateCfg} />
       )}
+
+      {tab === 'bicaklar' && <ToolMagazinePanel />}
 
       {tab === 'kullanicilar' && <UsersPanel me={me?.user} />}
       {tab === 'hesap' && <PasswordPanel />}
