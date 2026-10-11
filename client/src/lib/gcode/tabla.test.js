@@ -9,7 +9,7 @@
 // comparable. Passes of one tool and depth that ArtCAM splits differently (a
 // tarama ring set, a V-carve touching the surface) match as a group by extent.
 // Known, harmless differences are listed per model below.
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { buildKapakGcode } from './kapak.js';
@@ -79,7 +79,13 @@ const same = (a, b) => a.T === b.T && Math.abs(a.zmin - b.zmin) < 0.06 && a.bb.e
 
 function compare(model) {
   const { W, H, passes: ref } = panelDoor(model);
-  const preset = PRESETS.find((p) => p.name === `${model} NUMARA`);
+  // A frozen numuneler/artcam/modelN.preset.json wins over the live preset: the shop
+  // may tune a model (10 NUMARA: T4 moved and deepened after a simulation showed a
+  // mark) while this test keeps proving the generator reproduces the panel's ArtCAM job.
+  const frozen = join(REPO_ROOT, `numuneler/artcam/model${model}.preset.json`);
+  const preset = existsSync(frozen)
+    ? JSON.parse(readFileSync(frozen, 'utf8'))
+    : PRESETS.find((p) => p.name === `${model} NUMARA`);
   const ours = passesOf(buildKapakGcode(W, H, preset).split('\n'));
   const used = new Set(); let missing = [];
   ref.forEach((a) => { const i = ours.findIndex((b, k) => !used.has(k) && same(a, b)); if (i >= 0) used.add(i); else missing.push(a); });

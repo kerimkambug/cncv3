@@ -1,0 +1,94 @@
+{
+  "category": "kapak",
+  "module": "kapak",
+  "previewWidth": 347.5,
+  "previewHeight": 462.5,
+  "thickness": 18,
+  "spindleSpeed": 18000,
+  "safeZ": 46,
+  "toolChangeZ": 46,
+  "homeZ": 46,
+  "plungeFeed": 3000,
+  "cutFeed": 6000,
+  "offsetMode": "absolute",
+  "topStyle": "flat",
+  "riseRatio": 0.125,
+  "name": "10 NUMARA",
+  "description": "TABLA panosu model 10: iç içe çerçeveler. T1 90° carving 57 mm (7 mm, köşeler 50 ye), T4 58.5 mm (5 mm), T3 profil 60 ve 74 mm (7 mm), T6 tarama 74 ile 81 arası (7 mm), T12 135° 81 mm (7 mm).",
+  "rows": [
+    {
+      "toolNo": "3",
+      "operation": "offset",
+      "stepOffset": 60,
+      "absoluteOffset": 60,
+      "depth": 7,
+      "feed": 6000,
+      "name": "T3 profil (dış)",
+      "roughing": false,
+      "chain": false,
+      "repeatStartY": false
+    },
+    {
+      "toolNo": "3",
+      "operation": "offset",
+      "stepOffset": 74,
+      "absoluteOffset": 74,
+      "depth": 7,
+      "feed": 6000,
+      "name": "T3 profil (iç)",
+      "roughing": false,
+      "chain": false,
+      "repeatStartY": false
+    },
+    {
+      "toolNo": "4",
+      "operation": "offset",
+      "stepOffset": 58.5,
+      "absoluteOffset": 58.5,
+      "depth": 5,
+      "feed": 8000,
+      "name": "T4 kanal",
+      "roughing": false,
+      "chain": false,
+      "repeatStartY": false
+    },
+    {
+      "toolNo": "1",
+      "operation": "carving",
+      "stepOffset": 57,
+      "depth": 7,
+      "bitAngle": 90,
+      "feed": 8000,
+      "name": "T1 90° carving",
+      "roughing": false,
+      "chain": false,
+      "repeatStartY": false
+    },
+    {
+      "toolNo": "12",
+      "operation": "offset",
+      "stepOffset": 81,
+      "absoluteOffset": 81,
+      "depth": 7,
+      "feed": 10000,
+      "name": "T12 135° V iç çerçeve",
+      "roughing": false,
+      "chain": false,
+      "repeatStartY": false
+    },
+    {
+      "toolNo": "6",
+      "operation": "tarama",
+      "stepOffset": 74,
+      "depth": 7,
+      "feed": 6000,
+      "name": "T6 tarama (T3 74 ile T12 81 arası)",
+      "tarama": {
+        "innerOffset": 81,
+        "toolDiameter": 6
+      }
+    }
+  ],
+  "createdAt": "2026-10-07T12:26:36.075Z",
+  "updatedAt": "2026-10-08T12:56:10.945Z"
+}
