@@ -9,7 +9,7 @@ export const UPPER_Y = 1500;      // wall units start here
 export const UPPER_H = 720;
 export const TOP = PLINTH + 2080; // tall units / wall units top (2220)
 export const DEPTH = { base: 560, upper: 330, tall: 580 };
-export const GAP = 4;             // gap between fronts
+export const GAP = 2;             // gap between fronts (as fitted in a real kitchen)
 export const THICK = 18;          // door thickness
 
 /**
@@ -33,7 +33,11 @@ export function frontsOf(units = UNITS) {
   const out = [];
   for (const u of units) {
     let y = (u.kind === 'upper' ? UPPER_Y : PLINTH) + GAP / 2;
-    for (const f of u.fronts) {
+    // the fronts fill the carcass height exactly, whatever the gap
+    const unitH = u.kind === 'upper' ? UPPER_H : u.kind === 'tall' ? TOP - PLINTH : BASE_H;
+    const scale = (unitH - GAP * u.fronts.length) / u.fronts.reduce((a, f) => a + f.h, 0);
+    for (const f0 of u.fronts) {
+      const f = { ...f0, h: f0.h * scale };
       const w = (u.w - GAP * f.count) / f.count;
       for (let k = 0; k < f.count; k++) {
         out.push({
