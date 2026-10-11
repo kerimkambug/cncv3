@@ -1,6 +1,8 @@
 import Preset from '../models/Preset.js';
 import { isMongoConnected } from '../config/db.js';
 import { fileStore } from '../store/fileStore.js';
+import { toolStore } from '../store/toolStore.js';
+import { renderPresetImage, simToolsFrom } from '../services/presetImage.js';
 
 // Normalizes a Mongoose document to the same plain-object shape the file
 // store returns, so the frontend never has to care which backend is active.
@@ -103,6 +105,30 @@ export async function deletePreset(req, res) {
     if (err.name === 'CastError') {
       return res.status(404).json({ error: 'Preset bulunamadı.' });
     }
+    res.status(500).json({ error: err.message });
+  }
+}
+
+/**
+ * "Görselleri yenile": every kapak model's picture is made again from its own rows,
+ * in whatever store is active (the online site's MongoDB too), with the workshop's
+ * tools. Only imageDataUrl changes.
+ */
+export async function renderPresetImages(req, res) {
+  try {
+    const tools = simToolsFrom((await toolStore.get())?.value || null);
+    const list = isMongoConnected() ? (await Preset.find({})).map(serializeMongoDoc) : await fileStore.list();
+    const done = [], skipped = [];
+    for (const p of list) {
+      if ((p.category || 'kapak') !== 'kapak') continue;
+      const r = renderPresetImage(p, tools);
+      if (!r) { skipped.push(p.name); continue; }
+      if (isMongoConnected()) await Preset.updateOne({ _id: p._id }, { $set: { imageDataUrl: r.dataUrl } });
+      else await fileStore.update(p._id, { imageDataUrl: r.dataUrl });
+      done.push(p.name);
+    }
+    res.json({ done, skipped });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 }

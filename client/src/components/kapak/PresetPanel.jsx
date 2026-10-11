@@ -11,7 +11,22 @@ function createDefaultPresetImage(name) {
 
 export default function PresetPanel({ workspace }) {
   const { cfg, rows } = workspace;
-  const { presets, loading, error, storage, savePreset, deletePreset } = usePresets('kapak');
+  const { presets, loading, error, storage, savePreset, deletePreset, refresh } = usePresets('kapak');
+  const [renderMsg, setRenderMsg] = useState(null);
+
+  // every model's picture again from its own rows, on the server (MongoDB on the site)
+  async function renderImages() {
+    setRenderMsg('Görseller simülasyondan üretiliyor…');
+    try {
+      const res = await fetch('/api/presets/render-images', { method: 'POST', credentials: 'same-origin' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      await refresh();
+      setRenderMsg(`${data.done.length} modelin görseli yenilendi.${data.skipped.length ? ` Üretilemeyen: ${data.skipped.join(', ')}.` : ''}`);
+    } catch (err) {
+      setRenderMsg(`Görseller yenilenemedi: ${err.message}`);
+    }
+  }
   const [category, setCategory] = useState('kapak');
   const [name, setName] = useState('');
   const [imageDataUrl, setImageDataUrl] = useState('');
@@ -256,6 +271,8 @@ export default function PresetPanel({ workspace }) {
         <button type="button" className="btn-secondary" onClick={triggerImport}>Modelleri içe aktar</button>
         <button type="button" className="btn-secondary" onClick={exportPresetsJson} disabled={presets.length === 0}>Modelleri dışa aktar</button>
       </div>
+      <button type="button" className="btn-secondary" style={{ marginTop: 8, width: '100%' }} onClick={renderImages} disabled={presets.length === 0 || renderMsg === 'Görseller simülasyondan üretiliyor…'}>🖼 Görselleri yenile</button>
+      {renderMsg && <div className="hint">{renderMsg}</div>}
       <input ref={fileInputRef} type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={handleImportFile} />
       {importMsg && <div className="hint" style={{ whiteSpace: 'pre-line' }}>{importMsg}</div>}
       {previewPreset && (

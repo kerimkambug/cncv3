@@ -13,6 +13,11 @@ const DATA_DIR = process.env.TOOLS_DATA_DIR || path.join(__dirname, '..', 'data'
 const FILE = path.join(DATA_DIR, 'bicaklar.json');
 const KEY = 'tools';
 
+function readFile() {
+  if (!fs.existsSync(FILE)) return null;
+  return { value: JSON.parse(fs.readFileSync(FILE, 'utf-8')), updatedAt: fs.statSync(FILE).mtime };
+}
+
 export function validateTools(v) {
   if (!v || typeof v !== 'object' || !Array.isArray(v.library) || typeof v.slots !== 'object' || v.slots === null) {
     return 'Bıçak listesi bozuk: library ve slots gerekli.';
@@ -26,10 +31,11 @@ export const toolStore = {
   async get() {
     if (isMongoConnected()) {
       const doc = await Setting.findOne({ key: KEY }).lean();
-      return doc ? { value: doc.value, updatedAt: doc.updatedAt } : null;
+      if (doc) return { value: doc.value, updatedAt: doc.updatedAt };
+      // a new online database: start from the repository's list (the real T9 profile…)
+      return readFile();
     }
-    if (!fs.existsSync(FILE)) return null;
-    return { value: JSON.parse(fs.readFileSync(FILE, 'utf-8')), updatedAt: fs.statSync(FILE).mtime };
+    return readFile();
   },
   async set(value) {
     if (isMongoConnected()) {
