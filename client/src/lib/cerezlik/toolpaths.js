@@ -49,7 +49,7 @@ export function toolReach(recipe) {
   return Math.max(cutR, roundR);
 }
 
-const levels = (total, step) => {
+export const levels = (total, step) => {
   const out = [];
   const s = Math.max(0.1, Number(step) || total);
   for (let d = s; d < total - 1e-6; d += s) out.push(d);
@@ -58,14 +58,14 @@ const levels = (total, step) => {
 };
 
 /** Orient a loop for the milling direction. materialInside: the kept material is inside the loop. */
-function orient(loop, materialInside, climb) {
+export function orient(loop, materialInside, climb) {
   const ccw = signedArea(loop) > 0;
   const wantCCW = climb ? materialInside : !materialInside; // CW spindle: climb = material on the left
   return ccw === wantCCW ? loop : loop.slice().reverse();
 }
 
 /** Rotate a closed loop so it starts at its point nearest to `from` (inserted on an edge if needed). */
-function startNear(loop, from) {
+export function startNear(loop, from) {
   if (!from) return loop;
   let best = 0, bd = Infinity, bp = loop[0];
   for (let i = 0; i < loop.length; i++) {
@@ -81,7 +81,7 @@ function startNear(loop, from) {
   return [bp, ...rest];
 }
 
-const close3 = (loop, z, tol = 0.01) => { const l = simplifyLoop(loop, tol); return [...l, l[0]].map(([x, y]) => [x, y, z]); };
+export const close3 = (loop, z, tol = 0.01) => { const l = simplifyLoop(loop, tol); return [...l, l[0]].map(([x, y]) => [x, y, z]); };
 
 /**
  * Compartment pocket: concentric rings from the centre outwards. Consecutive
@@ -108,7 +108,7 @@ function pocketPasses(comp, recipe) {
 }
 
 /** Concentric rings (outermost first in `rings`) cut inside out at height z. */
-function ringPasses(rings, z, step, climb) {
+export function ringPasses(rings, z, step, climb) {
   const passes = [];
   let pass = null, last = null;
   for (let i = rings.length - 1; i >= 0; i--) {
@@ -197,7 +197,7 @@ function surfaceOps(part, recipe) {
 }
 
 /** Holding tabs on a closed 3D pass: the stretches inside a tab rise to `tabZ`. */
-function addTabs(pass, count, len, tabZ) {
+export function addTabs(pass, count, len, tabZ) {
   if (!count || len <= 0) return pass;
   const xy = pass.map(([x, y]) => [x, y]);
   const L = pathLength(xy, false);

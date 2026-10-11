@@ -6,6 +6,7 @@ export const MAIN_SCREENS = [
   { key: 'kapak', label: 'Kapak' },
   { key: 'batch', label: 'Toplu Liste' },
   { key: 'nesting', label: 'Nesting' },
+  { key: 'serbest', label: 'Serbest Kesim' },
   { key: 'cam', label: 'Cam' },
   { key: 'panjur', label: 'Panjur' },
   { key: 'cerezlik', label: 'Çerezlik' },

@@ -13,6 +13,7 @@ import CerezlikModule from './components/cerezlik/CerezlikModule.jsx';
 import ReliefGenerator from './components/ReliefGenerator.jsx';
 import GcodeDxfConverter from './components/GcodeDxfConverter.jsx';
 import MutfakModule from './components/mutfak/MutfakModule.jsx';
+import SerbestKesim from './components/serbest/SerbestKesim.jsx';
 import { useKapakWorkspace } from './hooks/useKapakWorkspace.js';
 import { usePersistentState } from './hooks/usePersistentState.js';
 import { usePresets } from './hooks/usePresets.js';
@@ -50,6 +51,7 @@ export default function App() {
         {current === 'nesting' && (
           <NestingPanel cfg={workspace.cfg} plateCfg={workspace.plateCfg} defaultModelName={workspace.modelName(presets)} />
         )}
+        {current === 'serbest' && <SerbestKesim />}
         {current === 'cam' && <CamModule />}
         {current === 'panjur' && <PanjurModule />}
         {current === 'cerezlik' && <CerezlikModule />}
