@@ -3,7 +3,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { ROOM, buildRoom } from './room.js';
 import {
   COLORS, COUNTERS, COUNTER, DEPTH, FINISHES, GLASSES, HANDLES, PLINTH, THICK, TOP, UNITS, UPPER_H, UPPER_Y, BASE_H, frontsOf,
 } from './kitchen.js';
@@ -56,33 +55,30 @@ export function createKitchen(host) {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.setSize(width(), height());
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  // no shadows, no tone curve: colours as chosen, every groove readable
+  renderer.toneMapping = THREE.NoToneMapping;
   host.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x1d2027);
+  scene.background = new THREE.Color(0xe6e4e0);
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-  scene.environmentIntensity = 0.32;
+  scene.environmentIntensity = 0.3;
 
-  // soft key light from the window side (the room adds the warm lamps)
-  const sun = new THREE.DirectionalLight(0xfff1e0, 0.55);
-  sun.position.set(-2000, 3400, 3800);
-  sun.target.position.set(1800, 600, 0);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  Object.assign(sun.shadow.camera, { left: -3600, right: 3600, top: 3600, bottom: -3600, near: 100, far: 12000 });
-  sun.shadow.bias = -0.0004;
-  scene.add(sun, sun.target, new THREE.HemisphereLight(0xfff3e2, 0x8a6f58, 0.22));
+  // plain studio light: even ambient + one key from the upper left front (shows the
+  // relief of the doors the way the model images do) + a weak fill from the right
+  const key = new THREE.DirectionalLight(0xffffff, 0.95);
+  key.position.set(-1500, 3200, 5200); key.target.position.set(1800, 1000, 0);
+  const fill = new THREE.DirectionalLight(0xffffff, 0.18);
+  fill.position.set(5200, 1500, 3000); fill.target.position.set(1800, 1000, 0);
+  scene.add(key, key.target, fill, fill.target, new THREE.AmbientLight(0xffffff, 0.28));
 
   const camera = new THREE.PerspectiveCamera(40, width() / height(), 10, 30000);
   camera.up.set(0, 1, 0);
   const controls = new OrbitControls(camera, renderer.domElement);
-  controls.maxPolarAngle = Math.PI * 0.495;
-  controls.minDistance = 300; controls.maxDistance = 5200;
+  // free orbit: no angle, distance or position limits
+  controls.minDistance = 50; controls.maxDistance = 25000;
+  controls.screenSpacePanning = true;
   const VIEWS = {
     genel: [[1800, 1650, 4700], [1800, 1050, 300]],
     alt: [[1500, 1000, 1900], [1500, 600, 300]],
@@ -104,22 +100,16 @@ export function createKitchen(host) {
     handle: new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 1, roughness: 0.3 }),
     steel: new THREE.MeshStandardMaterial({ color: 0xb9bcbe, metalness: 1, roughness: 0.28 }),
     black: new THREE.MeshPhysicalMaterial({ color: 0x0c0c0d, roughness: 0.08, clearcoat: 1 }),
-    wall: new THREE.MeshStandardMaterial({ color: 0xebe7e0, roughness: 0.95 }),
-    floor: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7 }),
     plate: new THREE.MeshStandardMaterial({ color: 0xf7f7f5, roughness: 0.35 }),
   };
-  M.floor.map = woodTexture('#b79f80'); M.floor.map.repeat.set(6, 6); M.floor.map.rotation = Math.PI / 2;
 
   const add = (geo, mat, x, y, z, { cast = true, receive = true, parent = scene } = {}) => {
     const m = new THREE.Mesh(geo, mat);
-    m.position.set(x, y, z); m.castShadow = cast; m.receiveShadow = receive;
+    m.position.set(x, y, z);
     parent.add(m); return m;
   };
   const box = (w, h, d, mat, x, y, z, o) => add(new THREE.BoxGeometry(w, h, d), mat, x, y, z, o); // x,y,z = centre
 
-  // ---- room ----
-  const floor = add(new THREE.PlaneGeometry(ROOM.x1 - ROOM.x0, ROOM.z1 - ROOM.z0), M.floor, (ROOM.x0 + ROOM.x1) / 2, 0, (ROOM.z0 + ROOM.z1) / 2, { cast: false });
-  floor.rotation.x = -Math.PI / 2;
 
   // ---- carcasses: open boxes (sides, top, bottom, back) so an opened door shows the inside ----
   const plates = (u, sy, d) => {
@@ -228,10 +218,6 @@ export function createKitchen(host) {
     movers.push(m);
   }
 
-  // ---- the room around the kitchen ----
-  const roomWood = new Map();
-  const room = buildRoom({ scene, add, box, M, wood: (hex) => { if (!roomWood.has(hex)) roomWood.set(hex, woodTexture(hex)); return roomWood.get(hex); } });
-
   // ---- opening: click a door / drawer, it swings / slides ----
   const DOOR_OPEN = (100 * Math.PI) / 180;
   let anim = 0;
@@ -318,7 +304,7 @@ export function createKitchen(host) {
     const n = new THREE.DataTexture(relief.normal, relief.w, relief.h, THREE.RGBAFormat);
     const a = new THREE.DataTexture(relief.shade, relief.w, relief.h, THREE.RGBAFormat);
     for (const t of [n, a]) { t.needsUpdate = true; t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true; t.anisotropy = 4; }
-    m.normalMap = n; m.normalScale.set(2, 2);
+    m.normalMap = n; m.normalScale.set(2.6, 2.6);
     m.aoMap = a; m.aoMapIntensity = 1;
     reliefTex.set(key, [n, a]);
     m.needsUpdate = true;
@@ -326,14 +312,7 @@ export function createKitchen(host) {
   }
 
   function render() { renderer.render(scene, camera); }
-  // the camera never leaves the room: not through a wall, the ceiling, the floor or into the cabinets
-  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
-  function keepInside() {
-    const p = camera.position, t = controls.target, m = 150;
-    p.set(clamp(p.x, ROOM.x0 + m, ROOM.x1 - m), clamp(p.y, 150, ROOM.h - m), clamp(p.z, 700, ROOM.z1 - m));
-    t.set(clamp(t.x, ROOM.x0 + m, ROOM.x1 - m), clamp(t.y, 0, ROOM.h - m), clamp(t.z, 0, ROOM.z1 - m));
-  }
-  controls.addEventListener('change', () => { keepInside(); render(); });
+  controls.addEventListener('change', render);
   const onResize = () => { renderer.setSize(width(), height()); camera.aspect = width() / height(); camera.updateProjectionMatrix(); render(); };
   window.addEventListener('resize', onResize);
   view('genel');
@@ -351,7 +330,6 @@ export function createKitchen(host) {
       renderer.domElement.removeEventListener('pointerup', onUp);
       renderer.domElement.removeEventListener('pointermove', onMove);
       controls.dispose();
-      room.dispose(); roomWood.forEach((t) => t.dispose());
       scene.traverse((o) => { o.geometry?.dispose(); });
       [...Object.values(M), ...frontMats.values()].forEach((m) => { m.map?.dispose(); m.dispose(); });
       reliefTex.forEach((ts) => ts.forEach((t) => t.dispose()));
