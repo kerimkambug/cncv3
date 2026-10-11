@@ -29,7 +29,10 @@
         "tarama": {
           "innerOffset": 77,
           "toolDiameter": 6
-        }
+        },
+        "roughing": false,
+        "chain": false,
+        "repeatStartY": false
       },
       {
         "toolNo": "1",
@@ -365,54 +368,6 @@
     "riseRatio": 0.125,
     "rows": [
       {
-        "toolNo": "12",
-        "depth": 5,
-        "stepOffset": 139.1,
-        "feed": 9000,
-        "name": "135° iç halka 1",
-        "operation": "offset",
-        "repeatStartY": true,
-        "absoluteOffset": 139.1,
-        "roughing": false,
-        "chain": false
-      },
-      {
-        "toolNo": "12",
-        "depth": 5,
-        "stepOffset": 115.4,
-        "feed": 9000,
-        "chain": true,
-        "name": "135° halka 2",
-        "operation": "offset",
-        "repeatStartY": true,
-        "absoluteOffset": 115.4,
-        "roughing": false
-      },
-      {
-        "toolNo": "12",
-        "depth": 5,
-        "stepOffset": 91.7,
-        "feed": 9000,
-        "chain": true,
-        "name": "135° halka 3",
-        "operation": "offset",
-        "repeatStartY": true,
-        "absoluteOffset": 91.7,
-        "roughing": false
-      },
-      {
-        "toolNo": "12",
-        "depth": 5,
-        "stepOffset": 68,
-        "feed": 9000,
-        "chain": true,
-        "name": "135° halka 4",
-        "operation": "offset",
-        "absoluteOffset": 68,
-        "roughing": false,
-        "repeatStartY": false
-      },
-      {
         "toolNo": "6",
         "depth": 5,
         "stepOffset": 53,
@@ -422,10 +377,31 @@
         "roughing": false,
         "chain": false,
         "repeatStartY": false
+      },
+      {
+        "name": "30mm tarama",
+        "toolNo": "11",
+        "operation": "tarama",
+        "depth": 5,
+        "stepOffset": 59,
+        "derz": {
+          "yon": "dikey",
+          "margin": 0,
+          "spacing": 60,
+          "autoFit": true,
+          "overshoot": 1,
+          "edgeExtra": 0,
+          "outerFrame": false
+        },
+        "roughing": false,
+        "chain": false,
+        "repeatStartY": false
       }
     ],
     "createdAt": "2026-09-25T15:51:01.962Z",
-    "updatedAt": "2026-09-25T15:51:01.962Z"
+    "updatedAt": "2026-10-11T19:16:43.382Z",
+    "refWidth": 292,
+    "refHeight": 400
   },
   {
     "_id": "local_1790351461965_3xeujg",
@@ -469,7 +445,10 @@
         "tarama": {
           "innerOffset": 68.5,
           "toolDiameter": 8
-        }
+        },
+        "roughing": false,
+        "chain": false,
+        "repeatStartY": false
       },
       {
         "toolNo": "12",
@@ -729,9 +708,9 @@
       {
         "toolNo": "4",
         "operation": "offset",
-        "stepOffset": 58.5,
-        "absoluteOffset": 58.5,
-        "depth": 5,
+        "stepOffset": 59,
+        "absoluteOffset": 59,
+        "depth": 7,
         "feed": 8000,
         "name": "T4 kanal",
         "roughing": false,
@@ -772,11 +751,16 @@
         "tarama": {
           "innerOffset": 81,
           "toolDiameter": 6
-        }
+        },
+        "roughing": false,
+        "chain": false,
+        "repeatStartY": false
       }
     ],
     "createdAt": "2026-10-07T12:26:36.075Z",
-    "updatedAt": "2026-10-08T12:56:10.945Z"
+    "updatedAt": "2026-10-11T19:11:28.681Z",
+    "refWidth": 347.5,
+    "refHeight": 462.5
   },
   {
     "category": "kapak",
