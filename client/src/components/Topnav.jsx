@@ -10,6 +10,7 @@ export const MAIN_SCREENS = [
   { key: 'panjur', label: 'Panjur' },
   { key: 'cerezlik', label: 'Çerezlik' },
   { key: 'relief', label: '3D Rölyef' },
+  { key: 'mutfak', label: 'Mutfak' },
 ];
 // Occasional helpers, under "Araçlar".
 export const TOOL_SCREENS = [

@@ -1,0 +1,81 @@
+{
+  "category": "kapak",
+  "previewWidth": 292,
+  "previewHeight": 400,
+  "name": "7 NUMARA",
+  "module": "kapak",
+  "description": "Çoklu iç halka (135° T12) + dış T6. 7_NUMARA.cnc ile doğrulandı (iç halka başlangıç noktaları + bıçak-başı feed T12→F9000).",
+  "thickness": 18,
+  "spindleSpeed": 18000,
+  "safeZ": 46,
+  "toolChangeZ": 46,
+  "homeZ": 46,
+  "plungeFeed": 3000,
+  "cutFeed": 5000,
+  "offsetMode": "absolute",
+  "topStyle": "flat",
+  "riseRatio": 0.125,
+  "rows": [
+    {
+      "toolNo": "12",
+      "depth": 5,
+      "stepOffset": 139.1,
+      "feed": 9000,
+      "name": "135° iç halka 1",
+      "operation": "offset",
+      "repeatStartY": true,
+      "absoluteOffset": 139.1,
+      "roughing": false,
+      "chain": false
+    },
+    {
+      "toolNo": "12",
+      "depth": 5,
+      "stepOffset": 115.4,
+      "feed": 9000,
+      "chain": true,
+      "name": "135° halka 2",
+      "operation": "offset",
+      "repeatStartY": true,
+      "absoluteOffset": 115.4,
+      "roughing": false
+    },
+    {
+      "toolNo": "12",
+      "depth": 5,
+      "stepOffset": 91.7,
+      "feed": 9000,
+      "chain": true,
+      "name": "135° halka 3",
+      "operation": "offset",
+      "repeatStartY": true,
+      "absoluteOffset": 91.7,
+      "roughing": false
+    },
+    {
+      "toolNo": "12",
+      "depth": 5,
+      "stepOffset": 68,
+      "feed": 9000,
+      "chain": true,
+      "name": "135° halka 4",
+      "operation": "offset",
+      "absoluteOffset": 68,
+      "roughing": false,
+      "repeatStartY": false
+    },
+    {
+      "toolNo": "6",
+      "depth": 5,
+      "stepOffset": 53,
+      "name": "6mm dış",
+      "operation": "offset",
+      "absoluteOffset": 53,
+      "roughing": false,
+      "chain": false,
+      "repeatStartY": false
+    }
+  ],
+  "createdAt": "2026-09-25T15:51:01.962Z",
+  "updatedAt": "2026-09-25T15:51:01.962Z"
+}

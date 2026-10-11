@@ -963,3 +963,30 @@ details.collapsible[open] > summary{margin-bottom:10px}
 .mag-glyph.drawn path.env{fill:none;stroke:var(--accent2);stroke-width:2;vector-effect:non-scaling-stroke}
 .mag-glyph.drawn path.line{fill:var(--accent2);fill-opacity:.12;stroke:var(--muted);stroke-width:1;vector-effect:non-scaling-stroke}
 .mag-glyph.drawn line.axis{stroke:var(--muted);stroke-width:.4;stroke-dasharray:1.5 1.5}
+
+/* Mutfak: 3D kitchen preview */
+.mutfak{display:grid;grid-template-columns:300px minmax(0,1fr);gap:16px;align-items:start}
+.mutfak .card + .card{margin-top:0}
+.mutfak-side{max-height:calc(100vh - 110px);overflow:auto}
+.mutfak-target,.mutfak-chips{display:flex;flex-wrap:wrap;gap:6px}
+.mutfak-target .tab,.mutfak-chips .tab{padding:6px 10px;font-size:12px}
+.mutfak-models{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.mutfak-model{display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px;background:var(--panel2);border:1px solid var(--border);border-radius:8px;cursor:pointer;color:var(--text);font-size:10.5px;position:relative}
+.mutfak-model img,.mutfak-noimg{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:4px;background:#2a2e36;display:block}
+.mutfak-model.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.mutfak-model small{position:absolute;top:8px;left:8px;background:var(--accent);color:#fff;font-size:9px;padding:1px 5px;border-radius:4px}
+.mutfak-swatches{display:grid;grid-template-columns:repeat(8,1fr);gap:6px}
+.mutfak-swatch{aspect-ratio:1;border-radius:50%;border:2px solid var(--border);cursor:pointer;padding:0;position:relative;margin:0}
+.mutfak-swatch.active{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)}
+.mutfak-swatch.wood{background-image:repeating-linear-gradient(95deg,rgba(0,0,0,.12) 0 2px,transparent 2px 6px)!important}
+.mutfak-swatch.custom{background:conic-gradient(red,yellow,lime,cyan,blue,magenta,red)}
+.mutfak-swatch.custom input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;padding:0}
+.mutfak-glass i{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid var(--border);margin-right:5px;vertical-align:-2px}
+.mutfak-view{padding:12px}
+.mutfak-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:10px}
+.mutfak-toolbar button{width:auto;margin:0}
+.mutfak-status{flex:1;min-width:160px;font-size:12px;color:var(--muted);text-align:center}
+.mutfak-canvas{width:100%;border-radius:8px;overflow:hidden;line-height:0}
+.mutfak-canvas canvas{display:block;width:100%!important;height:auto!important}
+@media (max-width:900px){.mutfak{grid-template-columns:1fr}.mutfak-side{max-height:none}}
+.mutfak-noimg.panjur{background:#c9bfae repeating-linear-gradient(180deg,#b3a893 0 3px,#d8cfbf 3px 9px,#c9bfae 9px 11px);box-shadow:inset 0 0 0 9px #c9bfae}

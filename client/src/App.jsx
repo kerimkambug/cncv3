@@ -12,6 +12,7 @@ import PanjurModule from './components/panjur/PanjurModule.jsx';
 import CerezlikModule from './components/cerezlik/CerezlikModule.jsx';
 import ReliefGenerator from './components/ReliefGenerator.jsx';
 import GcodeDxfConverter from './components/GcodeDxfConverter.jsx';
+import MutfakModule from './components/mutfak/MutfakModule.jsx';
 import { useKapakWorkspace } from './hooks/useKapakWorkspace.js';
 import { usePersistentState } from './hooks/usePersistentState.js';
 import { usePresets } from './hooks/usePresets.js';
@@ -53,6 +54,7 @@ export default function App() {
         {current === 'panjur' && <PanjurModule />}
         {current === 'cerezlik' && <CerezlikModule />}
         {current === 'relief' && <ReliefGenerator />}
+        {current === 'mutfak' && <MutfakModule presets={presets} />}
         {current === 'circle' && <DaireKesimi cfg={workspace.cfg} />}
         {current === 'derz' && <DerzBolme cfg={workspace.cfg} />}
         {current === 'gcode-dxf' && <GcodeDxfConverter />}
