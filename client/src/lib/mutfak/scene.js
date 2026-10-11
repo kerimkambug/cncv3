@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { ROOM, buildRoom } from './room.js';
 import {
   COLORS, COUNTERS, COUNTER, DEPTH, FINISHES, GLASSES, HANDLES, PLINTH, THICK, TOP, UNITS, UPPER_H, UPPER_Y, BASE_H, frontsOf,
 } from './kitchen.js';
@@ -58,34 +59,37 @@ export function createKitchen(host) {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.88;
+  renderer.toneMappingExposure = 1.05;
   host.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xdcd8d0);
+  scene.background = new THREE.Color(0x1d2027);
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-  scene.environmentIntensity = 0.6;
+  scene.environmentIntensity = 0.32;
 
-  const sun = new THREE.DirectionalLight(0xfff4e6, 1.6);
-  sun.position.set(2600, 3600, 3400);
+  // soft key light from the window side (the room adds the warm lamps)
+  const sun = new THREE.DirectionalLight(0xfff1e0, 0.55);
+  sun.position.set(-2000, 3400, 3800);
   sun.target.position.set(1800, 600, 0);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  Object.assign(sun.shadow.camera, { left: -2600, right: 2600, top: 2600, bottom: -2600, near: 100, far: 9000 });
+  Object.assign(sun.shadow.camera, { left: -3600, right: 3600, top: 3600, bottom: -3600, near: 100, far: 12000 });
   sun.shadow.bias = -0.0004;
-  scene.add(sun, sun.target, new THREE.HemisphereLight(0xffffff, 0x8a7f70, 0.35));
+  scene.add(sun, sun.target, new THREE.HemisphereLight(0xfff3e2, 0x8a6f58, 0.22));
 
   const camera = new THREE.PerspectiveCamera(40, width() / height(), 10, 30000);
   camera.up.set(0, 1, 0);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.maxPolarAngle = Math.PI * 0.495;
-  controls.minDistance = 400; controls.maxDistance = 9000;
+  controls.minDistance = 300; controls.maxDistance = 7000;
   const VIEWS = {
-    genel: [[1800, 1550, 4300], [1800, 1050, 300]],
+    genel: [[1800, 1650, 4700], [1800, 1050, 300]],
     alt: [[1500, 1000, 1900], [1500, 600, 300]],
     ust: [[1800, 1400, 2000], [1800, 1850, 200]],
-    yan: [[4300, 1500, 2600], [1500, 1000, 300]],
+    yan: [[4100, 1600, 3200], [1300, 1000, 600]],
+    oda: [[1800, 1600, 700], [1800, 700, 4300]],
+    disari: [[1800, 5200, 11000], [1800, 900, 2600]],
   };
   function view(name) {
     const [p, t] = VIEWS[name] || VIEWS.genel;
@@ -106,7 +110,7 @@ export function createKitchen(host) {
     floor: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7 }),
     plate: new THREE.MeshStandardMaterial({ color: 0xf7f7f5, roughness: 0.35 }),
   };
-  M.floor.map = woodTexture('#b79f80'); M.floor.map.repeat.set(10, 10); M.floor.map.rotation = Math.PI / 2;
+  M.floor.map = woodTexture('#b79f80'); M.floor.map.repeat.set(6, 6); M.floor.map.rotation = Math.PI / 2;
 
   const add = (geo, mat, x, y, z, { cast = true, receive = true, parent = scene } = {}) => {
     const m = new THREE.Mesh(geo, mat);
@@ -116,9 +120,8 @@ export function createKitchen(host) {
   const box = (w, h, d, mat, x, y, z, o) => add(new THREE.BoxGeometry(w, h, d), mat, x, y, z, o); // x,y,z = centre
 
   // ---- room ----
-  const floor = add(new THREE.PlaneGeometry(9000, 7000), M.floor, 1800, 0, 2500, { cast: false });
+  const floor = add(new THREE.PlaneGeometry(ROOM.x1 - ROOM.x0, ROOM.z1 - ROOM.z0), M.floor, (ROOM.x0 + ROOM.x1) / 2, 0, (ROOM.z0 + ROOM.z1) / 2, { cast: false });
   floor.rotation.x = -Math.PI / 2;
-  add(new THREE.PlaneGeometry(6000, 2800), M.wall, 1800, 1400, 0, { cast: false });
 
   // ---- carcasses: open boxes (sides, top, bottom, back) so an opened door shows the inside ----
   const plates = (u, sy, d) => {
@@ -226,6 +229,10 @@ export function createKitchen(host) {
     pivot.traverse((c) => { c.userData.mover = m; });
     movers.push(m);
   }
+
+  // ---- the room around the kitchen ----
+  const roomWood = new Map();
+  const room = buildRoom({ scene, add, box, M, wood: (hex) => { if (!roomWood.has(hex)) roomWood.set(hex, woodTexture(hex)); return roomWood.get(hex); } });
 
   // ---- opening: click a door / drawer, it swings / slides ----
   const DOOR_OPEN = (100 * Math.PI) / 180;
@@ -339,6 +346,7 @@ export function createKitchen(host) {
       renderer.domElement.removeEventListener('pointerup', onUp);
       renderer.domElement.removeEventListener('pointermove', onMove);
       controls.dispose();
+      room.dispose(); roomWood.forEach((t) => t.dispose());
       scene.traverse((o) => { o.geometry?.dispose(); });
       [...Object.values(M), ...frontMats.values()].forEach((m) => { m.map?.dispose(); m.dispose(); });
       reliefTex.forEach((ts) => ts.forEach((t) => t.dispose()));
