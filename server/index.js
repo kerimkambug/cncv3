@@ -7,6 +7,7 @@ import { connectDB, isMongoConnected } from './config/db.js';
 import presetRoutes from './routes/presetRoutes.js';
 import reliefRoutes from './routes/reliefRoutes.js';
 import authRoutes from './routes/authRoutes.js';
+import toolRoutes from './routes/toolRoutes.js';
 import { seedPresetsIfEmpty } from './config/seed.js';
 import { accessProblem, loadUser, requireAccess, requireAdmin } from './auth/auth.js';
 
@@ -34,6 +35,8 @@ app.use('/api/auth', authRoutes);
 // models: everyone with access reads them, only the admin changes them
 app.use('/api/presets', requireAccess, (req, res, next) => (req.method === 'GET' ? next() : requireAdmin(req, res, next)), presetRoutes);
 app.use('/api/relief', requireAccess, reliefRoutes);
+// the workshop's tools: one copy for every computer (Atölye → Bıçaklar)
+app.use('/api/tools', requireAccess, toolRoutes);
 app.get('/api/health', (req, res) => res.json({ ok: true, storage: isMongoConnected() ? 'mongodb' : 'local-file' }));
 
 if (app.locals && app.locals.settings) {

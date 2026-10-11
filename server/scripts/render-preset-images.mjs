@@ -14,8 +14,14 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const lib = (p) => import(pathToFileURL(path.join(here, '../../client/src/lib', p)).href);
 const { buildKapakGcode } = await lib('gcode/kapak.js');
 const { simulate } = await lib('sim/millSim.js');
+const { normalizeMagazine, toSimTools } = await lib('sim/toolMagazine.js');
 
 const FILE = path.join(here, '../data/presets.json');
+// The workshop's real tools (Atölye → Bıçaklar → Dışa aktar, e.g. the T9 tabla
+// bit drawn in AutoCAD); without the file the built-in tool table is used.
+const TOOLS_FILE = path.join(here, '../data/bicaklar.json');
+const tools = fs.existsSync(TOOLS_FILE) ? toSimTools(normalizeMagazine(JSON.parse(fs.readFileSync(TOOLS_FILE, 'utf8')))) : {};
+console.log(fs.existsSync(TOOLS_FILE) ? `bıçaklar: ${path.relative(process.cwd(), TOOLS_FILE)} (T9 = ${tools[9]?.name})` : 'bıçaklar: yerleşik tablo');
 const DOOR_W = 300, DOOR_H = 400; // mm
 const IMG_W = 300, IMG_H = 400; // px (the gallery cards are 3:4)
 
@@ -92,7 +98,7 @@ for (const p of presets) {
     continue;
   }
   const t0 = Date.now();
-  const { grid, stats } = simulate(gcode, { top, cell: 0.25, box: { x0: -2, y0: -2, x1: DOOR_W + 2, y1: DOOR_H + 2 } });
+  const { grid, stats } = simulate(gcode, { top, cell: 0.25, box: { x0: -2, y0: -2, x1: DOOR_W + 2, y1: DOOR_H + 2 }, tools });
   p.imageDataUrl = pngDataUrl(IMG_W, IMG_H, render(grid, top));
   done++;
   console.log(`${p.name}: ${((Date.now() - t0) / 1000).toFixed(1)} sn, ${(stats.cuttingMm / 1000).toFixed(1)} m kesim, görsel ${Math.round(p.imageDataUrl.length / 1024)} KB`);

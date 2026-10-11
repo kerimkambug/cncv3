@@ -12,7 +12,7 @@ import {
  * The simulation cuts with whatever is loaded here.
  */
 export default function ToolMagazinePanel() {
-  const [mag, setMag] = useToolMagazine();
+  const [mag, setMag, sync] = useToolMagazine();
   const [msg, setMsg] = useState(null);
   const [libMsg, setLibMsg] = useState(null);
   const fileRef = useRef(null);
@@ -194,13 +194,16 @@ export default function ToolMagazinePanel() {
           </table>
         </div>
         {libMsg && <div className="hint">{libMsg}</div>}
+        <div className={`hint${sync.status === 'error' || sync.status === 'local' ? ' hint-warn' : ''}`}>
+          {{ loading: 'Sunucuya kaydediliyor…', saved: '✓ Sunucuda kayıtlı', idle: '' }[sync.status] ?? sync.message}
+        </div>
         <button type="button" className="btn-secondary" style={{ marginTop: 12 }} onClick={addTool}>+ Bıçak ekle</button>
         <div className="hint">
           V bıçakta çap = kesen kısmın en geniş yeri, açı = toplam uç açısı (90° = kenara 45°).
           Yuvarlamada “Uç” = uçtaki düz kısım (boş = sivri), konikte “Uç” = küre uç çapı.
           Hazır tiplere uymayan bıçaklar (kulp, tabla…) için tip “Özel profil (DXF)”: bıçağın yan görünüşünü AutoCAD'de
           ucu aşağıda, 1 birim = 1 mm çizip DXF kaydedin. Ya bütün silüeti çizin ya da yalnız sağ yarısını, eksen X=0 çizgisinde olacak şekilde.
-          Liste bu tarayıcıda saklanır; başka bilgisayara “Dışa aktar” dosyasıyla taşıyın.
+          Liste sunucuda saklanır: atölyedeki bütün bilgisayarlar aynı bıçakları görür.
         </div>
       </div>
     </div>
