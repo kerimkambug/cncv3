@@ -59,6 +59,7 @@ export function createKitchen(host) {
   renderer.toneMapping = THREE.NoToneMapping;
   host.appendChild(renderer.domElement);
 
+  const maxAniso = renderer.capabilities.getMaxAnisotropy();
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0xe6e4e0);
   const pmrem = new THREE.PMREMGenerator(renderer);
@@ -301,9 +302,17 @@ export function createKitchen(host) {
     if (!m) return;
     reliefTex.get(key)?.forEach((t) => t.dispose());
     if (!relief) { m.normalMap = null; m.aoMap = null; reliefTex.delete(key); m.needsUpdate = true; render(); return; }
-    const n = new THREE.DataTexture(relief.normal, relief.w, relief.h, THREE.RGBAFormat);
-    const a = new THREE.DataTexture(relief.shade, relief.w, relief.h, THREE.RGBAFormat);
-    for (const t of [n, a]) { t.needsUpdate = true; t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true; t.anisotropy = 4; }
+    // the smaller levels are built here (normals averaged and re-normalised): seen
+    // from afar a dense groove pattern fades evenly instead of breaking into moiré
+    const tex = (data, normal) => {
+      const t = new THREE.DataTexture(data, relief.w, relief.h, THREE.RGBAFormat);
+      t.mipmaps = mipChain(data, relief.w, relief.h, normal);
+      t.generateMipmaps = false;
+      t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter;
+      t.anisotropy = maxAniso; t.needsUpdate = true;
+      return t;
+    };
+    const n = tex(relief.normal, true), a = tex(relief.shade, false);
     m.normalMap = n; m.normalScale.set(2.6, 2.6);
     m.aoMap = a; m.aoMapIntensity = 1;
     reliefTex.set(key, [n, a]);
@@ -313,8 +322,18 @@ export function createKitchen(host) {
 
   function render() { renderer.render(scene, camera); }
   controls.addEventListener('change', render);
-  const onResize = () => { renderer.setSize(width(), height()); camera.aspect = width() / height(); camera.updateProjectionMatrix(); render(); };
-  window.addEventListener('resize', onResize);
+  // the drawing buffer always matches the box on screen 1:1 (a canvas the browser
+  // has to stretch even by 2% turns fine grooves into moiré); the box can change
+  // without a window resize, e.g. when the page's scrollbar appears
+  let lastW = 0;
+  const onResize = () => {
+    const w = width();
+    if (w === lastW) return;
+    lastW = w;
+    renderer.setSize(w, height()); camera.aspect = w / height(); camera.updateProjectionMatrix(); render();
+  };
+  const sizer = new ResizeObserver(onResize);
+  sizer.observe(host);
   view('genel');
 
   return {
@@ -324,7 +343,7 @@ export function createKitchen(host) {
     anyOpen: () => movers.some((m) => m.open),
     snapshot() { render(); return renderer.domElement.toDataURL('image/png'); },
     dispose() {
-      window.removeEventListener('resize', onResize);
+      sizer.disconnect();
       cancelAnimationFrame(anim);
       renderer.domElement.removeEventListener('pointerdown', onDown);
       renderer.domElement.removeEventListener('pointerup', onUp);
@@ -338,4 +357,54 @@ export function createKitchen(host) {
       host.removeChild(renderer.domElement);
     },
   };
+}
+
+/** Full mipmap chain of an RGBA texture (2×2 averages; normal maps are re-normalised). */
+function mipChain(data, w, h, normal) {
+  const levels = [{ data, width: w, height: h }];
+  let src = data, sw = w, sh = h;
+  while (sw > 1 || sh > 1) {
+    const nw = Math.max(1, sw >> 1), nh = Math.max(1, sh >> 1), dst = new Uint8Array(nw * nh * 4);
+    for (let j = 0; j < nh; j++) {
+      for (let i = 0; i < nw; i++) {
+        const acc = [0, 0, 0, 0];
+        for (const [di, dj] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+          const k = (Math.min(sh - 1, 2 * j + dj) * sw + Math.min(sw - 1, 2 * i + di)) * 4;
+          for (let c = 0; c < 4; c++) acc[c] += src[k + c];
+        }
+        const o = (j * nw + i) * 4;
+        if (normal) {
+          const x = acc[0] / 510 - 1, y = acc[1] / 510 - 1, z = acc[2] / 510 - 1, l = Math.hypot(x, y, z) || 1;
+          dst[o] = (x / l * 0.5 + 0.5) * 255; dst[o + 1] = (y / l * 0.5 + 0.5) * 255; dst[o + 2] = (z / l * 0.5 + 0.5) * 255; dst[o + 3] = 255;
+        } else {
+          for (let c = 0; c < 4; c++) dst[o + c] = acc[c] / 4;
+        }
+      }
+    }
+    levels.push({ data: soften(dst, nw, nh, normal), width: nw, height: nh });
+    src = dst; sw = nw; sh = nh;
+  }
+  return levels;
+}
+
+/** 3×3 tent filter on one mip level: removes the near-Nyquist stripes a 2×2 average leaves. */
+function soften(d, w, h, normal) {
+  if (w < 3 || h < 3) return d;
+  const out = new Uint8Array(d.length), K = [1, 2, 1];
+  for (let j = 0; j < h; j++) {
+    for (let i = 0; i < w; i++) {
+      const acc = [0, 0, 0]; let ws = 0;
+      for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) {
+        const k = (Math.min(h - 1, Math.max(0, j + b)) * w + Math.min(w - 1, Math.max(0, i + a))) * 4, wt = K[a + 1] * K[b + 1];
+        acc[0] += d[k] * wt; acc[1] += d[k + 1] * wt; acc[2] += d[k + 2] * wt; ws += wt;
+      }
+      const o = (j * w + i) * 4;
+      if (normal) {
+        const x = acc[0] / ws / 127.5 - 1, y = acc[1] / ws / 127.5 - 1, z = acc[2] / ws / 127.5 - 1, l = Math.hypot(x, y, z) || 1;
+        out[o] = (x / l * 0.5 + 0.5) * 255; out[o + 1] = (y / l * 0.5 + 0.5) * 255; out[o + 2] = (z / l * 0.5 + 0.5) * 255;
+      } else { out[o] = acc[0] / ws; out[o + 1] = acc[1] / ws; out[o + 2] = acc[2] / ws; }
+      out[o + 3] = 255;
+    }
+  }
+  return out;
 }

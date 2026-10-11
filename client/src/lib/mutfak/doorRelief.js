@@ -32,12 +32,18 @@ export function doorRelief(preset, w, h, tools = {}) {
   // ~0.8 mm per pixel, coarser on big doors (≤ ~600k pixels)
   const cell = Math.max(0.8, Math.sqrt((w * h) / 6e5));
   const { grid } = simulate(gcode, { top, cell, box: { x0: 0, y0: 0, x1: w, y1: h }, tools });
-  const { w: gw, h: gh, z } = grid;
+  const { w: gw, h: gh } = grid;
+  // a light blur (~1 mm) so a groove narrower than a screen pixel does not break
+  // up into moiré when the door is seen from across the room
+  const z = blur(blur(grid.z, gw, gh), gw, gh);
   const normal = new Uint8Array(gw * gh * 4), shade = new Uint8Array(gw * gh * 4);
   const at = (i, j) => z[Math.min(gh - 1, Math.max(0, j)) * gw + Math.min(gw - 1, Math.max(0, i))];
   for (let j = 0; j < gh; j++) {
     for (let i = 0; i < gw; i++) {
-      const dx = (at(i + 1, j) - at(i - 1, j)) / (2 * cell), dy = (at(i, j + 1) - at(i, j - 1)) / (2 * cell);
+      let dx = (at(i + 1, j) - at(i - 1, j)) / (2 * cell), dy = (at(i, j + 1) - at(i, j - 1)) / (2 * cell);
+      // steep walls (a pointed bit's flank) are capped at ~60°: still read as an edge, no harsh flicker
+      const sl = Math.hypot(dx, dy), cap = sl > 1.7 ? 1.7 / sl : 1;
+      dx *= cap; dy *= cap;
       const l = Math.hypot(dx, dy, 1), k = (j * gw + i) * 4;
       normal[k] = ((-dx / l) * 0.5 + 0.5) * 255;
       normal[k + 1] = ((-dy / l) * 0.5 + 0.5) * 255;
@@ -49,4 +55,20 @@ export function doorRelief(preset, w, h, tools = {}) {
     }
   }
   return { w: gw, h: gh, normal, shade };
+}
+
+/** 3×3 box blur of a height grid (edges clamp). */
+function blur(src, w, h) {
+  const out = new Float32Array(src.length);
+  for (let j = 0; j < h; j++) {
+    for (let i = 0; i < w; i++) {
+      let sum = 0;
+      for (let b = -1; b <= 1; b++) {
+        const jj = Math.min(h - 1, Math.max(0, j + b)) * w;
+        for (let a = -1; a <= 1; a++) sum += src[jj + Math.min(w - 1, Math.max(0, i + a))];
+      }
+      out[j * w + i] = sum / 9;
+    }
+  }
+  return out;
 }
