@@ -16,6 +16,7 @@ import { parseGcode } from './gcodeToDxf.js';
 import { buildCamPartProgram } from './camTarama.js';
 import { rowNeedsOffset } from './features.js';
 import { buildKapakGcode } from './kapak.js';
+import { buildKulpLines, kulpMargins, kulpProblem, kulpSettings } from './kulp.js';
 
 function rectsIntersect(a, b) {
   return a.x < b.x + b.w - 1e-9 && a.x + a.w > b.x + 1e-9 && a.y < b.y + b.h - 1e-9 && a.y + a.h > b.y + 1e-9;
@@ -296,10 +297,23 @@ export function calculateNesting(opts) {
   }
 
   // Her giriş satırını qty adet gerçek parçaya aç (qty yoksa/geçersizse 1 kabul edilir).
+  // A door with kulps is packed with the room its kulp work needs past those
+  // edges (the 10 mm bit's holes and the kulp bit's head): nothing else may lie
+  // there. It is turned back into the door itself after packing.
   const parts = inputParts
     .flatMap((p) => {
       const qty = Number.isFinite(Number(p.qty)) && Number(p.qty) > 0 ? Math.floor(Number(p.qty)) : 1;
       return Array.from({ length: qty }, (_, i) => ({ ...p, qty, copyIndex: i }));
+    })
+    .map((p) => {
+      if (!p.kulps || !p.kulps.length) return p;
+      const door = { x: 0, y: 0, w: Number(p.width), h: Number(p.height) };
+      for (const k of p.kulps) {
+        const why = kulpProblem(door, k, opts.kulp);
+        if (why) throw new Error(`${p.name || 'Parça'} (${p.width}×${p.height}): ${why}`);
+      }
+      const m = kulpMargins(p.kulps, opts.kulp);
+      return { ...p, width: p.width + m.left + m.right, height: p.height + m.bottom + m.top, kulpRoom: { w: p.width, h: p.height, m } };
     });
   const usableW = plateW - edge * 2;
   const usableH = plateH - edge * 2;
@@ -315,7 +329,9 @@ export function calculateNesting(opts) {
   // A part that fits on no empty plate is an input error, whatever the order.
   for (const part of parts) {
     if (!findPlacement(makePlate(1), part, gap, rotate, 'bssf')) {
-      throw new Error(`${part.name} (${part.width}×${part.height}) tek başına bile plakanın kullanılabilir alanına sığmıyor.`);
+      throw new Error(part.kulpRoom
+        ? `${part.name} (${part.kulpRoom.w}×${part.kulpRoom.h}) kulp payıyla (${part.width}×${part.height}) tek başına bile plakanın kullanılabilir alanına sığmıyor.`
+        : `${part.name} (${part.width}×${part.height}) tek başına bile plakanın kullanılabilir alanına sığmıyor.`);
     }
   }
 
@@ -364,12 +380,22 @@ export function calculateNesting(opts) {
   const plates = best;
 
   plates.forEach((p) => {
+    // a door packed with its kulp room: back to the door itself (the room stays free)
+    p.parts = p.parts.map((part) => {
+      if (!part.kulpRoom) return part;
+      const { w, h, m } = part.kulpRoom;
+      const { kulpRoom, ...door } = part;
+      // turned by 90°: the door's bottom margin is on the left, its right margin at the bottom
+      return part.rotated
+        ? { ...door, width: w, height: h, x: part.x + m.bottom, y: part.y + m.right, placedWidth: h, placedHeight: w }
+        : { ...door, width: w, height: h, x: part.x + m.left, y: part.y + m.bottom, placedWidth: w, placedHeight: h };
+    });
     // Profil / işleme aşaması için standart yakınlık optimizasyonu
     p.parts = orderPartsByProximity(p.parts);
     delete p.freeRects;
   });
 
-  const partArea = parts.reduce((s, p) => s + p.width * p.height, 0);
+  const partArea = parts.reduce((s, p) => s + (p.kulpRoom ? p.kulpRoom.w * p.kulpRoom.h : p.width * p.height), 0);
   const search = {
     variants: tried,
     ms: Date.now() - started,
@@ -645,6 +671,32 @@ export function partToolpathSegments(part, cfg) {
 }
 
 /**
+ * The kulp work of every part on a plate (10 mm clearing, then the kulp bit), in
+ * plate coordinates. A part turned by 90° gets its kulps on its own edges, turned
+ * with it. Refused when a model on the plate uses the kulp bit's number: the
+ * kulp bit's work would be pulled forward to that model's, before the clearing.
+ */
+function plateKulpLines(plate, cfg, groups, { safeZ, thickness }) {
+  const withKulp = (plate.parts || []).filter((p) => p.kulps && p.kulps.length);
+  if (!withKulp.length) return [];
+  const s = kulpSettings(cfg.kulp);
+  for (const g of groups) {
+    if ((g.cfg.rows || []).some((r) => String(r.toolNo) === s.toolNo)) {
+      throw new Error(`Bu plakadaki bir model de T${s.toolNo} kullanıyor; kulp bıçağı da T${s.toolNo}. Atölye → Makine → Kulp'tan kulp bıçağının numarasını değiştirin.`);
+    }
+  }
+  const out = [];
+  for (const part of withKulp) {
+    const w = part.rotated ? numOr(part.width, part.placedHeight) : part.placedWidth;
+    const h = part.rotated ? numOr(part.height, part.placedWidth) : part.placedHeight;
+    const door = part.rotated ? { x: 0, y: 0, w, h, kulps: part.kulps } : { x: part.x, y: part.y, w, h, kulps: part.kulps };
+    const lines = buildKulpLines([door], s, safeZ, { nest: true, top: thickness });
+    out.push(...(part.rotated ? lines.map((l) => rotatePartLine(l, w, part.x, part.y)) : lines));
+  }
+  return out;
+}
+
+/**
  * Builds one plate's G-code:
  * - AŞAMA 1 (Ön Kesim / Çizme): Eğer dış kesim açıksa, işlemeden önce 6mm kesim bıçağıyla 3mm dıştan 1.5mm derinliğe ön çizme yapar.
  * - AŞAMA 2 (İşleme): Eski sistemdeki tanımlı tüm bıçaklar sırayla motifleri işler.
@@ -710,6 +762,9 @@ export function buildNestingPlateGcode(plate, cfg, presetMap = {}) {
   ordered.forEach((group) => {
     emitPartProgramsByTool(lines, group.parts, { ...group.cfg, ...getMachineParams(group.cfg) }, throughCuts);
   });
+  // Kulp: the 10 mm bit clears where the kulp bit goes down and what it would cut
+  // flat, then the kulp bit cuts the profile — before anything is cut free.
+  lines.push(...plateKulpLines(plate, cfg, ordered, { safeZ, thickness }));
   throughCuts.forEach((b) => { lines.push(...b.head, ...b.body, `G0Z${fmt(toolChangeZ)}`, 'M5'); });
 
   // 3. AŞAMA: İŞLEME SONRASI FİNAL KESİM / EBATLAMA (Z0'A KADAR)

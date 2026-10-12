@@ -15,6 +15,8 @@ import { validateNestingGap } from '../../../../shared/gcode/validation.js';
 import { validateCarvingWarnings } from '../../lib/gcode/kapak.js';
 import { useCtrlEnter } from '../../hooks/useCtrlEnter.js';
 import { usePresets } from '../../hooks/usePresets.js';
+import { useKulpSettings } from '../../hooks/useKulpSettings.js';
+import KulpEditor from './KulpEditor.jsx';
 import { sortPresets } from '../../hooks/useKapakWorkspace.js';
 
 function getPresetId(p) { return p._id || p.id; }
@@ -76,6 +78,8 @@ export default function NestingPanel({ cfg, plateCfg, defaultModelName }) {
   // aktif cfg'yi (prop olarak gelen `cfg`) kullanır; aksi halde seçilen preset'in
   // KENDİ bıçak sırası/derinlik/offsetMode'u o parça grubuna uygulanır.
   const { presets } = usePresets('kapak');
+  // kulp settings with the bit as it is in the magazine (Atölye)
+  const kulpSet = useKulpSettings(cfg);
 
   const [result, setResult] = useState(null);
   const [resultPresetMap, setResultPresetMap] = useState({});
@@ -161,7 +165,7 @@ export default function NestingPanel({ cfg, plateCfg, defaultModelName }) {
         : p.presetId || null;
       if (w > 0 && h > 0) {
         for (let q = 1; q <= qty; q++) {
-          out.push({ name, width: w, height: h, itemNo: q, lockRotation: !!p.lockRotation, presetId });
+          out.push({ name, width: w, height: h, itemNo: q, lockRotation: !!p.lockRotation, presetId, kulps: p.kulps || [] });
         }
       }
     });
@@ -199,6 +203,7 @@ export default function NestingPanel({ cfg, plateCfg, defaultModelName }) {
       cutToolNo,
       cutToolDia: parseFloat(cutToolDia) || 6,
       preCutDepth: parseFloat(preCutDepth) || 1.5,
+      kulp: kulpSet,
     };
   }
 
@@ -233,6 +238,8 @@ export default function NestingPanel({ cfg, plateCfg, defaultModelName }) {
           cutToolDia: parseFloat(cutToolDia),
           outerCutEnabled: enableOuterCut,
         },
+        // a door with a kulp needs room past that edge (10 mm clearing + the kulp bit's head)
+        kulp: kulpSet,
       });
 
       const presetMap = buildPresetMap(expanded);
@@ -695,6 +702,15 @@ export default function NestingPanel({ cfg, plateCfg, defaultModelName }) {
                       >
                         ✕
                       </button>
+                    </td>
+                  </tr>
+                  <tr className="kulp-settings-row">
+                    <td colSpan={7}>
+                      <KulpEditor
+                        door={{ w: parseFloat(p.width) || 0, h: parseFloat(p.height) || 0 }}
+                        kulps={p.kulps || []}
+                        onChange={(k) => setParts(parts.map((x, j) => (j === idx ? { ...x, kulps: k } : x)))}
+                      />
                     </td>
                   </tr>
                   {p.presetId === CAM_ID && (

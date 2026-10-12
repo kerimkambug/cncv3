@@ -8,8 +8,7 @@ import { usePersistentState } from '../../hooks/usePersistentState.js';
 import ModelGallery from './ModelGallery.jsx';
 import KulpEditor from './KulpEditor.jsx';
 import { buildKulpLines, kulpProblem, KULP_EDGES } from '../../lib/gcode/kulp.js';
-import { useToolMagazine } from '../../hooks/useToolMagazine.js';
-import { toSimTools } from '../../lib/sim/toolMagazine.js';
+import { useKulpSettings } from '../../hooks/useKulpSettings.js';
 import PartPreview from './PartPreview.jsx';
 
 /**
@@ -25,14 +24,8 @@ export default function TekOlcu({ workspace, presets, presetsLoading }) {
   const plateW = plateCfg?.width || 2100;
   const plateH = plateCfg?.height || 2800;
 
-  const [magazine] = useToolMagazine();
-  // the kulp settings, with the bit's diameter from the magazine when it knows it
-  const kulpSet = useMemo(() => {
-    const k = { ...(cfg.kulp || {}) };
-    const bit = toSimTools(magazine)[Number(k.toolNo || 11)];
-    if (bit && !bit.empty && bit.dia > 0) k.dia = bit.dia;
-    return k;
-  }, [cfg.kulp, magazine]);
+  // the kulp settings, with the bit as it is in the magazine
+  const kulpSet = useKulpSettings(cfg);
   const setKulps = (id, kulps) => setMeasurements(measurements.map((m) => (m.id === id ? { ...m, kulps } : m)));
   const update = (id, field, value) => setMeasurements(measurements.map((m) => (m.id === id ? { ...m, [field]: value === '' ? '' : parseFloat(value) } : m)));
   const remove = (id) => measurements.length > 1 && setMeasurements(measurements.filter((m) => m.id !== id));
@@ -79,7 +72,7 @@ export default function TekOlcu({ workspace, presets, presetsLoading }) {
         if (shared) return { error: `${doors[i].w}×${doors[i].h}: ${KULP_EDGES[k.edge].toLowerCase()} kenar yanındaki kapağa bitişik; kulp bıçağı oraya inemez.` };
       }
     }
-    const kulpLines = buildKulpLines(doors, kulpSet, cfg.safeZ);
+    const kulpLines = buildKulpLines(doors, kulpSet, cfg.safeZ, { top: Number(cfg.thickness) || 18 });
     if (kulpLines.length) {
       lines.push(...kulpLines);
       const kt = String(kulpSet.toolNo || 11);

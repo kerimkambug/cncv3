@@ -1,7 +1,7 @@
 // The kulp paths must be the shop's own programs (numbers from the two files
 // "43'lük kapak gizli kulp sağ sol 90-110.anc" and "280 boy kulp 2 seferde.anc").
 import { describe, it, expect } from 'vitest';
-import { buildKulpLines, kulpPasses, kulpProblem } from './kulp.js';
+import { buildKulpLines, flatRadius, kulpMargins, kulpPasses, kulpProblem } from './kulp.js';
 import { guardZ } from './zGuard.js';
 
 const xy = (passes) => passes.flatMap((p) => p.pts).map(([x, y]) => `${+x.toFixed(3)},${+y.toFixed(3)}`);
@@ -57,5 +57,44 @@ describe('kulp along a door edge', () => {
     expect(kulpProblem(door, { edge: 'left', mode: 'window', from: 300, to: 340 }, set)).toMatch(/kısa/);
     expect(kulpProblem(door, { edge: 'left', mode: 'window', from: 600, to: 800 }, set)).toMatch(/taşıyor/);
     expect(kulpProblem(door, { edge: 'left', mode: 'window', from: 300, to: 500 }, set)).toBe('');
+  });
+});
+
+describe('kulp in a plate (nesting): the 10 mm bit clears first', () => {
+  // a kulp bit narrower in the middle (Ø50 foot, Ø36 waist) as drawn in Atölye
+  const outline = [{ closed: true, pts: [[0, 0], [25, 0], [25, 3], [18, 8], [18, 12], [23, 16], [23, 19], [7, 19], [7, 70], [0, 70]] }];
+  const set = { passes: '-1, 7', dia: 50, z: 4, outline };
+  const door = { x: 100, y: 100, w: 430, h: 700, kulps: [{ edge: 'right', mode: 'window', from: 250, to: 450 }] };
+
+  it('the flat band is the bit\'s narrowest radius inside the material', () => {
+    expect(flatRadius(set, 18)).toBeCloseTo(18, 1);
+    expect(flatRadius({ ...set, outline: null }, 18)).toBe(25); // undrawn bit: a cylinder
+  });
+
+  it('the kulp bit only goes down where the 10 mm bit has already cleared its whole head to the kulp height', async () => {
+    const { simulate } = await import('../sim/millSim.js');
+    const lines = buildKulpLines([door], set, 46, { nest: true, top: 18 });
+    expect(lines.filter((l) => /^M6T/.test(l))).toEqual(['M6T10', 'M6T11']);
+    const t10 = lines.slice(0, lines.indexOf('M6T11') - 1).join('\n');
+    const { grid } = simulate(t10, { top: 18, cell: 0.5, box: { x0: 400, y0: 200, x1: 700, y1: 700 }, tools: { 10: { type: 'flat', dia: 10, name: 'T10' } } });
+    const zAt = (x, y) => grid.z[Math.floor((y - grid.y0) / grid.cell) * grid.w + Math.floor((x - grid.x0) / grid.cell)];
+    // every point the kulp bit goes down or comes up at: a hole of its full radius, down to Z4
+    const passes = kulpPasses(door, door.kulps[0], set, { nest: true });
+    for (const [px, py] of [passes[0].pts[0], passes.at(-1).pts.at(-1)]) {
+      for (let a = 0; a < 360; a += 15) for (const r of [0, 10, 20, 24.5]) {
+        expect(zAt(px + r * Math.cos((a * Math.PI) / 180), py + r * Math.sin((a * Math.PI) / 180))).toBeLessThanOrEqual(4.01);
+      }
+    }
+    // the band the kulp bit would leave flat is cleared too: 15 mm from its deepest pass, inside the door, mid-window
+    expect(zAt(530 - 7 - 15, 450)).toBeLessThanOrEqual(4.01);
+    // …but the profile is left for the kulp bit (beyond its narrowest radius)
+    expect(zAt(530 - 7 - 19.5, 450)).toBeCloseTo(18, 3);
+  });
+
+  it('nesting keeps the room the kulp work needs past the edge', () => {
+    const m = kulpMargins(door.kulps, set);
+    expect(m.right).toBeCloseTo(25 + 2 + 25 + 1, 6);
+    expect(m.left).toBe(0);
+    expect(kulpMargins([{ edge: 'left', mode: 'full' }], set)).toMatchObject({ left: 53, top: 53, bottom: 53, right: 0 });
   });
 });

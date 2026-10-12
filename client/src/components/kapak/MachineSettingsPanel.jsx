@@ -245,6 +245,30 @@ function KulpSettings({ cfg, setCfg }) {
         {num('plungeFeed', 'İniş feed', 50)}
         {num('cutFeed', 'Kesim feed', 50)}
       </div>
+      <h4 style={{ margin: '14px 0 6px' }}>Ön temizlik (nesting)</h4>
+      <div className="row3">
+        <div>
+          <label>Temizlik bıçağı (T)</label>
+          <input type="text" value={k.clearTool} onChange={(e) => set('clearTool', e.target.value)} />
+        </div>
+        {num('clearDia', 'Çapı (mm)', 0.5)}
+        {num('clearSpindle', 'Devir S', 100)}
+      </div>
+      <div className="row3">
+        {num('clearStepdown', 'Kademe (mm)', 0.5)}
+        {num('clearPlungeFeed', 'Dalış feed', 50)}
+        {num('clearFeed', 'Kesim feed', 50)}
+      </div>
+      <label className="check-field" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <input type="checkbox" style={{ width: 'auto' }} checked={k.clearAlways === true || k.clearAlways === 'true'} onChange={(e) => set('clearAlways', e.target.checked)} />
+        <span>Tek Ölçü'de de önce bu bıçakla temizle</span>
+      </label>
+      <div className="hint">
+        Nestingde kapağın etrafı malzeme olduğu için kulp bıçağı inmeden önce bu bıçak, kulp bıçağının ineceği ve çıkacağı yerleri
+        (bıçağın tamamı sığacak kadar) ve kulp bıçağının düz bırakacağı her yeri kulp yüksekliğine kadar boşaltır; kulp bıçağı sadece
+        kenarlarıyla profili keser. Düz bırakacağı yer, Atölye → Bıçaklar'daki çizimde bıçağın malzeme içindeki en dar yarıçapından hesaplanır.
+        Nesting kulplu kenarın yanına başka parça koymaz.
+      </div>
       <div className="hint">
         Kulp bıçağı malzemeye dalamaz: kapağın dışında, boşlukta bu Z'ye iner, kenara yandan girer, pasolarla derinleşir,
         dışarı çıkıp kalkar. Bıçak çapı Atölye → Bıçaklar'da bu yuvadaki bıçaktan alınır; orada yoksa buradaki değer kullanılır.
