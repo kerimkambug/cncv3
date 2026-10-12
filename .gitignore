@@ -24,4 +24,6 @@ __pycache__/
 # accounts (password hashes) and the session key: never in git
 server/data/users.json
 server/data/.session-secret
+server/data/user-presets.json
+server/data/user-settings.json
 server/.env.local

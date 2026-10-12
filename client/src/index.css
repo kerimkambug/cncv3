@@ -1018,3 +1018,16 @@ details.collapsible[open] > summary{margin-bottom:10px}
 .serbest-rowbtns{white-space:nowrap}
 .serbest-rowbtns button{width:auto;margin:0 2px}
 @media (max-width:900px){.serbest-top{grid-template-columns:1fr}}
+
+/* Atölye: whose settings are on screen (the admin's default or the user's own copy) */
+.scope-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding: 10px 14px; margin-bottom: 14px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--panel2); color: var(--muted); font-size: 13px;
+}
+.scope-bar b { color: var(--text); }
+.scope-bar.own { border-color: var(--accent); }
+.scope-bar.admin { border-style: dashed; }
+.scope-bar .btn-secondary { margin: 0; width: auto; }
+.preset-scope { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 9px; border: 1px solid var(--border); color: var(--muted); }
+.preset-scope.own, .preset-scope.changed { border-color: var(--accent); color: var(--accent); }

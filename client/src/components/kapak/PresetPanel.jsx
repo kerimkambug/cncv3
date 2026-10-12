@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { usePresets } from '../../hooks/usePresets.js';
 import { buildKapakPresetDxf } from '../../lib/gcode/kapak.js';
 import { sortPresets } from '../../hooks/useKapakWorkspace.js';
+import { ScopeBar } from './ToolMagazinePanel.jsx';
 
 function createDefaultPresetImage(name) {
   const label = String(name || 'Preset').trim() || 'Preset';
@@ -9,7 +10,9 @@ function createDefaultPresetImage(name) {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
-export default function PresetPanel({ workspace }) {
+const SCOPE_LABEL = { default: 'Varsayılan', changed: 'Sizde değişti', own: 'Sizin' };
+
+export default function PresetPanel({ workspace, isAdmin = true }) {
   const { cfg, rows } = workspace;
   const { presets, loading, error, storage, savePreset, deletePreset, refresh } = usePresets('kapak');
   const [renderMsg, setRenderMsg] = useState(null);
@@ -58,10 +61,21 @@ export default function PresetPanel({ workspace }) {
     }
   }
 
-  async function handleDelete(id, presetName) {
-    if (!window.confirm(`"${presetName}" modelini silmek istediğinize emin misiniz?`)) return;
-    await deletePreset(id);
-    if (activeId === id) setActiveId(null);
+  // the admin deletes defaults; a user deletes their own models, and dropping their
+  // copy of a default brings the default back
+  const canDelete = (p) => (isAdmin ? p.scope !== 'own' && p.scope !== 'changed' : p.scope === 'own' || p.scope === 'changed');
+  async function handleDelete(p) {
+    const id = getPresetId(p);
+    const ask = p.scope === 'changed'
+      ? `"${p.name}" için yaptığınız değişiklikler silinsin ve varsayılan hali geri gelsin mi?`
+      : `"${p.name}" modelini silmek istediğinize emin misiniz?`;
+    if (!window.confirm(ask)) return;
+    try {
+      await deletePreset(id);
+      if (activeId === id) setActiveId(null);
+    } catch (e) {
+      setSaveError(e.message);
+    }
   }
 
   function handleLoad(preset) {
@@ -216,6 +230,8 @@ export default function PresetPanel({ workspace }) {
     <div className="card">
       <h2>Modeller</h2>
       <div className="hint">Bir modele tıklayıp “Düzenle” deyince seçilir; bıçak sırası aşağıdaki tabloda düzenlenir, sonra “Değişiklikleri Kaydet”.</div>
+      {isAdmin && <ScopeBar isAdmin scope={null} what="Modeller" />}
+      {!isAdmin && <div className="hint">Varsayılan bir modeli değiştirip kaydederseniz yalnız sizde değişir (“Sizde değişti”); ↺ ile varsayılan haline dönersiniz. Kendi modellerinizi de ekleyebilirsiniz.</div>}
       <div className="preset-category-tabs">
         <button type="button" className={`tab${category === 'kapak' ? ' active' : ''}`} onClick={() => setCategory('kapak')}>Kapak Modelleri</button>
         <button type="button" className={`tab${category === 'kapi' ? ' active' : ''}`} onClick={() => setCategory('kapi')}>Kapı Modelleri</button>
@@ -246,8 +262,8 @@ export default function PresetPanel({ workspace }) {
             <button type="button" className="preset-image-button" onClick={(event) => { event.stopPropagation(); setPreviewPreset(p); }}>
               <img src={p.imageDataUrl || createDefaultPresetImage(p.name)} alt={`${p.name} önizleme`} />
             </button>
-            <div className="preset-card-info"><strong>{p.name}</strong><span>{p.category === 'kapi' ? 'Kapı' : 'Kapak'} · {p.rows?.length || 0} işlem</span><small className="dxf-badge">Örnek ölçü {Number(p.previewWidth || 600).toFixed(0)} × {Number(p.previewHeight || 600).toFixed(0)} mm</small><button type="button" className="preset-select-button" onClick={(event) => { event.stopPropagation(); handleLoad(p); }}>Seç</button><button type="button" className="preset-dxf-button" onClick={(event) => { event.stopPropagation(); downloadDxf(p); }}>DXF indir</button></div>
-            <span className="x" title="Bu kapağı sil" onClick={(event) => { event.stopPropagation(); handleDelete(getPresetId(p), p.name); }}>✕</span>
+            <div className="preset-card-info"><strong>{p.name}</strong>{!isAdmin && p.scope && <span className={`preset-scope ${p.scope}`}>{SCOPE_LABEL[p.scope]}</span>}<span>{p.category === 'kapi' ? 'Kapı' : 'Kapak'} · {p.rows?.length || 0} işlem</span><small className="dxf-badge">Örnek ölçü {Number(p.previewWidth || 600).toFixed(0)} × {Number(p.previewHeight || 600).toFixed(0)} mm</small><button type="button" className="preset-select-button" onClick={(event) => { event.stopPropagation(); handleLoad(p); }}>Seç</button><button type="button" className="preset-dxf-button" onClick={(event) => { event.stopPropagation(); downloadDxf(p); }}>DXF indir</button></div>
+            {canDelete(p) && <span className="x" title={p.scope === 'changed' ? 'Varsayılana dön' : 'Bu kapağı sil'} onClick={(event) => { event.stopPropagation(); handleDelete(p); }}>{p.scope === 'changed' ? '↺' : '✕'}</span>}
           </div>
         ))}
       </div>

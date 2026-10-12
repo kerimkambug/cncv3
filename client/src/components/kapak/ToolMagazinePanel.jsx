@@ -1,5 +1,5 @@
 import { Fragment, useRef, useState } from 'react';
-import { useToolMagazine } from '../../hooks/useToolMagazine.js';
+import { resetMagazine, useToolMagazine } from '../../hooks/useToolMagazine.js';
 import { profileFromDxf } from '../../lib/sim/toolProfile.js';
 import { profile } from '../../lib/sim/millSim.js';
 import {
@@ -9,9 +9,10 @@ import {
 /**
  * Atölye → Bıçaklar: the workshop's tool library (every tool owned, with its
  * shape and size) and the magazine (which tool sits in T1…T12 right now).
- * The simulation cuts with whatever is loaded here.
+ * The simulation cuts with whatever is loaded here. The admin's list is the
+ * workshop default; another user's changes make their own copy.
  */
-export default function ToolMagazinePanel() {
+export default function ToolMagazinePanel({ isAdmin = true }) {
   const [mag, setMag, sync] = useToolMagazine();
   const [msg, setMsg] = useState(null);
   const [libMsg, setLibMsg] = useState(null);
@@ -82,8 +83,18 @@ export default function ToolMagazinePanel() {
   const byId = new Map(mag.library.map((t) => [t.id, t]));
   const sorted = [...mag.library].sort((a, b) => String(a.name).localeCompare(String(b.name), 'tr', { numeric: true }));
 
+  function backToDefault() {
+    if (window.confirm('Kendi bıçak listeniz silinsin ve yöneticinin varsayılan listesine dönülsün mü?')) resetMagazine();
+  }
+
   return (
     <div className="atolye-models">
+      <ScopeBar
+        isAdmin={isAdmin}
+        scope={sync.scope}
+        what="Bıçak listesi"
+        onReset={backToDefault}
+      />
       <div className="card">
         <h2>
           Makine Magazini
@@ -203,11 +214,30 @@ export default function ToolMagazinePanel() {
           Yuvarlamada “Uç” = uçtaki düz kısım (boş = sivri), konikte “Uç” = küre uç çapı.
           Hazır tiplere uymayan bıçaklar (kulp, tabla…) için tip “Özel profil (DXF)”: bıçağın yan görünüşünü AutoCAD'de
           ucu aşağıda, 1 birim = 1 mm çizip DXF kaydedin. Ya bütün silüeti çizin ya da yalnız sağ yarısını, eksen X=0 çizgisinde olacak şekilde.
-          Liste sunucuda saklanır: atölyedeki bütün bilgisayarlar aynı bıçakları görür.
+          Liste sunucuda saklanır: hesabınızla girdiğiniz her bilgisayarda aynı bıçaklar görünür.
         </div>
       </div>
     </div>
   );
+}
+
+/**
+ * Whose settings are on screen: the admin edits everyone's default; a user sees
+ * the default until they change something, then their own copy (with a way back).
+ */
+export function ScopeBar({ isAdmin, scope, what, onReset }) {
+  if (isAdmin) {
+    return <div className="scope-bar admin"><b>{what}:</b> yöneticisiniz, burada yaptığınız ayar herkesin varsayılanıdır. Kendi ayarını yapan kullanıcılar kendi kopyalarıyla çalışır.</div>;
+  }
+  if (scope === 'own') {
+    return (
+      <div className="scope-bar own">
+        <span><b>{what}:</b> kendi ayarınızı kullanıyorsunuz; değişiklikler yalnız sizde geçerli.</span>
+        <button type="button" className="btn-secondary" onClick={onReset}>↺ Varsayılana dön</button>
+      </div>
+    );
+  }
+  return <div className="scope-bar"><b>{what}:</b> yöneticinin varsayılan ayarı. Bir şeyi değiştirdiğinizde kendi kopyanız oluşur; istediğiniz zaman varsayılana dönebilirsiniz.</div>;
 }
 
 function summary(tool) {

@@ -3,14 +3,15 @@ import { defaultMagazine, normalizeMagazine } from '../lib/sim/toolMagazine.js';
 import { handleAuthError } from './useAuth.js';
 
 // One magazine for the whole app (Atölye edits it, every SimPanel reads it).
-// The server holds the workshop's copy (/api/tools: MongoDB online, the file
-// server/data/bicaklar.json on a local install) so every computer sees the
-// same tools; localStorage keeps the last copy for a quick start and offline use.
+// The server holds it (/api/tools: MongoDB online, server/data on a local
+// install): the admin's copy is the workshop DEFAULT; anyone else who changes
+// it gets their OWN copy (scope 'own'), which resetMagazine() drops again.
+// localStorage keeps the last copy for a quick start and offline use.
 const KEY = 'empire-cnc-tool-magazine';
 const API = '/api/tools';
 const subscribers = new Set();
 let cache = null;
-let sync = { status: 'idle', message: '' }; // idle | loading | saved | local | error
+let sync = { status: 'idle', message: '', scope: null }; // status: idle | loading | saved | local | error; scope: default | own
 let started = false;
 let saveTimer = null;
 
@@ -25,15 +26,16 @@ function read() {
   return cache;
 }
 const notify = () => subscribers.forEach((f) => f());
-function setSync(status, message = '') { sync = { status, message }; notify(); }
+function setSync(status, message = '', scope = sync.scope) { sync = { status, message, scope }; notify(); }
 function keepLocal(m) { try { localStorage.setItem(KEY, JSON.stringify(m)); } catch { /* storage unavailable */ } }
 
 async function upload(m) {
   try {
     const res = await fetch(API, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(m), credentials: 'same-origin' });
     if (handleAuthError(res)) return;
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
-    setSync('saved');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    setSync('saved', '', data.scope || null);
   } catch (err) {
     setSync('error', `Sunucuya kaydedilemedi (${err.message}); bu tarayıcıda duruyor.`);
   }
@@ -52,7 +54,7 @@ async function start() {
     if (data && data.value) {
       cache = normalizeMagazine(data.value);
       keepLocal(cache);
-      setSync('saved');
+      setSync('saved', '', data.scope || null);
     } else {
       await upload(read());
     }
@@ -72,6 +74,22 @@ export function setMagazine(next) {
   saveTimer = setTimeout(() => upload(snapshot), 600);
 }
 
+/** Drops this user's own tools: back to the workshop default. */
+export async function resetMagazine() {
+  clearTimeout(saveTimer);
+  setSync('loading');
+  try {
+    const res = await fetch(API, { method: 'DELETE', credentials: 'same-origin' });
+    if (handleAuthError(res)) return;
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    if (data && data.value) { cache = normalizeMagazine(data.value); keepLocal(cache); }
+    setSync('saved', '', data?.scope || null);
+  } catch (err) {
+    setSync('error', `Varsayılana dönülemedi (${err.message}).`);
+  }
+}
+
 function subscribe(fn) {
   subscribers.add(fn);
   const onStorage = (e) => { if (e.key === KEY) { cache = null; fn(); } };
@@ -79,7 +97,7 @@ function subscribe(fn) {
   return () => { subscribers.delete(fn); window.removeEventListener('storage', onStorage); };
 }
 
-/** @returns {[{library:object[], slots:object, slotCount:number}, Function, {status:string, message:string}]} */
+/** @returns {[{library:object[], slots:object, slotCount:number}, Function, {status:string, message:string, scope:string|null}]} */
 export function useToolMagazine() {
   const magazine = useSyncExternalStore(subscribe, read);
   const status = useSyncExternalStore(subscribe, () => sync);

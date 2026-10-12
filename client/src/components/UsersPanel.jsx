@@ -38,8 +38,10 @@ export default function UsersPanel({ me }) {
     else setError((await r.json()).error || 'Silinemedi.');
   }
 
+  // added on top of the days still left; an expired (or unlimited) account counts from today
   function quick(u, months) {
-    const d = new Date();
+    const end = u.accessUntil ? new Date(u.accessUntil) : null;
+    const d = end && end > new Date() ? end : new Date();
     d.setMonth(d.getMonth() + months);
     patch(u._id, { status: 'active', accessUntil: isoDay(d) }, `${u.email}: ${months} ay erişim verildi.`);
   }

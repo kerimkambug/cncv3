@@ -13,13 +13,22 @@ function ensureFile() {
   if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, '[]', 'utf-8');
 }
 
+// Users' own models live apart from the defaults: presets.json is in git, a
+// user's model never should be.
+const USER_FILE = path.join(DATA_DIR, 'user-presets.json');
+
+function readList(file) {
+  const parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
+  if (!Array.isArray(parsed)) {
+    throw new Error('Preset data must be a JSON array.');
+  }
+  return parsed;
+}
+
 function readAll() {
   ensureFile();
   try {
-    const parsed = JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
-    if (!Array.isArray(parsed)) {
-      throw new Error('Preset data must be a JSON array.');
-    }
+    const parsed = [...readList(DATA_FILE), ...(fs.existsSync(USER_FILE) ? readList(USER_FILE) : [])];
     validateAbsoluteOffsets(parsed);
     validateRowFlags(parsed);
     return parsed.map((p) => normalizeRowFlags(normalizeOffsetRows(p)));
@@ -30,20 +39,29 @@ function readAll() {
   }
 }
 
-function writeAll(list) {
-  ensureFile();
+function writeList(file, list) {
+  const text = JSON.stringify(list, null, 2);
+  // a file whose part did not change is left alone (no noise in git)
+  try { if (fs.readFileSync(file, 'utf-8').replace(/\r\n/g, '\n').trimEnd() === text) return; } catch { /* new file */ }
   // Atomic replace: write to a temp file in the same directory, then rename it
   // over the data file. A crash or concurrent read mid-write can no longer leave
   // a truncated/partial presets.json behind (rename over an existing file is
   // atomic on POSIX and effectively atomic on Windows via MoveFileEx).
-  const tmpFile = `${DATA_FILE}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmpFile, JSON.stringify(list, null, 2), 'utf-8');
+  const tmpFile = `${file}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tmpFile, text, 'utf-8');
   try {
-    fs.renameSync(tmpFile, DATA_FILE);
+    fs.renameSync(tmpFile, file);
   } catch (err) {
     try { fs.unlinkSync(tmpFile); } catch { /* best effort cleanup */ }
     throw err;
   }
+}
+
+function writeAll(list) {
+  ensureFile();
+  writeList(DATA_FILE, list.filter((p) => !p.owner));
+  const own = list.filter((p) => p.owner);
+  if (own.length || fs.existsSync(USER_FILE)) writeList(USER_FILE, own);
 }
 
 function makeId() {
@@ -170,7 +188,8 @@ export const fileStore = {
     return withLock(() => {
       const all = readAll();
       const module = data.module || 'kapak';
-      const dupe = all.find((p) => p.name === data.name && p.module === module);
+      const owner = data.owner || null;
+      const dupe = all.find((p) => p.name === data.name && p.module === module && (p.owner || null) === owner);
       if (dupe) {
         const err = new Error('duplicate');
         err.code = 11000;

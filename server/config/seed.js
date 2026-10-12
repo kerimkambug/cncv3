@@ -13,6 +13,8 @@ const PRESETS_FILE = path.join(__dirname, '..', 'data', 'presets.json');
 
 export async function seedPresetsIfEmpty() {
   if (!isMongoConnected()) return;
+  // the unique name index now includes the owner (users' own models): replace the old one
+  try { await Preset.syncIndexes(); } catch (err) { console.warn(`[db] preset indexes: ${err.message}`); }
   if ((await Preset.countDocuments()) > 0) return;
   let list = [];
   try { list = JSON.parse(fs.readFileSync(PRESETS_FILE, 'utf-8')); } catch { return; }

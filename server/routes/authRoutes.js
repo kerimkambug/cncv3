@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { userStore } from '../store/userStore.js';
+import { toolStore } from '../store/toolStore.js';
+import { removeUserPresets } from '../controllers/presetController.js';
 import {
   accessProblem, checkPassword, clearSession, hashPassword, publicUser, requireAdmin, setSession,
 } from '../auth/auth.js';
@@ -119,6 +121,9 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
 router.delete('/users/:id', requireAdmin, async (req, res) => {
   if (req.params.id === req.user._id) return res.status(400).json({ error: 'Kendi hesabınızı silemezsiniz.' });
   await userStore.remove(req.params.id);
+  // their own models and tools go with the account
+  await removeUserPresets(req.params.id);
+  await toolStore.clear(req.params.id);
   res.json({ ok: true });
 });
 

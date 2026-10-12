@@ -99,6 +99,11 @@ const ToolRowSchema = new mongoose.Schema(
 const PresetSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
+    // null = a default model (the admin's, everyone sees it); a user id = that
+    // user's own model. baseId: the default model an own copy was made from
+    // (the user changed it for themselves; dropping the copy restores the default).
+    owner: { type: String, default: null, index: true },
+    baseId: { type: String, default: null },
     module: { type: String, enum: ['kapak', 'cam'], default: 'kapak' },
     category: { type: String, enum: ['kapak', 'kapi'], default: 'kapak' },
     imageDataUrl: { type: String, default: '' },
@@ -143,7 +148,7 @@ const PresetSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// One preset name per module (mirrors the original's object-keyed preset.json)
-PresetSchema.index({ name: 1, module: 1 }, { unique: true });
+// One preset name per module and owner (the defaults share owner null)
+PresetSchema.index({ name: 1, module: 1, owner: 1 }, { unique: true });
 
 export default mongoose.model('Preset', PresetSchema);

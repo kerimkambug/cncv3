@@ -13,10 +13,11 @@ import UsersPanel, { PasswordPanel } from '../UsersPanel.jsx';
  */
 export default function AtolyePage({ workspace, me = null }) {
   const [tab0, setTab] = usePersistentState('empire-cnc-atolye-tab', 'modeller');
-  // no account (development server) = full access; otherwise models and users are the admin's
+  // no account (development server) = full access. The admin's models, tools and
+  // machine values are everyone's defaults; other users work on their own copies.
   const isAdmin = !me || me.user?.role === 'admin';
   const tabs = [
-    isAdmin && ['modeller', 'Modeller'],
+    ['modeller', 'Modeller'],
     ['makine', 'Makine'],
     ['bicaklar', 'Bıçaklar'],
     isAdmin && me && ['kullanicilar', 'Kullanıcılar'],
@@ -37,17 +38,17 @@ export default function AtolyePage({ workspace, me = null }) {
       </div>
 
       {tab === 'makine' && (
-        <MachineSettingsPanel cfg={machineCfg} setCfg={setMachineCfg} plateCfg={plateCfg} setPlateCfg={setPlateCfg} />
+        <MachineSettingsPanel cfg={machineCfg} setCfg={setMachineCfg} plateCfg={plateCfg} setPlateCfg={setPlateCfg} isAdmin={isAdmin} />
       )}
 
-      {tab === 'bicaklar' && <ToolMagazinePanel />}
+      {tab === 'bicaklar' && <ToolMagazinePanel isAdmin={isAdmin} />}
 
       {tab === 'kullanicilar' && <UsersPanel me={me?.user} />}
       {tab === 'hesap' && <PasswordPanel />}
 
       {tab === 'modeller' && (
         <div className="atolye-models">
-          <PresetPanel workspace={workspace} />
+          <PresetPanel workspace={workspace} isAdmin={isAdmin} />
           <ToolRows
             rows={rows}
             setRows={setRows}

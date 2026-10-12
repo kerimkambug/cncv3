@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { usePersistentState } from './usePersistentState.js';
 import { DEFAULT_MACHINE_CONFIG, DEFAULT_PLATE_CONFIG } from '../lib/gcode/common.js';
 
@@ -26,10 +27,23 @@ function cloneRows(rows) {
  * rows nobody had picked).
  */
 export function useKapakWorkspace() {
-  const [machineCfg, setMachineCfg] = usePersistentState('empire-cnc-kapak-machine', {
+  const [machineCfg, setMachineCfg, hadMachine] = usePersistentState('empire-cnc-kapak-machine', {
     ...DEFAULT_MACHINE_CONFIG, offsetMode: 'relative', topStyle: 'flat', riseRatio: 0.125,
   });
-  const [plateCfg, setPlateCfg] = usePersistentState('empire-cnc-kapak-plate', { ...DEFAULT_PLATE_CONFIG });
+  const [plateCfg, setPlateCfg, hadPlate] = usePersistentState('empire-cnc-kapak-plate', { ...DEFAULT_PLATE_CONFIG });
+  // a browser with no values of its own starts from the admin's defaults (Atölye → Makine)
+  useEffect(() => {
+    if (hadMachine && hadPlate) return;
+    fetch('/api/machine', { credentials: 'same-origin' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        const v = data?.value;
+        if (!v) return;
+        if (!hadMachine && v.machine) setMachineCfg((c) => ({ ...c, ...v.machine }));
+        if (!hadPlate && v.plate) setPlateCfg((c) => ({ ...c, ...v.plate }));
+      })
+      .catch(() => { /* offline: the built-in values stay */ });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [rows, setRowsRaw] = usePersistentState('empire-cnc-kapak-rows', []);
   const [activeModel, setActiveModel] = usePersistentState('empire-cnc-active-model', () => {
     try {

@@ -7,9 +7,9 @@ import { connectDB, isMongoConnected } from './config/db.js';
 import presetRoutes from './routes/presetRoutes.js';
 import reliefRoutes from './routes/reliefRoutes.js';
 import authRoutes from './routes/authRoutes.js';
-import toolRoutes from './routes/toolRoutes.js';
+import toolRoutes, { machineRoutes } from './routes/toolRoutes.js';
 import { seedPresetsIfEmpty } from './config/seed.js';
-import { accessProblem, loadUser, requireAccess, requireAdmin } from './auth/auth.js';
+import { accessProblem, loadUser, requireAccess } from './auth/auth.js';
 
 // server/.env.local (never in git: database address, session key…) first, then
 // server/.env; variables already set by the host (Render…) always win.
@@ -32,11 +32,13 @@ app.use(express.json({ limit: '25mb' }));
 // for users with access (see server/auth/auth.js).
 app.use(loadUser);
 app.use('/api/auth', authRoutes);
-// models: everyone with access reads them, only the admin changes them
-app.use('/api/presets', requireAccess, (req, res, next) => (req.method === 'GET' ? next() : requireAdmin(req, res, next)), presetRoutes);
+// models: the admin's defaults for everyone, plus each user's own (see presetController)
+app.use('/api/presets', requireAccess, presetRoutes);
 app.use('/api/relief', requireAccess, reliefRoutes);
-// the workshop's tools: one copy for every computer (Atölye → Bıçaklar)
+// the workshop's tools (Atölye → Bıçaklar): the admin's default, or the user's own
 app.use('/api/tools', requireAccess, toolRoutes);
+// machine / plate defaults (Atölye → Makine)
+app.use('/api/machine', requireAccess, machineRoutes);
 app.get('/api/health', (req, res) => res.json({ ok: true, storage: isMongoConnected() ? 'mongodb' : 'local-file' }));
 
 if (app.locals && app.locals.settings) {

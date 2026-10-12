@@ -1,4 +1,65 @@
-export default function MachineSettingsPanel({ cfg, setCfg, plateCfg, setPlateCfg }) {
+import { useState } from 'react';
+import { DEFAULT_MACHINE_CONFIG, DEFAULT_PLATE_CONFIG } from '../../lib/gcode/common.js';
+import { handleAuthError } from '../../hooks/useAuth.js';
+import { ScopeBar } from './ToolMagazinePanel.jsx';
+
+// The values this panel sets (a chosen model may bring its own over them)
+const MACHINE_FIELDS = [
+  'thickness', 'spindleSpeed', 'safeZ', 'toolChangeZ', 'homeZ', 'plungeFeed', 'cutFeed',
+  'offsetMode', 'topStyle', 'riseRatio', 'narrowAdapt', 'narrowMinPanel', 'narrowMinFirst',
+];
+const pick = (o) => Object.fromEntries(MACHINE_FIELDS.filter((f) => o[f] !== undefined).map((f) => [f, o[f]]));
+
+/**
+ * Atölye → Makine. Each user's values stay in their browser; the admin can make
+ * the current values everyone's default, and anyone can go back to it.
+ */
+function DefaultsBar({ cfg, setCfg, plateCfg, setPlateCfg, isAdmin }) {
+  const [msg, setMsg] = useState(null);
+  async function saveAsDefault() {
+    if (!window.confirm('Bu makine ve plaka değerleri herkesin varsayılanı olsun mu?')) return;
+    try {
+      const res = await fetch('/api/machine', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ machine: pick(cfg), plate: plateCfg }),
+      });
+      if (handleAuthError(res)) return;
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setMsg('✓ Varsayılan olarak kaydedildi.');
+    } catch (err) {
+      setMsg(`Kaydedilemedi: ${err.message}`);
+    }
+  }
+  async function backToDefault() {
+    if (!window.confirm('Makine ve plaka değerleri varsayılana dönsün mü?')) return;
+    try {
+      const res = await fetch('/api/machine', { credentials: 'same-origin' });
+      if (handleAuthError(res)) return;
+      const data = res.ok ? await res.json() : null;
+      const v = data?.value;
+      setCfg({ ...cfg, ...pick(DEFAULT_MACHINE_CONFIG), ...(v?.machine ? pick(v.machine) : {}) });
+      setPlateCfg({ ...DEFAULT_PLATE_CONFIG, ...(v?.plate || {}) });
+      setMsg(v ? '✓ Yöneticinin varsayılan değerleri yüklendi.' : '✓ Henüz yönetici varsayılanı yok; başlangıç değerleri yüklendi.');
+    } catch (err) {
+      setMsg(`Varsayılan alınamadı: ${err.message}`);
+    }
+  }
+  return (
+    <>
+      {isAdmin
+        ? <ScopeBar isAdmin what="Makine ayarları" />
+        : <div className="scope-bar"><span><b>Makine ayarları:</b> değerleriniz bu tarayıcıda saklanır ve yalnız sizde geçerlidir.</span></div>}
+      <div className="row2" style={{ marginBottom: 6 }}>
+        {isAdmin && <button type="button" className="btn-secondary" onClick={saveAsDefault}>Bu değerleri varsayılan yap</button>}
+        <button type="button" className="btn-secondary" onClick={backToDefault}>↺ Varsayılana dön</button>
+      </div>
+      {msg && <div className="hint">{msg}</div>}
+    </>
+  );
+}
+
+export default function MachineSettingsPanel({ cfg, setCfg, plateCfg, setPlateCfg, isAdmin = true }) {
   function set(field, value) {
     setCfg({ ...cfg, [field]: parseFloat(value) });
   }
@@ -20,6 +81,7 @@ export default function MachineSettingsPanel({ cfg, setCfg, plateCfg, setPlateCf
   return (
     <div className="card">
       <h2>Genel Ayarlar</h2>
+      <DefaultsBar cfg={cfg} setCfg={setCfg} plateCfg={plateCfg} setPlateCfg={setPlateCfg} isAdmin={isAdmin} />
       <div className="row2">
         <div>
           <label>Malzeme kalınlığı (mm)</label>
