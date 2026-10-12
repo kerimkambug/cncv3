@@ -49,8 +49,9 @@ export function panjurGroups(c) {
   const available = usableAlong - flat;
   const groups = [];
   // Every panjur ends deep, and there the T14 cone is wider at the surface than at
-  // its tip. The last panjur before the frame (and before the centre flat) ends
-  // this much earlier, so the cone eats only `deepEndBite` mm into the frame.
+  // its tip. Each panjur's cut stops this much short of its end, so the cone
+  // reaches neither the panjur in front of it nor the frame (the T4 opens that
+  // end anyway when it is on); the pitch stays the same.
   const deepPull = deepEndPullback(c);
 
   const makeFromStart = (start, limit, side) => {
@@ -62,28 +63,31 @@ export function panjurGroups(c) {
       throw new Error('Seçilen panjur kademesi bu alana sığmıyor.');
     }
 
+    if (length - deepPull <= 0) {
+      throw new Error('Panjur boyu konik bıçağın derin uçtaki genişliğine yetmiyor.');
+    }
     let pos = start;
     for (let i = 0; i < count; i++) {
-      const end = pos + length;
-      groups.push({ start: pos, end, side });
-      pos = end + (i < count - 1 ? gap : 0);
+      groups.push({ start: pos, end: pos + length - deepPull, side });
+      pos += length + (i < count - 1 ? gap : 0);
     }
   };
 
   if (flat > 0) {
     const lowerSpan = available / 2;
     const upperSpan = available - lowerSpan;
-    makeFromStart(alongStart, lowerSpan - deepPull, 'start');
+    makeFromStart(alongStart, lowerSpan, 'start');
     const upperStart = alongStart + lowerSpan + flat;
-    makeFromStart(upperStart, upperSpan - deepPull, 'end');
+    makeFromStart(upperStart, upperSpan, 'end');
   } else {
-    makeFromStart(alongStart, usableAlong - deepPull, 'single');
+    makeFromStart(alongStart, usableAlong, 'single');
   }
 
   groups.sort((a, b) => a.start - b.start);
   const actualLengths = [...new Set(groups.map((g) => Number((g.end - g.start).toFixed(6))))];
   const actualLength = actualLengths.length === 1 ? actualLengths[0] : Math.min(...actualLengths);
-  const actualPitch = actualLength + c.exitGap;
+  // the slat as seen on the surface: its cut plus the cone past its deep end
+  const actualPitch = actualLength + deepPull + c.exitGap;
 
   return {
     crossSpan,
@@ -136,9 +140,6 @@ function validatePanjurConfig(c) {
     if (!Number.isFinite(Number(c.edgeInset)) || Number(c.edgeInset) < 0) {
       throw new Error('Kenar içeri çekme negatif olamaz (sayı veya "auto").');
     }
-  }
-  if (c.deepEndBite !== undefined && c.deepEndBite !== null && c.deepEndBite !== '' && !(Number(c.deepEndBite) >= 0)) {
-    throw new Error('Derin uçta çerçeveye girme payı negatif olamaz.');
   }
   if (c.endZ >= c.startZ) {
     throw new Error('Son Z, başlangıç Z’den daha düşük olmalı.');
@@ -248,19 +249,16 @@ export function resolveEdgeInsetAtDepth(c, depth) {
 }
 
 /**
- * How much earlier the deep end of the panjurs stops before the frame (and the
- * centre flat). At the deepest row the tool's tip sits on that line, but its cone
- * reaches the surface `inset` mm further (the same amount the sides are pulled in
- * by: the cone radius at the deepest depth, or the hand-set edge inset). The shop
- * wants a small bite into the frame kept there (`deepEndBite`, default 1 mm — a
- * problem otherwise on coated models), so only the rest is pulled back.
+ * How much short of its end every panjur's cut stops: at the deepest row the
+ * tool's tip sits there, and its cone reaches the surface this much further (the
+ * cone radius at the deepest depth, or the hand-set edge inset — the same amount
+ * the sides are pulled in by). So nothing of the panjur in front, nor of the
+ * frame, is cut by the cone.
  * @param {object} c
  * @returns {number} mm (>= 0)
  */
 export function deepEndPullback(c) {
-  const bite = c.deepEndBite === undefined || c.deepEndBite === null || c.deepEndBite === '' ? 1 : Math.max(0, Number(c.deepEndBite) || 0);
-  const inset = resolveEdgeInsetAtDepth(c, Math.max(0, (Number(c.startZ) || 0) - (Number(c.endZ) || 0)));
-  return Math.max(0, inset - bite);
+  return resolveEdgeInsetAtDepth(c, Math.max(0, (Number(c.startZ) || 0) - (Number(c.endZ) || 0)));
 }
 
 /** How far past the frame line the 4 mm bit goes at both ends of an opening (mm): `t4Extend`, default 1. */
@@ -449,8 +447,9 @@ export function generatePanjurGcode(c, offsetX = 0, offsetY = 0, isCombined = fa
     }
 
     g.groups.forEach((grp) => {
-      // panjurun ucu, yan yana seri üretimde kapağın kaydırmasıyla birlikte
-      const end = grp.end + (c.direction === 'y' ? offsetY : offsetX);
+      // panjurun yüzeydeki ucu: kesim konik payı kadar önce biter, koni yüzeyde buraya ulaşır
+      // (yan yana seri üretimde kapağın kaydırmasıyla birlikte)
+      const end = grp.end + deepEndPullback(c) + (c.direction === 'y' ? offsetY : offsetX);
       // T4 kanal temizliği: kalın malzemede düşük ilerleme
       const t4Feed = c.t4Feed || 5000;
 

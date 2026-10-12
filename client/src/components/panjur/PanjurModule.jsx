@@ -19,7 +19,6 @@ export default function PanjurModule({ onBackToMenu }) {
   const [exitGap, setExitGap] = useState(0.45);
   const [stepover, setStepover] = useState(0.468);
   const [edgeInset, setEdgeInset] = useState('auto');
-  const [deepEndBite, setDeepEndBite] = useState(1); // derin uçta konik gövdenin çerçeveye girmesine izin verilen pay
   const [startZ, setStartZ] = useState(17.937);
   const [endZ, setEndZ] = useState(3.105);
   const [feed, setFeed] = useState(20000);
@@ -81,7 +80,6 @@ export default function PanjurModule({ onBackToMenu }) {
       exitGap: parseFloat(exitGap) || 0,
       stepover: parseFloat(stepover) || 0,
       edgeInset,
-      deepEndBite: Math.max(0, parseFloat(deepEndBite) || 0),
       t14TipDia: parseFloat(t14TipDia) || 0,
       t14BodyDia: parseFloat(t14BodyDia) || 0,
       t14Height: parseFloat(t14Height) || 0,
@@ -105,7 +103,7 @@ export default function PanjurModule({ onBackToMenu }) {
     };
   }, [
     width, height, offsetMode, direction, offset, offsetLeft, offsetRight, offsetBottom, offsetTop, centerFlat,
-    pitch, exitGap, stepover, edgeInset, deepEndBite, startZ, endZ, feed, plunge, toolNo, spindle, groundEntry, exitCut,
+    pitch, exitGap, stepover, edgeInset, startZ, endZ, feed, plunge, toolNo, spindle, groundEntry, exitCut,
     drillTool, drillSpindle, exitToolDia, t14TipDia, t14BodyDia, t14Height, safeZ, toolChangeZ, homeZ, t4Step, t4Extend, t4Feed
   ]);
 
@@ -403,10 +401,6 @@ function downloadFile() {
               <input type="number" value={edgeInset} min="0" step="0.1" onChange={(e) => setEdgeInset(parseFloat(e.target.value) || 0)} />
             </div>
           )}
-          <div>
-            <label title="Panjurlar derin biter; orada konik bıçağın gövdesi yüzeyde uçtan daha geniştir. Son panjur çerçeveden (ve orta düz alandan) erken bitirilir, gövde çerçeveye yalnız bu kadar girer.">Derin uçta çerçeveye girme (mm)</label>
-            <input type="number" value={deepEndBite} min="0" step="0.1" onChange={(e) => setDeepEndBite(e.target.value)} />
-          </div>
         </div>
         <div className="row4" style={{ marginTop: 10 }}>
           <div>
