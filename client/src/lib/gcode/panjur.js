@@ -263,6 +263,12 @@ export function deepEndPullback(c) {
   return Math.max(0, inset - bite);
 }
 
+/** How far past the frame line the 4 mm bit goes at both ends of an opening (mm): `t4Extend`, default 1. */
+function t4ExtendOf(c) {
+  const v = c.t4Extend === undefined || c.t4Extend === null || c.t4Extend === '' ? 1 : Number(c.t4Extend);
+  return Number.isFinite(v) ? Math.max(0, Math.min(v, Number(c.exitToolDia) || 4)) : 1;
+}
+
 /** T4 step-down depth (mm): `t4Step`, default 6. */
 function t4StepOf(c) {
   const v = c.t4Step === undefined || c.t4Step === null || c.t4Step === '' ? 6 : Number(c.t4Step);
@@ -455,8 +461,12 @@ export function generatePanjurGcode(c, offsetX = 0, offsetY = 0, isCombined = fa
       // pasoda geri kesilir (git-gel).
       const levels = t4Levels(c);
       const across = c.direction === 'y' ? 'X' : 'Y';
-      const from = (c.direction === 'y' ? x0 : y0) + toolRT4;
-      const to = (c.direction === 'y' ? x1 : y1) - toolRT4;
+      // The round end of the 4 mm bit touches the frame line only in the middle of
+      // the opening; its corners would keep a small piece against the frame. The
+      // bit goes `t4Extend` mm further at both ends (default 1 mm) to clean them.
+      const ext = t4ExtendOf(c);
+      const from = (c.direction === 'y' ? x0 : y0) + toolRT4 - ext;
+      const to = (c.direction === 'y' ? x1 : y1) - toolRT4 + ext;
       lines.push(c.direction === 'y'
         ? `N${n++} G0 X${fmt(from)} Y${fmt(a)} Z${fmt(c.safeZ)}`
         : `N${n++} G0 X${fmt(a)} Y${fmt(from)} Z${fmt(c.safeZ)}`);
