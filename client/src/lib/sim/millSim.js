@@ -12,7 +12,6 @@
 // stretches (`grid.voids`: column index → [[from, to], …] below its top), and
 // such a tool cuts with its full side view, height by height.
 import { parseGcode } from '../gcode/gcodeToDxf.js';
-import { dexelTriangles, trianglesToStl } from './dexelMesh.js';
 
 /** The workshop's tools (see the tool table): profile type and size. */
 export const TOOL_TABLE = {
@@ -272,8 +271,6 @@ const THROUGH_Z = 0.02;
 
 export function gridToStl(grid, stlCell = 0.8) {
   const f = Math.max(1, Math.ceil(stlCell / grid.cell - 1e-9));
-  // hollows under the surface: the part is built column by column (dexelMesh.js)
-  if (grid.voids && grid.voids.size) return trianglesToStl(dexelTriangles(grid, f));
   const W = Math.floor(grid.w / f), H = Math.floor(grid.h / f);
   const c = grid.cell * f;
   const hz = (i, j) => {
