@@ -3,151 +3,191 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>Empire CNC — Giriş</title>
 <style>
   :root {
-    --bg:#0b0e13; --panel:#131820; --panel2:#1a2029; --border:#262d39; --text:#e8ebf0; --muted:#8e97a7;
-    --accent:#4f8cff; --accent2:#2fd08a; --ok:#2fd08a; --err:#ff6b6b;
-    --steel:#c9d2df; --cut:#ffb547; --grid:rgba(79,140,255,.07); --grid2:rgba(79,140,255,.16);
-  }
-  @media (prefers-color-scheme: light) {
-    :root { --bg:#eef1f5; --panel:#ffffff; --panel2:#f3f5f8; --border:#d6dce5; --text:#1b2330; --muted:#5f6b7e; --accent:#2367d1; --ok:#16855a; --err:#c43e4b; }
+    --bg:#06090d; --panel:rgba(14,19,27,.82); --panel2:rgba(22,29,40,.9); --border:#243042; --text:#e8ebf0; --muted:#8e97a7;
+    --accent:#4f8cff; --accent2:#2fd08a; --cut:#ffb547; --ok:#2fd08a; --err:#ff6b6b;
   }
   * { box-sizing:border-box; }
   html, body { height:100%; }
   body {
-    margin:0; background:var(--bg); color:var(--text);
+    margin:0; background:var(--bg); color:var(--text); overflow-x:hidden;
     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;
-    display:grid; grid-template-columns:minmax(0,1.15fr) minmax(360px,1fr); min-height:100vh;
+    display:grid; grid-template-columns:minmax(0,1.15fr) minmax(380px,1fr); min-height:100vh;
   }
   .mono { font-family:ui-monospace,'Cascadia Mono','Consolas','SF Mono',Menlo,monospace; }
 
-  /* ---- the machine side: a blueprint with a door being cut ---- */
-  .bench {
-    position:relative; overflow:hidden; color:#e8ebf0;
-    background:
-      linear-gradient(var(--grid) 1px, transparent 1px) 0 0/24px 24px,
-      linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0/24px 24px,
-      linear-gradient(var(--grid2) 1px, transparent 1px) 0 0/120px 120px,
-      linear-gradient(90deg, var(--grid2) 1px, transparent 1px) 0 0/120px 120px,
-      radial-gradient(1200px 700px at 30% 40%, #142033 0%, #0b0e13 70%);
-    display:flex; flex-direction:column; justify-content:space-between; padding:40px 48px;
-  }
-  .brand { display:flex; align-items:center; gap:12px; }
-  .brand svg { flex:none; }
-  .brand b { font-size:20px; letter-spacing:.14em; font-weight:800; }
-  .brand small { display:block; font-size:11px; letter-spacing:.22em; color:#8e97a7; margin-top:2px; }
-  .stage { flex:1; display:flex; align-items:center; justify-content:center; padding:24px 0; }
-  .stage svg { width:min(100%, 560px); height:auto; overflow:visible; }
-  .pitch h1 { margin:0 0 10px; font-size:28px; line-height:1.2; font-weight:700; letter-spacing:-.01em; max-width:520px; }
-  .pitch p { margin:0 0 18px; color:#9aa4b5; font-size:15px; line-height:1.55; max-width:520px; }
-  .feats { display:flex; flex-wrap:wrap; gap:8px; margin:0; padding:0; list-style:none; }
-  .feats li { font-size:12px; color:#c9d2df; border:1px solid #2a3442; background:rgba(19,24,32,.7); border-radius:999px; padding:6px 12px; display:flex; align-items:center; gap:6px; }
-  .feats li i { width:6px; height:6px; border-radius:50%; background:var(--accent); display:inline-block; }
-  .feats li:nth-child(2) i { background:#2fd08a; } .feats li:nth-child(3) i { background:#ffb547; } .feats li:nth-child(4) i { background:#c084fc; }
-  .dro { position:absolute; top:40px; right:48px; text-align:right; font-size:12px; color:#7d8799; line-height:1.7; }
-  .dro span { color:#e8ebf0; display:inline-block; min-width:76px; }
-  .dro .live { color:#2fd08a; }
+  /* G-code rain behind everything */
+  #rain { position:fixed; inset:0; width:100%; height:100%; z-index:0; pointer-events:none; }
+  .vignette { position:fixed; inset:0; z-index:0; pointer-events:none;
+    /* the rain shows on the machine side; it fades behind the sign-in card */
+    background:radial-gradient(520px 520px at 76% 50%, rgba(6,9,13,.82), rgba(6,9,13,.35) 70%, transparent 100%),
+      radial-gradient(1000px 650px at 30% 45%, rgba(20,34,56,.35), transparent 70%); }
 
-  /* toolpaths drawn one after another, like the machine cutting them */
+  /* ---- the machine side ---- */
+  .bench { position:relative; z-index:1; display:flex; flex-direction:column; justify-content:space-between; padding:36px 48px 28px; min-height:100vh; }
+  .bench::before { content:''; position:absolute; inset:0; z-index:-1; opacity:.9;
+    background:
+      linear-gradient(rgba(79,140,255,.06) 1px, transparent 1px) 0 0/24px 24px,
+      linear-gradient(90deg, rgba(79,140,255,.06) 1px, transparent 1px) 0 0/24px 24px,
+      linear-gradient(rgba(79,140,255,.13) 1px, transparent 1px) 0 0/120px 120px,
+      linear-gradient(90deg, rgba(79,140,255,.13) 1px, transparent 1px) 0 0/120px 120px;
+    -webkit-mask-image:radial-gradient(70% 65% at 45% 48%, #000 40%, transparent 100%); mask-image:radial-gradient(70% 65% at 45% 48%, #000 40%, transparent 100%); }
+  .top { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; }
+  .brand { display:flex; align-items:center; gap:12px; }
+  .logo { flex:none; filter:drop-shadow(0 0 12px rgba(79,140,255,.55)); }
+  .brand b { font-size:20px; letter-spacing:.16em; font-weight:800; }
+  .brand small { display:block; font-size:10.5px; letter-spacing:.26em; color:#7f8aa0; margin-top:3px; }
+  .dro { text-align:right; font-size:12px; color:#6f7b90; line-height:1.75; padding:8px 12px; border:1px solid #1d2838; border-radius:10px; background:rgba(8,12,18,.7); }
+  .dro span { color:#e8ebf0; display:inline-block; min-width:78px; }
+  .dro .live { color:var(--accent2); }
+  .dro .live::before { content:''; display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--accent2); margin-right:6px; box-shadow:0 0 8px var(--accent2); animation:pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity:.3; } }
+
+  /* the drawing fills whatever height is left, never over the text below */
+  .stage { flex:1 1 auto; position:relative; min-height:220px; margin:18px 0; }
+  .stage svg { position:absolute; inset:0; width:100%; height:100%; max-width:600px; margin:0 auto; overflow:visible; filter:drop-shadow(0 20px 40px rgba(0,0,0,.45)); }
+
+  /* toolpaths drawn again and again, like plates going through the machine */
   .path { fill:none; stroke-linecap:round; stroke-linejoin:round; }
-  .p1 { stroke:#4f8cff; stroke-width:2.2; }
-  .p2 { stroke:#2fd08a; stroke-width:1.6; }
-  .p3 { stroke:#ffb547; stroke-width:1.4; }
-  .draw { stroke-dasharray:var(--len); stroke-dashoffset:var(--len); animation:cut var(--t,3s) cubic-bezier(.4,.1,.3,1) var(--d,0s) forwards; }
-  @keyframes cut { to { stroke-dashoffset:0; } }
-  .spindle { animation:travel 9s ease-in-out infinite; }
-  @keyframes travel {
-    0%,100% { transform:translate(0,0); } 25% { transform:translate(300px,0); } 50% { transform:translate(300px,210px); } 75% { transform:translate(0,210px); }
+  .p1 { stroke:#4f8cff; stroke-width:2.2; filter:drop-shadow(0 0 4px rgba(79,140,255,.8)); }
+  .p2 { stroke:#2fd08a; stroke-width:1.7; filter:drop-shadow(0 0 4px rgba(47,208,138,.7)); }
+  .p3 { stroke:#ffb547; stroke-width:1.4; filter:drop-shadow(0 0 3px rgba(255,181,71,.7)); }
+  .draw { stroke-dasharray:var(--len); stroke-dashoffset:var(--len); animation:cut 12s linear var(--d,0s) infinite; }
+  @keyframes cut {
+    0% { stroke-dashoffset:var(--len); opacity:1; }
+    22% { stroke-dashoffset:0; opacity:1; }
+    88% { stroke-dashoffset:0; opacity:1; }
+    100% { stroke-dashoffset:0; opacity:0; }
   }
-  .spark { animation:blink 1.2s ease-in-out infinite; }
-  @keyframes blink { 50% { opacity:.25; } }
-  @media (prefers-reduced-motion: reduce) {
-    .draw { animation:none; stroke-dashoffset:0; } .spindle, .spark { animation:none; }
-  }
+  .scan { animation:scan 4.5s ease-in-out infinite; }
+  @keyframes scan { 0%,100% { transform:translateY(0); opacity:.0; } 10%,90% { opacity:1; } 50% { transform:translateY(300px); } }
+  .halo { animation:halo 1.6s ease-out infinite; transform-origin:center; transform-box:fill-box; }
+  @keyframes halo { 0% { transform:scale(.6); opacity:.9; } 100% { transform:scale(2.4); opacity:0; } }
+  .spark { animation:blink .5s steps(2) infinite; }
+  @keyframes blink { 50% { opacity:.35; } }
+
+  .pitch h1 { margin:0 0 10px; font-size:30px; line-height:1.18; font-weight:800; letter-spacing:-.015em; max-width:540px;
+    background:linear-gradient(90deg,#fff 0%,#cfe0ff 40%,#4f8cff 60%,#fff 100%); background-size:250% 100%;
+    -webkit-background-clip:text; background-clip:text; color:transparent; animation:shine 7s linear infinite; }
+  @keyframes shine { to { background-position:-250% 0; } }
+  .pitch p { margin:0 0 16px; color:#9aa4b5; font-size:15px; line-height:1.55; max-width:520px; }
+  .feats { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 16px; padding:0; list-style:none; }
+  .feats li { font-size:12px; color:#c9d2df; border:1px solid #233044; background:rgba(12,17,25,.75); border-radius:999px; padding:6px 12px; display:flex; align-items:center; gap:7px; }
+  .feats li i { width:7px; height:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 8px currentColor; color:var(--accent); }
+  .feats li:nth-child(2) i { background:#2fd08a; color:#2fd08a; } .feats li:nth-child(3) i { background:#ffb547; color:#ffb547; } .feats li:nth-child(4) i { background:#c084fc; color:#c084fc; }
+  .console { font-size:11.5px; line-height:1.6; height:calc(1.6em * 4 + 16px); overflow:hidden; padding:8px 12px; border:1px solid #1d2838; border-radius:10px; background:rgba(5,8,12,.8); color:#5d6b80; max-width:560px; position:relative; }
+  .console div { white-space:nowrap; }
+  .console div:last-child { color:#7ee2b0; }
+  .console div:last-child::after { content:'▌'; margin-left:2px; animation:blink 1s steps(2) infinite; color:#7ee2b0; }
 
   /* ---- the sign-in side ---- */
-  .side { display:flex; align-items:center; justify-content:center; padding:32px 24px; background:var(--bg); }
-  .box { width:100%; max-width:400px; }
-  .box h2 { margin:0 0 6px; font-size:24px; font-weight:700; }
-  .lead { margin:0 0 24px; color:var(--muted); font-size:14px; line-height:1.5; }
-  .tabs { display:grid; grid-template-columns:1fr 1fr; gap:4px; padding:4px; border-radius:10px; background:var(--panel2); border:1px solid var(--border); margin-bottom:20px; }
-  .tabs button { padding:9px; border-radius:7px; border:none; background:transparent; color:var(--muted); cursor:pointer; font-size:13px; font-weight:600; }
-  .tabs button.on { background:var(--panel); color:var(--text); box-shadow:0 1px 2px rgba(0,0,0,.25), 0 0 0 1px var(--border); }
-  label { display:block; font-size:12px; font-weight:600; color:var(--muted); margin:14px 0 6px; letter-spacing:.02em; }
+  .side { position:relative; z-index:1; display:flex; align-items:center; justify-content:center; padding:32px 28px; }
+  .box { width:100%; max-width:410px; padding:32px 30px 24px; border-radius:18px; background:var(--panel); border:1px solid var(--border);
+    -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px); box-shadow:0 30px 80px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.04); position:relative; }
+  /* a light running round the card's edge */
+  .box::before { content:''; position:absolute; inset:-1px; border-radius:19px; padding:1px; pointer-events:none;
+    background:conic-gradient(from var(--a), transparent 0deg, rgba(79,140,255,.9) 40deg, rgba(47,208,138,.6) 80deg, transparent 120deg, transparent 360deg);
+    -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor; mask-composite:exclude; animation:edge 6s linear infinite; }
+  @property --a { syntax:'<angle>'; inherits:false; initial-value:0deg; }
+  @keyframes edge { to { --a:360deg; } }
+  .box h2 { margin:0 0 6px; font-size:24px; font-weight:750; }
+  .lead { margin:0 0 22px; color:var(--muted); font-size:14px; line-height:1.5; }
+  .tabs { display:grid; grid-template-columns:1fr 1fr; gap:4px; padding:4px; border-radius:11px; background:rgba(6,9,13,.6); border:1px solid var(--border); margin-bottom:18px; }
+  .tabs button { padding:9px; border-radius:8px; border:none; background:transparent; color:var(--muted); cursor:pointer; font-size:13px; font-weight:650; transition:background .2s,color .2s; }
+  .tabs button.on { background:linear-gradient(180deg,#2a3a55,#1e2a3e); color:#fff; box-shadow:0 0 0 1px #34507a, 0 6px 16px rgba(79,140,255,.18); }
+  label { display:block; font-size:11.5px; font-weight:650; color:var(--muted); margin:14px 0 6px; letter-spacing:.06em; text-transform:uppercase; }
   .field { position:relative; }
-  .field svg { position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--muted); pointer-events:none; }
-  input { width:100%; padding:11px 12px 11px 38px; border-radius:9px; border:1px solid var(--border); background:var(--panel); color:var(--text); font-size:14px; outline:none; transition:border-color .15s, box-shadow .15s; }
-  input:focus { border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
-  .go { width:100%; margin-top:22px; padding:12px; border:none; border-radius:9px; background:var(--accent); color:#fff; font-size:14px; font-weight:700; cursor:pointer; letter-spacing:.02em; display:flex; align-items:center; justify-content:center; gap:8px; }
+  .field svg { position:absolute; left:12px; top:50%; transform:translateY(-50%); color:#6c7a91; pointer-events:none; transition:color .15s; }
+  .field:focus-within svg { color:var(--accent); }
+  input { width:100%; padding:12px 12px 12px 38px; border-radius:10px; border:1px solid var(--border); background:rgba(6,9,13,.65); color:var(--text); font-size:14px; outline:none; transition:border-color .15s, box-shadow .15s; }
+  input::placeholder { color:#566277; }
+  input:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(79,140,255,.22), 0 0 18px rgba(79,140,255,.15); }
+  .go { position:relative; overflow:hidden; width:100%; margin-top:22px; padding:13px; border:none; border-radius:10px; color:#fff; font-size:14px; font-weight:750; cursor:pointer; letter-spacing:.04em;
+    background:linear-gradient(135deg,#3d7bff,#4f8cff 45%,#2fb3d0); box-shadow:0 10px 26px rgba(79,140,255,.35); }
+  .go::after { content:''; position:absolute; top:0; left:-60%; width:40%; height:100%; background:linear-gradient(90deg,transparent,rgba(255,255,255,.35),transparent); transform:skewX(-20deg); animation:sweep 3.2s ease-in-out infinite; }
+  @keyframes sweep { 0%,60% { left:-60%; } 100% { left:130%; } }
   .go:hover { filter:brightness(1.08); }
   .go:disabled { opacity:.6; cursor:default; filter:none; }
-  .msg { margin-top:14px; font-size:13px; line-height:1.45; white-space:pre-line; min-height:1px; }
+  .msg { margin-top:14px; font-size:13px; line-height:1.45; white-space:pre-line; }
   .msg.err { color:var(--err); } .msg.ok { color:var(--ok); }
-  .note { margin-top:12px; font-size:12px; color:var(--muted); line-height:1.5; padding:10px 12px; border-radius:9px; background:var(--panel2); border:1px solid var(--border); }
+  .note { margin-top:12px; font-size:12px; color:var(--muted); line-height:1.5; padding:10px 12px; border-radius:10px; background:rgba(6,9,13,.55); border:1px dashed #2d3b52; }
   .who { font-size:13px; color:var(--muted); margin-bottom:12px; }
   .switch { margin-top:18px; font-size:13px; color:var(--muted); text-align:center; }
-  .link { background:none; border:none; color:var(--accent); cursor:pointer; padding:0; font-size:13px; font-weight:600; }
-  .foot { margin-top:28px; font-size:11px; color:var(--muted); text-align:center; letter-spacing:.04em; }
+  .link { background:none; border:none; color:var(--accent); cursor:pointer; padding:0; font-size:13px; font-weight:650; }
+  .foot { margin-top:22px; font-size:11px; color:#5d6a7f; text-align:center; letter-spacing:.08em; }
   [hidden] { display:none !important; }
 
-  /* phones: the machine side becomes a short banner above the form */
-  @media (max-width: 860px) {
+  /* phones: the machine side becomes a banner above the card */
+  @media (max-width: 900px) {
     body { grid-template-columns:1fr; grid-template-rows:auto 1fr; }
-    .bench { padding:20px 16px; min-height:0; }
-    .stage, .pitch p, .feats, .dro { display:none; }
-    .pitch h1 { font-size:17px; margin:14px 0 0; }
-    .side { padding:24px 16px 32px; align-items:flex-start; }
+    .bench { min-height:0; padding:20px 16px 6px; }
+    .stage, .pitch p, .feats, .dro, .console { display:none; }
+    .pitch h1 { font-size:19px; margin:16px 0 0; }
+    .side { padding:18px 16px 32px; align-items:flex-start; }
+    .box { padding:26px 20px 20px; }
   }
 </style>
 </head>
 <body>
-<section class="bench" aria-hidden="true">
-  <div class="brand">
-    <svg width="38" height="38" viewBox="0 0 38 38">
-      <rect x="1" y="1" width="36" height="36" rx="9" fill="#4f8cff"/>
-      <path d="M13 9h12v6H13z M16 15h6v6h-6z M18 21h2v7l-1 2-1-2z" fill="#fff"/>
-      <path d="M8 31h22" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity=".7"/>
-    </svg>
-    <div><b>EMPIRE CNC</b><small>G-CODE ÜRETİM SİSTEMİ</small></div>
-  </div>
+<canvas id="rain" aria-hidden="true"></canvas>
+<div class="vignette" aria-hidden="true"></div>
 
-  <div class="dro mono">
-    <div>X <span id="dx">214.000</span></div>
-    <div>Y <span id="dy">338.000</span></div>
-    <div>Z <span id="dz">12.000</span></div>
-    <div class="live">● S18000 · F6000</div>
+<section class="bench" aria-hidden="true">
+  <div class="top">
+    <div class="brand">
+      <svg class="logo" width="40" height="40" viewBox="0 0 40 40">
+        <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4f8cff"/><stop offset="1" stop-color="#2fb3d0"/></linearGradient></defs>
+        <rect x="1" y="1" width="38" height="38" rx="10" fill="url(#lg)"/>
+        <path d="M14 9h12v6H14z M17 15h6v6h-6z M19 21h2v7l-1 2-1-2z" fill="#fff"/>
+        <path d="M9 32h22" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity=".75"/>
+      </svg>
+      <div><b>EMPIRE CNC</b><small>G-CODE ÜRETİM SİSTEMİ</small></div>
+    </div>
+    <div class="dro mono">
+      <div>X <span id="dx">0.000</span></div>
+      <div>Y <span id="dy">0.000</span></div>
+      <div>Z <span id="dz">12.000</span></div>
+      <div class="live">S18000 · F6000</div>
+    </div>
   </div>
 
   <div class="stage">
     <svg viewBox="0 0 520 380" role="img">
+      <defs>
+        <linearGradient id="scanG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4f8cff" stop-opacity="0"/><stop offset=".5" stop-color="#7fb0ff" stop-opacity=".55"/><stop offset="1" stop-color="#4f8cff" stop-opacity="0"/></linearGradient>
+        <clipPath id="stock"><rect x="40" y="20" width="440" height="330" rx="3"/></clipPath>
+        <radialGradient id="glow"><stop offset="0" stop-color="#ffd27a" stop-opacity=".9"/><stop offset="1" stop-color="#ffb547" stop-opacity="0"/></radialGradient>
+      </defs>
       <!-- the stock -->
-      <rect x="40" y="20" width="440" height="330" rx="3" fill="#1b2230" stroke="#33405a" stroke-width="1.2"/>
-      <!-- the door's outline and its offset passes -->
-      <rect class="path p1 draw" x="70" y="45" width="380" height="280" rx="4" style="--len:1320;--t:2.4s"/>
-      <rect class="path p2 draw" x="110" y="80" width="300" height="210" rx="10" style="--len:1030;--t:2.4s;--d:1.6s"/>
-      <rect class="path p3 draw" x="128" y="98" width="264" height="174" rx="16" style="--len:880;--t:2.2s;--d:3.2s"/>
-      <!-- derz lines inside the panel -->
-      <g class="path p3 draw" style="--len:180;--t:1.4s;--d:4.6s">
+      <rect x="40" y="20" width="440" height="330" rx="3" fill="#121a26" stroke="#2c3a52" stroke-width="1.2"/>
+      <g clip-path="url(#stock)"><rect class="scan" x="40" y="10" width="440" height="34" fill="url(#scanG)"/></g>
+      <!-- the door: outline, offset passes, derz lines -->
+      <rect class="path p1 draw" x="70" y="45" width="380" height="280" rx="4" style="--len:1320"/>
+      <rect class="path p2 draw" x="110" y="80" width="300" height="210" rx="10" style="--len:1030;--d:.6s"/>
+      <rect class="path p3 draw" x="128" y="98" width="264" height="174" rx="16" style="--len:880;--d:1.2s"/>
+      <g class="path p3 draw" style="--len:180;--d:1.9s">
         <path d="M168 110v150"/><path d="M212 110v150"/><path d="M256 110v150"/><path d="M300 110v150"/><path d="M344 110v150"/>
       </g>
-      <!-- dimension lines -->
-      <g stroke="#4f8cff" stroke-width=".8" opacity=".55" fill="none">
-        <path d="M70 352v14M450 352v14M70 360h380"/>
-        <path d="M486 45h14M486 325h14M494 45v280"/>
+      <!-- dimensions -->
+      <g stroke="#4f8cff" stroke-width=".8" opacity=".5" fill="none">
+        <path d="M70 352v14M450 352v14M70 360h380"/><path d="M486 45h14M486 325h14M494 45v280"/>
       </g>
-      <g class="mono" fill="#7d8799" font-size="11">
+      <g class="mono" fill="#6f7b90" font-size="11">
         <text x="260" y="374" text-anchor="middle">600.00</text>
         <text x="508" y="190" transform="rotate(90 508 190)" text-anchor="middle">800.00</text>
       </g>
-      <!-- the spindle above the cut -->
-      <g class="spindle">
-        <g transform="translate(110 80)">
-          <circle r="16" fill="rgba(79,140,255,.14)" stroke="#4f8cff" stroke-width="1"/>
-          <circle r="4" fill="#ffb547" class="spark"/>
-          <path d="M-22 0h-10M22 0h10M0 -22v-10M0 22v10" stroke="#4f8cff" stroke-width="1.2"/>
-        </g>
+      <!-- the spindle, moved by the script along the passes -->
+      <g id="spindle" transform="translate(110 80)">
+        <circle r="26" fill="url(#glow)" opacity=".35"/>
+        <circle class="halo" r="10" fill="none" stroke="#4f8cff" stroke-width="1.4"/>
+        <circle r="16" fill="rgba(79,140,255,.12)" stroke="#4f8cff" stroke-width="1"/>
+        <path d="M-24 0h-10M24 0h10M0 -24v-10M0 24v10" stroke="#4f8cff" stroke-width="1.2"/>
+        <circle r="3.6" fill="#ffd27a" class="spark"/>
       </g>
+      <g id="chips"></g>
     </svg>
   </div>
 
@@ -160,6 +200,7 @@
       <li><i></i>Panjur, cam, kulp</li>
       <li><i></i>3B kesim simülasyonu</li>
     </ul>
+    <div class="console mono" id="console"></div>
   </div>
 </section>
 
@@ -203,7 +244,7 @@
       <div class="msg" id="msg"></div>
       <div class="switch" id="switch"></div>
     </div>
-    <div class="foot">© Empire CNC</div>
+    <div class="foot">© EMPIRE CNC</div>
   </div>
 </main>
 <script>
@@ -261,21 +302,103 @@
   // signed in but without access (pending, expired, disabled)
   fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => { if (d && d.problem) blocked(d.user, d.problem); }).catch(() => {});
 
-  // the readout follows the spindle around the door (decoration only)
-  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    const corners = [[110, 80], [410, 80], [410, 290], [110, 290]];
-    let t0 = performance.now();
-    const tick = (now) => {
-      const p = ((now - t0) / 9000) % 1, seg = Math.floor(p * 4), f = (p * 4) % 1;
-      const ease = f < 0.5 ? 2 * f * f : 1 - Math.pow(-2 * f + 2, 2) / 2;
-      const [ax, ay] = corners[seg], [bx, by] = corners[(seg + 1) % 4];
-      const x = ax + (bx - ax) * ease, y = ay + (by - ay) * ease;
-      $('dx').textContent = ((x - 70) * 600 / 380).toFixed(3);
-      $('dy').textContent = ((325 - y) * 800 / 280).toFixed(3);
-      requestAnimationFrame(tick);
+  // ---------------------------------------------------------------- decoration
+  // (slow, ambient motion only; it runs even with Windows' "reduce animations" on,
+  // which is common on shop PCs and would leave the page standing still)
+  const still = false;
+
+  // G-code rain: columns of falling program characters, bright at the head
+  (function rain() {
+    const cv = $('rain'), cx = cv.getContext('2d');
+    const glyphs = 'G0G1G2G3XYZFIJMST0123456789.-N'.split('');
+    const words = ['G1', 'G0', 'M6', 'T6', 'T11', 'M3', 'S18000', 'F6000', 'Z12.0', 'X214', 'Y338', 'G2', 'M5', 'M30'];
+    const size = 15;
+    let cols = [], w = 0, h = 0, dpr = 1;
+    function resize() {
+      dpr = Math.min(2, window.devicePixelRatio || 1);
+      w = cv.clientWidth; h = cv.clientHeight;
+      cv.width = w * dpr; cv.height = h * dpr; cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const n = Math.ceil(w / size);
+      cols = Array.from({ length: n }, (_, i) => cols[i] || { y: Math.random() * -h, v: 0.6 + Math.random() * 1.6, word: '' });
+      cx.fillStyle = '#06090d'; cx.fillRect(0, 0, w, h);
+    }
+    resize();
+    addEventListener('resize', resize);
+    cx.font = `${size - 2}px ui-monospace, Consolas, monospace`;
+    let prev = 0;
+    function frame(now = 0) {
+      // about 22 steps a second, like the film
+      if (!still && now - prev < 45) { requestAnimationFrame(frame); return; }
+      prev = now;
+      cx.fillStyle = 'rgba(6,9,13,0.14)';
+      cx.fillRect(0, 0, w, h);
+      cx.font = `${size - 2}px ui-monospace, Consolas, monospace`;
+      for (let i = 0; i < cols.length; i++) {
+        const c = cols[i];
+        // now and then a whole word runs down the column
+        if (!c.word && Math.random() < 0.004) c.word = words[(Math.random() * words.length) | 0];
+        const ch = c.word ? c.word[0] : glyphs[(Math.random() * glyphs.length) | 0];
+        if (c.word) c.word = c.word.slice(1);
+        const x = i * size, y = c.y;
+        cx.fillStyle = i % 7 === 0 ? 'rgba(47,208,138,.75)' : 'rgba(126,176,255,.55)';
+        cx.fillText(ch, x, y);
+        c.y += size * c.v * 0.7;
+        if (c.y > h + 40 && Math.random() > 0.96) { c.y = -20; c.v = 0.6 + Math.random() * 1.6; }
+      }
+      if (!still) requestAnimationFrame(frame);
+    }
+    if (still) { for (let k = 0; k < 60; k++) frame(); } else requestAnimationFrame(frame);
+  })();
+
+  // the spindle runs round the passes; the readout and the console follow it
+  (function machine() {
+    const sp = $('spindle'), chips = $('chips'), con = $('console');
+    const loops = [[[70, 45], [450, 45], [450, 325], [70, 325]], [[110, 80], [410, 80], [410, 290], [110, 290]], [[128, 98], [392, 98], [392, 272], [128, 272]]];
+    const zOf = [12, 13.5, 15];
+    const toX = (x) => ((x - 70) * 600 / 380), toY = (y) => ((325 - y) * 800 / 280);
+    let lines = [], n = 10;
+    const log = (t) => {
+      lines.push(t); if (lines.length > 4) lines.shift();
+      con.innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
     };
-    requestAnimationFrame(tick);
-  }
+    log('N1 G0 G17 G40 G49 G80 G90 G54'); log('N2 M6T6'); log('N3 M3 S18000');
+    if (still) return;
+    let loop = 0, side = 0, t = 0, last = performance.now(), lastLog = 0;
+    function step(now) {
+      const dt = Math.min(50, now - last); last = now;
+      const L = loops[loop], a = L[side], b = L[(side + 1) % 4];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      t += (dt * 0.16) / len;
+      if (t >= 1) {
+        t = 0; side++;
+        if (side === 4) { side = 0; loop = (loop + 1) % loops.length; log(`N${n++} G0 Z46.00`); log(`N${n++} G1 Z${zOf[loop].toFixed(2)} F3000.0`); }
+      }
+      const x = a[0] + (b[0] - a[0]) * t, y = a[1] + (b[1] - a[1]) * t;
+      sp.setAttribute('transform', `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
+      $('dx').textContent = toX(x).toFixed(3); $('dy').textContent = toY(y).toFixed(3); $('dz').textContent = zOf[loop].toFixed(3);
+      if (now - lastLog > 420) { lastLog = now; log(`N${n++} G1 X${toX(x).toFixed(2)} Y${toY(y).toFixed(2)} F6000.0`); }
+      // chips flying off the cutter
+      if (Math.random() < 0.55) {
+        const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        const ang = Math.random() * Math.PI * 2, sp2 = 18 + Math.random() * 26;
+        c.setAttribute('cx', x); c.setAttribute('cy', y); c.setAttribute('r', (0.8 + Math.random() * 1.4).toFixed(2));
+        c.setAttribute('fill', Math.random() < 0.5 ? '#ffd27a' : '#ffb547');
+        chips.appendChild(c);
+        const t0 = now;
+        const fly = (tt) => {
+          const k = (tt - t0) / 600;
+          if (k >= 1) { c.remove(); return; }
+          c.setAttribute('cx', (x + Math.cos(ang) * sp2 * k).toFixed(1));
+          c.setAttribute('cy', (y + Math.sin(ang) * sp2 * k + 14 * k * k).toFixed(1));
+          c.setAttribute('opacity', (1 - k).toFixed(2));
+          requestAnimationFrame(fly);
+        };
+        requestAnimationFrame(fly);
+      }
+      requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  })();
 </script>
 </body>
 </html>
