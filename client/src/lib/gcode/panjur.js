@@ -48,6 +48,10 @@ export function panjurGroups(c) {
   }
   const available = usableAlong - flat;
   const groups = [];
+  // Every panjur ends deep, and there the T14 cone is wider at the surface than at
+  // its tip. The last panjur before the frame (and before the centre flat) ends
+  // this much earlier, so the cone eats only `deepEndBite` mm into the frame.
+  const deepPull = deepEndPullback(c);
 
   const makeFromStart = (start, limit, side) => {
     const gap = c.exitGap;
@@ -69,11 +73,11 @@ export function panjurGroups(c) {
   if (flat > 0) {
     const lowerSpan = available / 2;
     const upperSpan = available - lowerSpan;
-    makeFromStart(alongStart, lowerSpan, 'start');
+    makeFromStart(alongStart, lowerSpan - deepPull, 'start');
     const upperStart = alongStart + lowerSpan + flat;
-    makeFromStart(upperStart, upperSpan, 'end');
+    makeFromStart(upperStart, upperSpan - deepPull, 'end');
   } else {
-    makeFromStart(alongStart, usableAlong, 'single');
+    makeFromStart(alongStart, usableAlong - deepPull, 'single');
   }
 
   groups.sort((a, b) => a.start - b.start);
@@ -104,7 +108,7 @@ export function panjurGroups(c) {
 function validatePanjurConfig(c) {
   const nums = [
     c.width, c.height, c.offset, c.pitch, c.exitGap, c.stepover, c.startZ, c.endZ,
-    c.feed, c.plunge, c.spindle, c.exitCut, c.t4Z, c.drillSpindle, c.exitToolDia,
+    c.feed, c.plunge, c.spindle, c.exitCut, c.drillSpindle, c.exitToolDia,
     c.t14TipDia, c.t14BodyDia, c.t14Height,
   ];
   if (nums.some((v) => !Number.isFinite(v))) {
@@ -133,8 +137,14 @@ function validatePanjurConfig(c) {
       throw new Error('Kenar içeri çekme negatif olamaz (sayı veya "auto").');
     }
   }
+  if (c.deepEndBite !== undefined && c.deepEndBite !== null && c.deepEndBite !== '' && !(Number(c.deepEndBite) >= 0)) {
+    throw new Error('Derin uçta çerçeveye girme payı negatif olamaz.');
+  }
   if (c.endZ >= c.startZ) {
     throw new Error('Son Z, başlangıç Z’den daha düşük olmalı.');
+  }
+  if (c.groundEntry && !(t4StepOf(c) > 0)) {
+    throw new Error('T4 paso derinliği 0’dan büyük olmalı.');
   }
   if (c.groundEntry && c.exitCut <= 0) {
     throw new Error('Çıkış kesimi 0’dan büyük olmalı.');
@@ -235,6 +245,40 @@ export function resolveEdgeInsetAtDepth(c, depth) {
   }
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * How much earlier the deep end of the panjurs stops before the frame (and the
+ * centre flat). At the deepest row the tool's tip sits on that line, but its cone
+ * reaches the surface `inset` mm further (the same amount the sides are pulled in
+ * by: the cone radius at the deepest depth, or the hand-set edge inset). The shop
+ * wants a small bite into the frame kept there (`deepEndBite`, default 1 mm — a
+ * problem otherwise on coated models), so only the rest is pulled back.
+ * @param {object} c
+ * @returns {number} mm (>= 0)
+ */
+export function deepEndPullback(c) {
+  const bite = c.deepEndBite === undefined || c.deepEndBite === null || c.deepEndBite === '' ? 1 : Math.max(0, Number(c.deepEndBite) || 0);
+  const inset = resolveEdgeInsetAtDepth(c, Math.max(0, (Number(c.startZ) || 0) - (Number(c.endZ) || 0)));
+  return Math.max(0, inset - bite);
+}
+
+/** T4 step-down depth (mm): `t4Step`, default 6. */
+function t4StepOf(c) {
+  const v = c.t4Step === undefined || c.t4Step === null || c.t4Step === '' ? 6 : Number(c.t4Step);
+  return Number.isFinite(v) ? v : 0;
+}
+
+/**
+ * The T4 ground-entry levels, top down: the material thickness split into equal
+ * passes no deeper than `t4Step` (18 mm, 6 → [12, 6, 0]). The last one is Z0.
+ * @param {object} c
+ * @returns {number[]}
+ */
+export function t4Levels(c) {
+  const top = Number(c.thickness) || 18;
+  const count = Math.max(1, Math.ceil(top / t4StepOf(c) - 1e-9));
+  return Array.from({ length: count }, (_, k) => (k === count - 1 ? 0 : top - ((k + 1) * top) / count));
 }
 
 function emitRasterPass(axis, lines, n, c, crossStart, crossEnd, safeStart, step, passes) {
@@ -381,7 +425,7 @@ export function generatePanjurGcode(c, offsetX = 0, offsetY = 0, isCombined = fa
   }
 
   // =========================================================
-  // 2. AŞAMA: TÜM T4 ÇIKIŞ KESİMLERİ (2 PASO: Z9 VE Z0 — GIT-GEL)
+  // 2. AŞAMA: TÜM T4 ÇIKIŞ KESİMLERİ (KADEMELİ PASOLAR, GİT-GEL, SON PASO Z0)
   // =========================================================
   if (c.groundEntry && (phase === 'all' || phase === 'exit')) {
     if (t4Header) {
@@ -399,35 +443,27 @@ export function generatePanjurGcode(c, offsetX = 0, offsetY = 0, isCombined = fa
     }
 
     g.groups.forEach((grp) => {
-      const end = grp.end;
-      // T4 kanal temizliği: kalın malzemeye tek seferde dalıyor, düşük ilerleme kullan
+      // panjurun ucu, yan yana seri üretimde kapağın kaydırmasıyla birlikte
+      const end = grp.end + (c.direction === 'y' ? offsetY : offsetX);
+      // T4 kanal temizliği: kalın malzemede düşük ilerleme
       const t4Feed = c.t4Feed || 5000;
 
-      const cutCenterY = end + newSideOverlap - toolRT4;
-      const cutCenterX = end + newSideOverlap - toolRT4;
+      const a = end + newSideOverlap - toolRT4; // kanal ekseni (panjur boyunca)
 
-      if (c.direction === 'y') {
-        // Çerçeve içine konumlan
-        lines.push(`N${n++} G0 X${fmt(x0 + toolRT4)} Y${fmt(cutCenterY)} Z${fmt(c.safeZ)}`);
-
-        // 1. PASO: T4 İlk Dalış Z değerine in (Örn: Z9) ve SAĞA doğru kes
-        lines.push(`N${n++} G1 Z${fmt(c.t4Z)} F${c.plunge}`);
-        lines.push(`N${n++} G1 X${fmt(x1 - toolRT4)} F${t4Feed}`);
-
-        // 2. PASO: En dibe (Z0) dal ve SOLA (başlangıca) geri kes
-        lines.push(`N${n++} G1 Z0.000 F${c.plunge}`);
-        lines.push(`N${n++} G1 X${fmt(x0 + toolRT4)} F${t4Feed}`);
-      } else {
-        lines.push(`N${n++} G0 X${fmt(cutCenterX)} Y${fmt(y0 + toolRT4)} Z${fmt(c.safeZ)}`);
-
-        // 1. PASO
-        lines.push(`N${n++} G1 Z${fmt(c.t4Z)} F${c.plunge}`);
-        lines.push(`N${n++} G1 Y${fmt(y1 - toolRT4)} F${t4Feed}`);
-
-        // 2. PASO
-        lines.push(`N${n++} G1 Z0.000 F${c.plunge}`);
-        lines.push(`N${n++} G1 Y${fmt(y0 + toolRT4)} F${t4Feed}`);
-      }
+      // Kademeli dalış: tek seferde 18 mm dalmak T4'ü kırar. Kalınlık eşit pasolara
+      // bölünür (18 mm, 6 mm paso → Z12, Z6, Z0); her pasoda kanal bir yöne, sonraki
+      // pasoda geri kesilir (git-gel).
+      const levels = t4Levels(c);
+      const across = c.direction === 'y' ? 'X' : 'Y';
+      const from = (c.direction === 'y' ? x0 : y0) + toolRT4;
+      const to = (c.direction === 'y' ? x1 : y1) - toolRT4;
+      lines.push(c.direction === 'y'
+        ? `N${n++} G0 X${fmt(from)} Y${fmt(a)} Z${fmt(c.safeZ)}`
+        : `N${n++} G0 X${fmt(a)} Y${fmt(from)} Z${fmt(c.safeZ)}`);
+      levels.forEach((z, k) => {
+        lines.push(`N${n++} G1 Z${fmt(z)} F${c.plunge}`);
+        lines.push(`N${n++} G1 ${across}${fmt(k % 2 === 0 ? to : from)} F${t4Feed}`);
+      });
       lines.push(`N${n++} G0 Z${fmt(c.safeZ)}`);
     });
   }

@@ -115,6 +115,9 @@ function roughBox(text, top) {
   return Number.isFinite(x0) ? { w: x1 - x0 + 40, h: y1 - y0 + 40 } : { w: 100, h: 100 };
 }
 
+// a column at or below this height was cut through to the table
+const THROUGH_Z = 0.02;
+
 /** three.js view of the simulated stock. */
 function SimView({ grid, top }) {
   const host = useRef(null);
@@ -140,15 +143,19 @@ function SimView({ grid, top }) {
       pos[k + 1] = grid.y0 + (j * S + 0.5) * grid.cell;
       pos[k + 2] = grid.z[Math.min(grid.h - 1, j * S) * grid.w + Math.min(grid.w - 1, i * S)];
     }
+    // cut through to the table (Z0): no surface there, the part is open
+    const through = (p) => pos[p * 3 + 2] <= THROUGH_Z;
+    const hole = (i, j) => { const a = j * W + i; return through(a) && through(a + 1) && through(a + W) && through(a + W + 1); };
     const idx = new Uint32Array((W - 1) * (H - 1) * 6);
     let o = 0;
     for (let j = 0; j < H - 1; j++) for (let i = 0; i < W - 1; i++) {
+      if (hole(i, j)) continue;
       const a = j * W + i, b = a + 1, c = a + W, d = c + 1;
       idx[o++] = a; idx[o++] = b; idx[o++] = d; idx[o++] = a; idx[o++] = d; idx[o++] = c;
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geo.setIndex(new THREE.BufferAttribute(idx, 1));
+    geo.setIndex(new THREE.BufferAttribute(idx.subarray(0, o), 1));
     geo.computeVertexNormals();
     const mat = new THREE.MeshStandardMaterial({ color: 0xe8dcc6, roughness: 0.85, metalness: 0 });
     const mesh = new THREE.Mesh(geo, mat);
@@ -166,8 +173,17 @@ function SimView({ grid, top }) {
       const a = ring[r], b = ring[(r + 1) % ring.length];
       sides.push(...v(a), ...v(a, 0), ...v(b, 0), ...v(a), ...v(b, 0), ...v(b));
     }
-    const c0 = 0, c1 = W - 1, c2 = H * W - 1, c3 = (H - 1) * W;
-    sides.push(...v(c0, 0), ...v(c2, 0), ...v(c1, 0), ...v(c0, 0), ...v(c3, 0), ...v(c2, 0));
+    // the bottom, one strip per row of cells, leaving the through-cut holes open
+    for (let j = 0; j < H - 1; j++) {
+      for (let i = 0; i < W - 1;) {
+        if (hole(i, j)) { i++; continue; }
+        let k = i;
+        while (k < W - 1 && !hole(k, j)) k++;
+        const p0 = j * W + i, p1 = j * W + k, p2 = (j + 1) * W + k, p3 = (j + 1) * W + i;
+        sides.push(...v(p0, 0), ...v(p2, 0), ...v(p1, 0), ...v(p0, 0), ...v(p3, 0), ...v(p2, 0));
+        i = k;
+      }
+    }
     const sideGeo = new THREE.BufferGeometry();
     sideGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(sides), 3));
     sideGeo.computeVertexNormals();

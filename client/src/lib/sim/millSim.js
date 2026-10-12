@@ -163,7 +163,11 @@ export function simulate(text, { top, cell = 0.4, tools = {}, box = null } = {})
   return { grid: { x0: b.x0, y0: b.y0, w, h, cell, z }, stats };
 }
 
+// a column at or below this height was cut through to the table
+const THROUGH_Z = 0.02;
+
 /** Binary STL of the simulated stock (top surface, sides, bottom), resampled to `stlCell`. */
+
 export function gridToStl(grid, stlCell = 0.8) {
   const f = Math.max(1, Math.ceil(stlCell / grid.cell - 1e-9));
   const W = Math.floor(grid.w / f), H = Math.floor(grid.h / f);
@@ -177,27 +181,46 @@ export function gridToStl(grid, stlCell = 0.8) {
   const Z = new Float32Array((W + 1) * (H + 1));
   for (let j = 0; j <= H; j++) for (let i = 0; i <= W; i++) Z[j * (W + 1) + i] = hz(Math.min(W - 1, i), Math.min(H - 1, j));
   const X = (i) => grid.x0 + i * c, Y = (j) => grid.y0 + j * c;
-  const tris = 2 * W * H + 4 * (W + H) + 2;
-  const buf = new ArrayBuffer(84 + tris * 50);
+  // a cell cut through to the table (Z0 all round) is a hole: no top, no bottom
+  const through = (i, j) => Z[j * (W + 1) + i] <= THROUGH_Z;
+  const hole = (i, j) => through(i, j) && through(i + 1, j) && through(i, j + 1) && through(i + 1, j + 1);
+  // the cells kept, and the bottom as runs of kept cells per row
+  let kept = 0;
+  const runs = [];
+  for (let j = 0; j < H; j++) {
+    for (let i = 0; i < W;) {
+      if (hole(i, j)) { i++; continue; }
+      let k = i;
+      while (k < W && !hole(k, j)) k++;
+      runs.push([j, i, k]);
+      kept += k - i;
+      i = k;
+    }
+  }
+  const total = 2 * kept + 4 * (W + H) + 2 * runs.length;
+  const buf = new ArrayBuffer(84 + total * 50);
   const dv = new DataView(buf);
-  dv.setUint32(80, tris, true);
-  let o = 84;
+  let o = 84, tris = 0;
   const tri = (a, b2, d) => {
     const ux = b2[0] - a[0], uy = b2[1] - a[1], uz = b2[2] - a[2], vx = d[0] - a[0], vy = d[1] - a[1], vz = d[2] - a[2];
     let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
     const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
     for (const v of [nx, ny, nz, ...a, ...b2, ...d]) { dv.setFloat32(o, v, true); o += 4; }
     dv.setUint16(o, 0, true); o += 2;
+    tris++;
   };
   const P = (i, j) => [X(i), Y(j), Z[j * (W + 1) + i]];
   for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+    if (hole(i, j)) continue;
     const a = P(i, j), b2 = P(i + 1, j), cc = P(i + 1, j + 1), d = P(i, j + 1);
     tri(a, b2, cc); tri(a, cc, d);
   }
-  // sides down to Z0 and the bottom
+  // sides down to Z0
   const B = (i, j) => [X(i), Y(j), 0];
   for (let i = 0; i < W; i++) { tri(B(i, 0), B(i + 1, 0), P(i + 1, 0)); tri(B(i, 0), P(i + 1, 0), P(i, 0)); tri(B(i + 1, H), B(i, H), P(i, H)); tri(B(i + 1, H), P(i, H), P(i + 1, H)); }
   for (let j = 0; j < H; j++) { tri(B(0, j + 1), B(0, j), P(0, j)); tri(B(0, j + 1), P(0, j), P(0, j + 1)); tri(B(W, j), B(W, j + 1), P(W, j + 1)); tri(B(W, j), P(W, j + 1), P(W, j)); }
-  tri(B(0, 0), B(W, H), B(W, 0)); tri(B(0, 0), B(0, H), B(W, H));
+  // the bottom: one strip per row of cells, open where the part is cut through
+  for (const [j, i, k] of runs) { tri(B(i, j), B(k, j + 1), B(k, j)); tri(B(i, j), B(i, j + 1), B(k, j + 1)); }
+  dv.setUint32(80, tris, true);
   return buf;
 }

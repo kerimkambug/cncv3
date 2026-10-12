@@ -19,12 +19,13 @@ export default function PanjurModule({ onBackToMenu }) {
   const [exitGap, setExitGap] = useState(0.45);
   const [stepover, setStepover] = useState(0.468);
   const [edgeInset, setEdgeInset] = useState('auto');
+  const [deepEndBite, setDeepEndBite] = useState(1); // derin uçta konik gövdenin çerçeveye girmesine izin verilen pay
   const [startZ, setStartZ] = useState(17.937);
   const [endZ, setEndZ] = useState(3.105);
   const [feed, setFeed] = useState(20000);
   const [groundEntry, setGroundEntry] = useState(false);
   const [exitCut, setExitCut] = useState(4);
-  const [t4Z, setT4Z] = useState(9); // İlk dalış derinliği (2 pasolu kesim için)
+  const [t4Step, setT4Step] = useState(6); // T4 paso derinliği: 18 mm → Z12, Z6, Z0
   const [t4Feed, setT4Feed] = useState(5000); // T4 kesim hızı (rölyef feed'i T14 için)
 
   const [toolNo, setToolNo] = useState('14');
@@ -79,6 +80,7 @@ export default function PanjurModule({ onBackToMenu }) {
       exitGap: parseFloat(exitGap) || 0,
       stepover: parseFloat(stepover) || 0,
       edgeInset,
+      deepEndBite: Math.max(0, parseFloat(deepEndBite) || 0),
       t14TipDia: parseFloat(t14TipDia) || 0,
       t14BodyDia: parseFloat(t14BodyDia) || 0,
       t14Height: parseFloat(t14Height) || 0,
@@ -90,7 +92,7 @@ export default function PanjurModule({ onBackToMenu }) {
       spindle: parseFloat(spindle) || 0,
       groundEntry,
       exitCut: parseFloat(exitCut) || 0,
-      t4Z: parseFloat(t4Z) || 0,
+      t4Step: parseFloat(t4Step) || 0,
       t4Feed: parseFloat(t4Feed) || 5000,
       drillTool,
       drillSpindle: parseFloat(drillSpindle) || 0,
@@ -101,8 +103,8 @@ export default function PanjurModule({ onBackToMenu }) {
     };
   }, [
     width, height, offsetMode, direction, offset, offsetLeft, offsetRight, offsetBottom, offsetTop, centerFlat,
-    pitch, exitGap, stepover, edgeInset, startZ, endZ, feed, plunge, toolNo, spindle, groundEntry, exitCut,
-    drillTool, drillSpindle, exitToolDia, t14TipDia, t14BodyDia, t14Height, safeZ, toolChangeZ, homeZ, t4Z, t4Feed
+    pitch, exitGap, stepover, edgeInset, deepEndBite, startZ, endZ, feed, plunge, toolNo, spindle, groundEntry, exitCut,
+    drillTool, drillSpindle, exitToolDia, t14TipDia, t14BodyDia, t14Height, safeZ, toolChangeZ, homeZ, t4Step, t4Feed
   ]);
 
   const summaryText = useMemo(() => {
@@ -392,14 +394,18 @@ function downloadFile() {
             </select>
           </div>
         </div>
-        {edgeInset !== 'auto' && (
-          <div className="row2" style={{ marginTop: 10 }}>
+        <div className="row2" style={{ marginTop: 10 }}>
+          {edgeInset !== 'auto' && (
             <div>
               <label>Elle içeri çekme (mm)</label>
               <input type="number" value={edgeInset} min="0" step="0.1" onChange={(e) => setEdgeInset(parseFloat(e.target.value) || 0)} />
             </div>
+          )}
+          <div>
+            <label title="Panjurlar derin biter; orada konik bıçağın gövdesi yüzeyde uçtan daha geniştir. Son panjur çerçeveden (ve orta düz alandan) erken bitirilir, gövde çerçeveye yalnız bu kadar girer.">Derin uçta çerçeveye girme (mm)</label>
+            <input type="number" value={deepEndBite} min="0" step="0.1" onChange={(e) => setDeepEndBite(e.target.value)} />
           </div>
-        )}
+        </div>
         <div className="row4" style={{ marginTop: 10 }}>
           <div>
             <label>Başlangıç Z (üst yüzey)</label>
@@ -432,8 +438,8 @@ function downloadFile() {
               <input type="number" value={exitCut} min="0.1" step="0.1" onChange={(e) => setExitCut(parseFloat(e.target.value) || 0)} />
             </div>
             <div>
-              <label>T4 İlk Dalış Z</label>
-              <input type="number" value={t4Z} step="0.1" onChange={(e) => setT4Z(parseFloat(e.target.value) || 0)} />
+              <label title="T4 tek seferde dalmaz: kalınlık bu derinliği geçmeyen eşit pasolara bölünür (18 mm, 6 → Z12, Z6, Z0).">T4 paso derinliği (mm)</label>
+              <input type="number" value={t4Step} min="0.5" step="0.5" onChange={(e) => setT4Step(e.target.value)} />
             </div>
             <div>
               <label>T4 Kesim Hızı</label>
