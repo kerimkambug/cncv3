@@ -5,59 +5,207 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Empire CNC — Giriş</title>
 <style>
-  :root { --bg:#0f1115; --panel:#171a21; --panel2:#1e222c; --border:#2a2f3a; --text:#e6e8ec; --muted:#9aa2b1; --accent:#4f8cff; --ok:#2fd08a; --err:#ff5c5c; }
-  @media (prefers-color-scheme: light) { :root { --bg:#eef1f5; --panel:#fff; --panel2:#f3f5f8; --border:#d5dbe4; --text:#1c2430; --muted:#647084; --accent:#2367d1; --ok:#16855a; --err:#c43e4b; } }
-  * { box-sizing: border-box; }
-  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:16px;
-    background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
-  .box { width:100%; max-width:380px; background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:26px; }
-  .brand { display:flex; align-items:center; gap:8px; font-weight:700; font-size:18px; margin-bottom:18px; }
-  .tabs { display:flex; gap:6px; margin-bottom:16px; }
-  .tabs button { flex:1; padding:9px; border-radius:8px; border:1px solid var(--border); background:var(--panel2); color:var(--muted); cursor:pointer; font-size:13px; }
-  .tabs button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
-  label { display:block; font-size:12px; color:var(--muted); margin:12px 0 5px; }
-  input { width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--border); background:var(--panel2); color:var(--text); font-size:14px; outline:none; }
-  input:focus { border-color:var(--accent); }
-  .go { width:100%; margin-top:18px; padding:11px; border:none; border-radius:8px; background:var(--accent); color:#fff; font-size:14px; font-weight:600; cursor:pointer; }
-  .go:disabled { opacity:.6; cursor:default; }
-  .msg { margin-top:14px; font-size:13px; line-height:1.45; white-space:pre-line; }
+  :root {
+    --bg:#0b0e13; --panel:#131820; --panel2:#1a2029; --border:#262d39; --text:#e8ebf0; --muted:#8e97a7;
+    --accent:#4f8cff; --accent2:#2fd08a; --ok:#2fd08a; --err:#ff6b6b;
+    --steel:#c9d2df; --cut:#ffb547; --grid:rgba(79,140,255,.07); --grid2:rgba(79,140,255,.16);
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#eef1f5; --panel:#ffffff; --panel2:#f3f5f8; --border:#d6dce5; --text:#1b2330; --muted:#5f6b7e; --accent:#2367d1; --ok:#16855a; --err:#c43e4b; }
+  }
+  * { box-sizing:border-box; }
+  html, body { height:100%; }
+  body {
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;
+    display:grid; grid-template-columns:minmax(0,1.15fr) minmax(360px,1fr); min-height:100vh;
+  }
+  .mono { font-family:ui-monospace,'Cascadia Mono','Consolas','SF Mono',Menlo,monospace; }
+
+  /* ---- the machine side: a blueprint with a door being cut ---- */
+  .bench {
+    position:relative; overflow:hidden; color:#e8ebf0;
+    background:
+      linear-gradient(var(--grid) 1px, transparent 1px) 0 0/24px 24px,
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0/24px 24px,
+      linear-gradient(var(--grid2) 1px, transparent 1px) 0 0/120px 120px,
+      linear-gradient(90deg, var(--grid2) 1px, transparent 1px) 0 0/120px 120px,
+      radial-gradient(1200px 700px at 30% 40%, #142033 0%, #0b0e13 70%);
+    display:flex; flex-direction:column; justify-content:space-between; padding:40px 48px;
+  }
+  .brand { display:flex; align-items:center; gap:12px; }
+  .brand svg { flex:none; }
+  .brand b { font-size:20px; letter-spacing:.14em; font-weight:800; }
+  .brand small { display:block; font-size:11px; letter-spacing:.22em; color:#8e97a7; margin-top:2px; }
+  .stage { flex:1; display:flex; align-items:center; justify-content:center; padding:24px 0; }
+  .stage svg { width:min(100%, 560px); height:auto; overflow:visible; }
+  .pitch h1 { margin:0 0 10px; font-size:28px; line-height:1.2; font-weight:700; letter-spacing:-.01em; max-width:520px; }
+  .pitch p { margin:0 0 18px; color:#9aa4b5; font-size:15px; line-height:1.55; max-width:520px; }
+  .feats { display:flex; flex-wrap:wrap; gap:8px; margin:0; padding:0; list-style:none; }
+  .feats li { font-size:12px; color:#c9d2df; border:1px solid #2a3442; background:rgba(19,24,32,.7); border-radius:999px; padding:6px 12px; display:flex; align-items:center; gap:6px; }
+  .feats li i { width:6px; height:6px; border-radius:50%; background:var(--accent); display:inline-block; }
+  .feats li:nth-child(2) i { background:#2fd08a; } .feats li:nth-child(3) i { background:#ffb547; } .feats li:nth-child(4) i { background:#c084fc; }
+  .dro { position:absolute; top:40px; right:48px; text-align:right; font-size:12px; color:#7d8799; line-height:1.7; }
+  .dro span { color:#e8ebf0; display:inline-block; min-width:76px; }
+  .dro .live { color:#2fd08a; }
+
+  /* toolpaths drawn one after another, like the machine cutting them */
+  .path { fill:none; stroke-linecap:round; stroke-linejoin:round; }
+  .p1 { stroke:#4f8cff; stroke-width:2.2; }
+  .p2 { stroke:#2fd08a; stroke-width:1.6; }
+  .p3 { stroke:#ffb547; stroke-width:1.4; }
+  .draw { stroke-dasharray:var(--len); stroke-dashoffset:var(--len); animation:cut var(--t,3s) cubic-bezier(.4,.1,.3,1) var(--d,0s) forwards; }
+  @keyframes cut { to { stroke-dashoffset:0; } }
+  .spindle { animation:travel 9s ease-in-out infinite; }
+  @keyframes travel {
+    0%,100% { transform:translate(0,0); } 25% { transform:translate(300px,0); } 50% { transform:translate(300px,210px); } 75% { transform:translate(0,210px); }
+  }
+  .spark { animation:blink 1.2s ease-in-out infinite; }
+  @keyframes blink { 50% { opacity:.25; } }
+  @media (prefers-reduced-motion: reduce) {
+    .draw { animation:none; stroke-dashoffset:0; } .spindle, .spark { animation:none; }
+  }
+
+  /* ---- the sign-in side ---- */
+  .side { display:flex; align-items:center; justify-content:center; padding:32px 24px; background:var(--bg); }
+  .box { width:100%; max-width:400px; }
+  .box h2 { margin:0 0 6px; font-size:24px; font-weight:700; }
+  .lead { margin:0 0 24px; color:var(--muted); font-size:14px; line-height:1.5; }
+  .tabs { display:grid; grid-template-columns:1fr 1fr; gap:4px; padding:4px; border-radius:10px; background:var(--panel2); border:1px solid var(--border); margin-bottom:20px; }
+  .tabs button { padding:9px; border-radius:7px; border:none; background:transparent; color:var(--muted); cursor:pointer; font-size:13px; font-weight:600; }
+  .tabs button.on { background:var(--panel); color:var(--text); box-shadow:0 1px 2px rgba(0,0,0,.25), 0 0 0 1px var(--border); }
+  label { display:block; font-size:12px; font-weight:600; color:var(--muted); margin:14px 0 6px; letter-spacing:.02em; }
+  .field { position:relative; }
+  .field svg { position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--muted); pointer-events:none; }
+  input { width:100%; padding:11px 12px 11px 38px; border-radius:9px; border:1px solid var(--border); background:var(--panel); color:var(--text); font-size:14px; outline:none; transition:border-color .15s, box-shadow .15s; }
+  input:focus { border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+  .go { width:100%; margin-top:22px; padding:12px; border:none; border-radius:9px; background:var(--accent); color:#fff; font-size:14px; font-weight:700; cursor:pointer; letter-spacing:.02em; display:flex; align-items:center; justify-content:center; gap:8px; }
+  .go:hover { filter:brightness(1.08); }
+  .go:disabled { opacity:.6; cursor:default; filter:none; }
+  .msg { margin-top:14px; font-size:13px; line-height:1.45; white-space:pre-line; min-height:1px; }
   .msg.err { color:var(--err); } .msg.ok { color:var(--ok); }
+  .note { margin-top:12px; font-size:12px; color:var(--muted); line-height:1.5; padding:10px 12px; border-radius:9px; background:var(--panel2); border:1px solid var(--border); }
   .who { font-size:13px; color:var(--muted); margin-bottom:12px; }
-  .switch { margin-top:16px; font-size:13px; color:var(--muted); text-align:center; }
-  .link { background:none; border:none; color:var(--accent); cursor:pointer; padding:0; font-size:13px; }
+  .switch { margin-top:18px; font-size:13px; color:var(--muted); text-align:center; }
+  .link { background:none; border:none; color:var(--accent); cursor:pointer; padding:0; font-size:13px; font-weight:600; }
+  .foot { margin-top:28px; font-size:11px; color:var(--muted); text-align:center; letter-spacing:.04em; }
   [hidden] { display:none !important; }
+
+  /* phones: the machine side becomes a short banner above the form */
+  @media (max-width: 860px) {
+    body { grid-template-columns:1fr; grid-template-rows:auto 1fr; }
+    .bench { padding:20px 16px; min-height:0; }
+    .stage, .pitch p, .feats, .dro { display:none; }
+    .pitch h1 { font-size:17px; margin:14px 0 0; }
+    .side { padding:24px 16px 32px; align-items:flex-start; }
+  }
 </style>
 </head>
 <body>
-<div class="box">
-  <div class="brand">⚙ Empire CNC</div>
-
-  <div id="blocked" hidden>
-    <div class="who" id="who"></div>
-    <div class="msg err" id="why"></div>
-    <button class="go" id="logout2" type="button">Çıkış yap</button>
+<section class="bench" aria-hidden="true">
+  <div class="brand">
+    <svg width="38" height="38" viewBox="0 0 38 38">
+      <rect x="1" y="1" width="36" height="36" rx="9" fill="#4f8cff"/>
+      <path d="M13 9h12v6H13z M16 15h6v6h-6z M18 21h2v7l-1 2-1-2z" fill="#fff"/>
+      <path d="M8 31h22" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity=".7"/>
+    </svg>
+    <div><b>EMPIRE CNC</b><small>G-CODE ÜRETİM SİSTEMİ</small></div>
   </div>
 
-  <div id="forms">
-    <div class="tabs" id="tabs">
-      <button type="button" id="tLogin" class="on">Giriş</button>
-      <button type="button" id="tReg">Kayıt ol</button>
+  <div class="dro mono">
+    <div>X <span id="dx">214.000</span></div>
+    <div>Y <span id="dy">338.000</span></div>
+    <div>Z <span id="dz">12.000</span></div>
+    <div class="live">● S18000 · F6000</div>
+  </div>
+
+  <div class="stage">
+    <svg viewBox="0 0 520 380" role="img">
+      <!-- the stock -->
+      <rect x="40" y="20" width="440" height="330" rx="3" fill="#1b2230" stroke="#33405a" stroke-width="1.2"/>
+      <!-- the door's outline and its offset passes -->
+      <rect class="path p1 draw" x="70" y="45" width="380" height="280" rx="4" style="--len:1320;--t:2.4s"/>
+      <rect class="path p2 draw" x="110" y="80" width="300" height="210" rx="10" style="--len:1030;--t:2.4s;--d:1.6s"/>
+      <rect class="path p3 draw" x="128" y="98" width="264" height="174" rx="16" style="--len:880;--t:2.2s;--d:3.2s"/>
+      <!-- derz lines inside the panel -->
+      <g class="path p3 draw" style="--len:180;--t:1.4s;--d:4.6s">
+        <path d="M168 110v150"/><path d="M212 110v150"/><path d="M256 110v150"/><path d="M300 110v150"/><path d="M344 110v150"/>
+      </g>
+      <!-- dimension lines -->
+      <g stroke="#4f8cff" stroke-width=".8" opacity=".55" fill="none">
+        <path d="M70 352v14M450 352v14M70 360h380"/>
+        <path d="M486 45h14M486 325h14M494 45v280"/>
+      </g>
+      <g class="mono" fill="#7d8799" font-size="11">
+        <text x="260" y="374" text-anchor="middle">600.00</text>
+        <text x="508" y="190" transform="rotate(90 508 190)" text-anchor="middle">800.00</text>
+      </g>
+      <!-- the spindle above the cut -->
+      <g class="spindle">
+        <g transform="translate(110 80)">
+          <circle r="16" fill="rgba(79,140,255,.14)" stroke="#4f8cff" stroke-width="1"/>
+          <circle r="4" fill="#ffb547" class="spark"/>
+          <path d="M-22 0h-10M22 0h10M0 -22v-10M0 22v10" stroke="#4f8cff" stroke-width="1.2"/>
+        </g>
+      </g>
+    </svg>
+  </div>
+
+  <div class="pitch">
+    <h1>Kapak modelinden plakaya, tek ekrandan G-code.</h1>
+    <p>Modelleri seçin, ölçüyü girin; program, nesting ve kesim simülasyonu hazır. Ne indirirseniz makine onu keser.</p>
+    <ul class="feats">
+      <li><i></i>Kapak &amp; kapı modelleri</li>
+      <li><i></i>Nesting &amp; dış kesim</li>
+      <li><i></i>Panjur, cam, kulp</li>
+      <li><i></i>3B kesim simülasyonu</li>
+    </ul>
+  </div>
+</section>
+
+<main class="side">
+  <div class="box">
+    <div id="blocked" hidden>
+      <h2>Hesap erişimi</h2>
+      <div class="who" id="who"></div>
+      <div class="msg err" id="why"></div>
+      <button class="go" id="logout2" type="button">Çıkış yap</button>
     </div>
-    <form id="form" autocomplete="on">
-      <div id="nameRow" hidden>
-        <label for="name">Ad soyad</label>
-        <input id="name" name="name" autocomplete="name">
+
+    <div id="forms">
+      <h2 id="title">Tekrar hoş geldiniz</h2>
+      <p class="lead" id="lead">Atölyenize devam etmek için giriş yapın.</p>
+      <div class="tabs" id="tabs">
+        <button type="button" id="tLogin" class="on">Giriş</button>
+        <button type="button" id="tReg">Kayıt ol</button>
       </div>
-      <label for="email">E-posta</label>
-      <input id="email" name="email" type="email" required autocomplete="username">
-      <label for="password">Şifre</label>
-      <input id="password" name="password" type="password" required minlength="8" autocomplete="current-password">
-      <button class="go" id="submit" type="submit">Giriş yap</button>
-    </form>
-    <div class="msg" id="msg"></div>
-    <div class="switch" id="switch"></div>
+      <form id="form" autocomplete="on">
+        <div id="nameRow" hidden>
+          <label for="name">Ad soyad</label>
+          <div class="field">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>
+            <input id="name" name="name" autocomplete="name" placeholder="Adınız ve soyadınız">
+          </div>
+        </div>
+        <label for="email">E-posta</label>
+        <div class="field">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
+          <input id="email" name="email" type="email" required autocomplete="username" placeholder="ornek@atolye.com">
+        </div>
+        <label for="password">Şifre</label>
+        <div class="field">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+          <input id="password" name="password" type="password" required minlength="8" autocomplete="current-password" placeholder="En az 8 karakter">
+        </div>
+        <button class="go" id="submit" type="submit">Giriş yap</button>
+      </form>
+      <div class="note" id="regNote" hidden>Kaydınız yönetici onayından sonra açılır. Onaylandığında aynı e-posta ve şifreyle giriş yapabilirsiniz.</div>
+      <div class="msg" id="msg"></div>
+      <div class="switch" id="switch"></div>
+    </div>
+    <div class="foot">© Empire CNC</div>
   </div>
-</div>
+</main>
 <script>
   let mode = 'login';
   const $ = (id) => document.getElementById(id);
@@ -67,6 +215,9 @@
     $('tLogin').classList.toggle('on', m === 'login');
     $('tReg').classList.toggle('on', m === 'register');
     $('nameRow').hidden = m !== 'register';
+    $('regNote').hidden = m !== 'register';
+    $('title').textContent = m === 'login' ? 'Tekrar hoş geldiniz' : 'Hesap oluşturun';
+    $('lead').textContent = m === 'login' ? 'Atölyenize devam etmek için giriş yapın.' : 'Bilgilerinizi girin; hesabınız onaylanınca kullanmaya başlayın.';
     $('submit').textContent = m === 'login' ? 'Giriş yap' : 'Kayıt ol';
     $('password').autocomplete = m === 'login' ? 'current-password' : 'new-password';
     $('switch').innerHTML = m === 'login'
@@ -91,7 +242,7 @@
     try {
       const body = { email: $('email').value, password: $('password').value, name: $('name').value };
       const data = await api(mode, body);
-      if (mode === 'register' && data.user.status !== 'active') { show(data.message, true); setMode('login'); show(data.message, true); }
+      if (mode === 'register' && data.user.status !== 'active') { setMode('login'); show(data.message, true); }
       else if (data.problem) { blocked(data.user, data.problem); }
       else location.reload();
     } catch (err) { show(err.message); }
@@ -109,6 +260,22 @@
   setMode('login');
   // signed in but without access (pending, expired, disabled)
   fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => { if (d && d.problem) blocked(d.user, d.problem); }).catch(() => {});
+
+  // the readout follows the spindle around the door (decoration only)
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const corners = [[110, 80], [410, 80], [410, 290], [110, 290]];
+    let t0 = performance.now();
+    const tick = (now) => {
+      const p = ((now - t0) / 9000) % 1, seg = Math.floor(p * 4), f = (p * 4) % 1;
+      const ease = f < 0.5 ? 2 * f * f : 1 - Math.pow(-2 * f + 2, 2) / 2;
+      const [ax, ay] = corners[seg], [bx, by] = corners[(seg + 1) % 4];
+      const x = ax + (bx - ax) * ease, y = ay + (by - ay) * ease;
+      $('dx').textContent = ((x - 70) * 600 / 380).toFixed(3);
+      $('dy').textContent = ((325 - y) * 800 / 280).toFixed(3);
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
 </script>
 </body>
 </html>
