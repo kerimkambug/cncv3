@@ -1,6 +1,7 @@
 // The deep end of the panjurs: the T14 cone is wider at the surface than at its
-// tip, so every panjur's cut stops short of its end by the cone's radius there.
-// The cone then reaches neither the panjur in front nor the frame (see deepEndPullback).
+// tip, so every panjur's cut stops short: at the surface the cone ends exactly
+// where the next panjur starts (the exit gap is cut, no ridge left, the next
+// panjur untouched) or exactly on the frame (see deepEndPullback).
 import { describe, it, expect } from 'vitest';
 import { deepEndPullback, generatePanjurGcode, panjurGroups, t14RadiusAtDepth } from './panjur.js';
 import { simulate } from '../sim/millSim.js';
@@ -14,13 +15,14 @@ const base = {
 const coneAtDeepest = t14RadiusAtDepth(base, base.startZ - base.endZ); // ≈ 2.14 mm
 
 describe('panjur deep end', () => {
-  it('every panjur stops one cone radius short; the pitch and the shallow starts stay', () => {
+  it('every panjur stops short so its cone ends on the next panjur\'s start; the pitch and the starts stay', () => {
     const g = panjurGroups(base);
     expect(deepEndPullback(base)).toBeCloseTo(coneAtDeepest, 6);
     expect(g.groups[0].start).toBe(60);
     for (let i = 0; i + 1 < g.groups.length; i++) {
-      // the cone at the surface stops exactly the exit gap before the next panjur
-      expect(g.groups[i + 1].start - (g.groups[i].end + coneAtDeepest)).toBeCloseTo(0.45, 6);
+      // the cone at the surface ends exactly where the next panjur starts
+      expect(g.groups[i].end + coneAtDeepest).toBeCloseTo(g.groups[i + 1].start, 6);
+      expect(g.groups[i + 1].start - g.groups[i].face).toBeCloseTo(0.45, 6);
     }
     // and the last one exactly on the frame line
     expect(g.groups.at(-1).end + coneAtDeepest).toBeCloseTo(240, 6);
@@ -45,9 +47,9 @@ describe('panjur deep end', () => {
     const { grid } = simulate(gcode, { top: 18, cell: 0.05, tools: { 14: { type: 'taper', dia: 12, tipDia: 2, angle: 8.8, name: 'T14' } }, box: { x0: 150, y0: 50, x1: 250, y1: 250 } });
     const next = g.groups[1].start;
     const zAt = (y) => grid.z[Math.floor((y - grid.y0) / grid.cell) * grid.w + Math.floor((200 - grid.x0) / grid.cell)];
-    // the exit gap between them stays at the surface: the previous cone stops before it
-    expect(zAt(next - 0.42)).toBeGreaterThan(17.99);
-    // (before the change the cone ran ~1.7 mm into the next panjur, down to well below the surface there)
+    // the exit gap between them is cut: no ridge left at the surface
+    for (let y = next - 0.45; y < next - 0.15; y += 0.05) expect(zAt(y)).toBeLessThan(17.5);
+    // …and the next panjur is not entered (the cone used to run ~1.7 mm into it, well below its surface)
     expect(zAt(next + 1)).toBeGreaterThan(17.5);
   });
 });
@@ -60,7 +62,7 @@ describe('panjur deep end with the T4 opening (kesimli)', () => {
     const tools = { 14: { type: 'taper', dia: 12, tipDia: 2, angle: 8.8, name: 'T14' }, 4: { type: 'flat', dia: 4, name: 'T4' } };
     const { grid } = simulate(gcode, { top: 18, cell: 0.05, tools, box: { x0: 150, y0: 50, x1: 250, y1: 250 } });
     const zAt = (y) => grid.z[Math.floor((y - grid.y0) / grid.cell) * grid.w + Math.floor((200 - grid.x0) / grid.cell)];
-    const surfaceEnd = g.groups[0].end + coneAtDeepest; // where the cone reaches the surface
+    const surfaceEnd = g.groups[0].face; // where the panjur ends on the surface
     for (let y = surfaceEnd - 2.9; y <= g.groups[1].start + 0.4; y += 0.1) expect(zAt(y)).toBeLessThan(0.05);
   });
 });

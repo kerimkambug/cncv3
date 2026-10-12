@@ -49,9 +49,10 @@ export function panjurGroups(c) {
   const available = usableAlong - flat;
   const groups = [];
   // Every panjur ends deep, and there the T14 cone is wider at the surface than at
-  // its tip. Each panjur's cut stops this much short of its end, so the cone
-  // reaches neither the panjur in front of it nor the frame (the T4 opens that
-  // end anyway when it is on); the pitch stays the same.
+  // its tip. Each panjur's cut stops short so that the cone, at the surface, ends
+  // exactly where the next panjur starts (the exit gap between them is cut, the
+  // next panjur is not touched) or exactly on the frame / the centre flat. The
+  // pitch stays the same. `face` is where the panjur ends on the surface.
   const deepPull = deepEndPullback(c);
 
   const makeFromStart = (start, limit, side) => {
@@ -68,8 +69,11 @@ export function panjurGroups(c) {
     }
     let pos = start;
     for (let i = 0; i < count; i++) {
-      groups.push({ start: pos, end: pos + length - deepPull, side });
-      pos += length + (i < count - 1 ? gap : 0);
+      const last = i === count - 1;
+      // before another panjur the cone may cover the exit gap; before the frame / flat it may not
+      const pull = last ? deepPull : Math.max(0, deepPull - gap);
+      groups.push({ start: pos, end: pos + length - pull, face: pos + length, side });
+      pos += length + (last ? 0 : gap);
     }
   };
 
@@ -84,10 +88,10 @@ export function panjurGroups(c) {
   }
 
   groups.sort((a, b) => a.start - b.start);
-  const actualLengths = [...new Set(groups.map((g) => Number((g.end - g.start).toFixed(6))))];
+  // the panjur as seen on the surface (its cut stops a cone radius earlier)
+  const actualLengths = [...new Set(groups.map((g) => Number((g.face - g.start).toFixed(6))))];
   const actualLength = actualLengths.length === 1 ? actualLengths[0] : Math.min(...actualLengths);
-  // the slat as seen on the surface: its cut plus the cone past its deep end
-  const actualPitch = actualLength + deepPull + c.exitGap;
+  const actualPitch = actualLength + c.exitGap;
 
   return {
     crossSpan,
@@ -261,10 +265,10 @@ export function deepEndPullback(c) {
   return resolveEdgeInsetAtDepth(c, Math.max(0, (Number(c.startZ) || 0) - (Number(c.endZ) || 0)));
 }
 
-/** How far past the frame line the 4 mm bit goes at both ends of an opening (mm): `t4Extend`, default 1. */
+/** How far past the frame line the 4 mm bit goes at both ends of an opening (mm): `t4Extend`, default 0. */
 function t4ExtendOf(c) {
-  const v = c.t4Extend === undefined || c.t4Extend === null || c.t4Extend === '' ? 1 : Number(c.t4Extend);
-  return Number.isFinite(v) ? Math.max(0, Math.min(v, Number(c.exitToolDia) || 4)) : 1;
+  const v = c.t4Extend === undefined || c.t4Extend === null || c.t4Extend === '' ? 0 : Number(c.t4Extend);
+  return Number.isFinite(v) ? Math.max(0, Math.min(v, Number(c.exitToolDia) || 4)) : 0;
 }
 
 /** T4 step-down depth (mm): `t4Step`, default 6. */
@@ -447,9 +451,9 @@ export function generatePanjurGcode(c, offsetX = 0, offsetY = 0, isCombined = fa
     }
 
     g.groups.forEach((grp) => {
-      // panjurun yüzeydeki ucu: kesim konik payı kadar önce biter, koni yüzeyde buraya ulaşır
-      // (yan yana seri üretimde kapağın kaydırmasıyla birlikte)
-      const end = grp.end + deepEndPullback(c) + (c.direction === 'y' ? offsetY : offsetX);
+      // panjurun yüzeydeki ucu (kesim konik payı kadar önce biter; T4 açıklığı buna göre:
+      // 3 mm eski + 1 mm yeni panjur), yan yana seri üretimde kapağın kaydırmasıyla birlikte
+      const end = (grp.face ?? grp.end) + (c.direction === 'y' ? offsetY : offsetX);
       // T4 kanal temizliği: kalın malzemede düşük ilerleme
       const t4Feed = c.t4Feed || 5000;
 
@@ -462,7 +466,8 @@ export function generatePanjurGcode(c, offsetX = 0, offsetY = 0, isCombined = fa
       const across = c.direction === 'y' ? 'X' : 'Y';
       // The round end of the 4 mm bit touches the frame line only in the middle of
       // the opening; its corners would keep a small piece against the frame. The
-      // bit goes `t4Extend` mm further at both ends (default 1 mm) to clean them.
+      // bit can go `t4Extend` mm further at both ends to clean them (default 0: it
+      // would notch the frame by as much).
       const ext = t4ExtendOf(c);
       const from = (c.direction === 'y' ? x0 : y0) + toolRT4 - ext;
       const to = (c.direction === 'y' ? x1 : y1) - toolRT4 + ext;

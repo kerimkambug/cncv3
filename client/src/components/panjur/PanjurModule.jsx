@@ -25,7 +25,7 @@ export default function PanjurModule({ onBackToMenu }) {
   const [groundEntry, setGroundEntry] = useState(false);
   const [exitCut, setExitCut] = useState(4);
   const [t4Step, setT4Step] = useState(6); // T4 paso derinliği: 18 mm → Z12, Z6, Z0
-  const [t4Extend, setT4Extend] = useState(1); // T4 açıklığın iki ucunda çerçeveye doğru bu kadar ileri gider
+  const [t4Extend, setT4Extend] = useState(0); // T4 açıklığın iki ucunda çerçeveye doğru bu kadar ileri gider
   const [t4Feed, setT4Feed] = useState(5000); // T4 kesim hızı (rölyef feed'i T14 için)
 
   const [toolNo, setToolNo] = useState('14');
