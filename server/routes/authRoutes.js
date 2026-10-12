@@ -54,13 +54,6 @@ router.post('/login', async (req, res) => {
   res.json({ user: publicUser(updated || user), problem: accessProblem(updated || user) });
 });
 
-// for the login page: with no account yet it opens straight on "create the first (admin) account"
-router.get('/status', async (req, res) => {
-  res.set('Cache-Control', 'no-store');
-  // with ADMIN_EMAIL the page never offers 'create the first account': the admin just signs up
-  res.json({ hasUsers: Boolean(process.env.ADMIN_EMAIL) || (await userStore.count()) > 0 });
-});
-
 router.post('/logout',(req, res) => { clearSession(res); res.json({ ok: true }); });
 
 router.get('/me', (req, res) => {

@@ -23,7 +23,6 @@
   .msg { margin-top:14px; font-size:13px; line-height:1.45; white-space:pre-line; }
   .msg.err { color:var(--err); } .msg.ok { color:var(--ok); }
   .who { font-size:13px; color:var(--muted); margin-bottom:12px; }
-  .intro { font-size:13px; line-height:1.45; background:var(--panel2); border:1px solid var(--accent); border-radius:8px; padding:10px 12px; margin-bottom:6px; }
   .switch { margin-top:16px; font-size:13px; color:var(--muted); text-align:center; }
   .link { background:none; border:none; color:var(--accent); cursor:pointer; padding:0; font-size:13px; }
   [hidden] { display:none !important; }
@@ -40,7 +39,6 @@
   </div>
 
   <div id="forms">
-    <div class="intro" id="intro" hidden>Henüz hiç hesap yok. <b>İlk hesabı siz oluşturun:</b> bu hesap yönetici olur, sonraki kayıtları siz onaylarsınız.</div>
     <div class="tabs" id="tabs">
       <button type="button" id="tLogin" class="on">Giriş</button>
       <button type="button" id="tReg">Kayıt ol</button>
@@ -109,16 +107,6 @@
   $('logout2').onclick = async () => { await api('logout'); location.reload(); };
 
   setMode('login');
-  // very first visit: no account yet → straight to creating the admin account
-  fetch('/api/auth/status').then((r) => r.json()).then((d) => {
-    if (d.hasUsers) return;
-    setMode('register');
-    $('intro').hidden = false;
-    $('tabs').hidden = true;
-    $('switch').hidden = true;
-    $('submit').textContent = 'Yönetici hesabını oluştur';
-  }).catch(() => {});
-
   // signed in but without access (pending, expired, disabled)
   fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => { if (d && d.problem) blocked(d.user, d.problem); }).catch(() => {});
 </script>
