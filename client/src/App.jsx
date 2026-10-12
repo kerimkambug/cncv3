@@ -56,7 +56,7 @@ export default function App() {
         {current === 'panjur' && <PanjurModule />}
         {current === 'cerezlik' && <CerezlikModule />}
         {current === 'relief' && <ReliefGenerator />}
-        {current === 'mutfak' && <MutfakModule presets={presets} />}
+        {current === 'mutfak' && <MutfakModule presets={presets} kulp={workspace.cfg.kulp} />}
         {current === 'circle' && <DaireKesimi cfg={workspace.cfg} />}
         {current === 'derz' && <DerzBolme cfg={workspace.cfg} />}
         {current === 'gcode-dxf' && <GcodeDxfConverter />}

@@ -5,6 +5,7 @@ import { toSimTools } from '../../lib/sim/toolMagazine.js';
 import { sortPresets } from '../../hooks/useKapakWorkspace.js';
 import { COLORS, COUNTERS, FINISHES, GLASSES, HANDLES } from '../../lib/mutfak/kitchen.js';
 import { createKitchen } from '../../lib/mutfak/scene.js';
+import { useKulpSettings } from '../../hooks/useKulpSettings.js';
 
 const idOf = (p) => p?._id || p?.id;
 // the Panjur screen's door (its own defaults), next to the kapak models
@@ -15,7 +16,7 @@ const PANJUR_MODEL = { _id: '__panjur__', name: 'Panjur', panjur: {}, thickness:
  * Every door's surface is the model's real program for that door size, cut in
  * the simulation — what the customer sees is what the machine will make.
  */
-export default function MutfakModule({ presets = [] }) {
+export default function MutfakModule({ presets = [], kulp = null }) {
   const models = useMemo(() => [...sortPresets(presets.filter((p) => (p.category || 'kapak') === 'kapak' && !p.cam && p.rows?.length)), PANJUR_MODEL], [presets]);
   const [look, setLook] = usePersistentState('empire-cnc-mutfak', {
     alt: null, ust: null, color: 'beyaz', finish: 'mat', glass: 'seffaf', counter: 'mermer', handle: 'inox',
@@ -25,6 +26,9 @@ export default function MutfakModule({ presets = [] }) {
   const [allOpen, setAllOpen] = useState(false);
   const [mag] = useToolMagazine();
   const tools = useMemo(() => toSimTools(mag), [mag]);
+  // the kulp bit and its settings (Atölye), for 'Gizli kulp'
+  const kulpSet = useKulpSettings({ kulp });
+  const hidden = look.handle === 'gizli';
   const host = useRef(null);
   const kitchen = useRef(null);
   const worker = useRef(null);
@@ -53,22 +57,24 @@ export default function MutfakModule({ presets = [] }) {
 
   // door surfaces: one per (model, door size); built once, then from the cache
   const toolsKey = JSON.stringify(tools);
+  const kulpKey = JSON.stringify(kulpSet).length + (kulpSet.passes || '') + kulpSet.z;
   useEffect(() => {
     const k = kitchen.current;
     if (!k) return;
     for (const rk of k.keys) {
-      const [group, size] = rk.split('|');
+      const [group, size, edge] = rk.split('|');
       const [w, h] = size.split('x').map(Number);
       const model = group === 'ust' ? ustModel : altModel;
       if (!model) { wanted.current.set(rk, null); k.setRelief(rk, null); continue; }
-      const ck = `${idOf(model)}|${model.updatedAt || ''}|${size}|${toolsKey.length}`;
+      const kulpEdge = hidden && edge !== '-' ? edge : null;
+      const ck = `${idOf(model)}|${model.updatedAt || ''}|${size}|${toolsKey.length}|${kulpEdge ? `${kulpEdge}:${kulpKey}` : '-'}`;
       wanted.current.set(rk, ck);
       if (cache.current.has(ck)) { k.setRelief(rk, cache.current.get(ck)); continue; }
       cache.current.set(ck, undefined);
       setBusy((n) => n + 1);
-      worker.current.postMessage({ key: ck, preset: model, w, h, tools });
+      worker.current.postMessage({ key: ck, preset: model, w, h, tools, kulp: kulpEdge ? { edge: kulpEdge, settings: kulpSet } : null });
     }
-  }, [altModel, ustModel, toolsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [altModel, ustModel, toolsKey, hidden, kulpKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function pickModel(m) {
     const id = idOf(m);

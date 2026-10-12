@@ -4,11 +4,12 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import {
-  COLORS, COUNTERS, COUNTER, DEPTH, FINISHES, GLASSES, HANDLES, PLINTH, THICK, TOP, UNITS, UPPER_H, UPPER_Y, BASE_H, frontsOf,
+  COLORS, COUNTERS, COUNTER, DEPTH, FINISHES, GLASSES, HANDLES, PLINTH, THICK, TOP, UNITS, UPPER_H, UPPER_Y, BASE_H, frontsOf, kulpEdge,
 } from './kitchen.js';
 
 /** Door surface key: same model group + same size = same texture. */
-export const reliefKey = (f) => `${f.group}|${Math.round(f.w)}x${Math.round(f.h)}`;
+// one surface per group, door size and the edge its hidden kulp would be on
+export const reliefKey = (f) => `${f.group}|${Math.round(f.w)}x${Math.round(f.h)}|${kulpEdge(f) || '-'}`;
 
 function canvasTexture(size, draw, repeat = 1) {
   const c = document.createElement('canvas');
@@ -290,7 +291,8 @@ export function createKitchen(host) {
     M.counter.map = counterTex; M.counter.color.set(counterTex ? '#ffffff' : ct.hex);
     M.counter.roughness = ct.roughness; M.counter.clearcoat = ct.roughness < 0.4 ? 0.6 : 0; M.counter.needsUpdate = true;
     const hd = HANDLES.find((x) => x.id === handle) || HANDLES[0];
-    handles.forEach((g) => { g.visible = hd.id !== 'yok'; });
+    // no bars when the doors have none, or when the kulp is cut into their edge
+    handles.forEach((g) => { g.visible = hd.id !== 'yok' && hd.id !== 'gizli'; });
     if (hd.hex) { M.handle.color.set(hd.hex); M.handle.metalness = hd.metalness; M.handle.roughness = hd.roughness; }
     render();
   }

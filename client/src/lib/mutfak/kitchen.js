@@ -96,7 +96,21 @@ export const COUNTERS = [
 
 export const HANDLES = [
   { id: 'yok', name: 'Kulpsuz' },
+  // cut into the door's edge with the kulp bit (Atölye → Makine → Kulp), the whole length
+  { id: 'gizli', name: 'Gizli kulp (kenarda)' },
   { id: 'inox', name: 'Çubuk · inox', hex: '#c8cbcd', metalness: 1, roughness: 0.3 },
   { id: 'siyah', name: 'Çubuk · siyah', hex: '#1a1a1a', metalness: 0.4, roughness: 0.5 },
   { id: 'altin', name: 'Çubuk · altın', hex: '#c9a24a', metalness: 1, roughness: 0.25 },
 ];
+
+/**
+ * The edge a front's hidden kulp (gizli kulp) is cut on: the edge you reach for.
+ * Base doors and drawers at the top, wall units at the bottom, tall doors on
+ * their opening side. Glass doors and ovens get none.
+ */
+export function kulpEdge(f) {
+  if (f.type !== 'door' && f.type !== 'drawer') return null;
+  if (f.group === 'ust') return 'bottom';
+  if (f.type === 'door' && f.unit.kind === 'tall') return f.side === 'L' ? 'left' : 'right';
+  return 'top';
+}

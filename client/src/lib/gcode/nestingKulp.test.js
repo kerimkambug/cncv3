@@ -21,7 +21,7 @@ describe('kulp in nesting', () => {
       { name: 'D', width: 430, height: 700, qty: 4, lockRotation: true },
     ];
     const nest = calculateNesting({ plateW: 2100, plateH: 2800, edge: 10, gap: 8, rotate: false, parts, kulp, gapSafety: { cutToolDia: 6 } });
-    const room = kulpMargins(right, kulp).right;
+    const room = kulpMargins({ w: 430, h: 700 }, right, kulp).right;
     for (const plate of nest.plates) {
       for (const k of plate.parts.filter((p) => p.kulps?.length)) {
         expect(k.placedWidth).toBe(430); // the door itself, not its room
@@ -62,6 +62,18 @@ describe('kulp in nesting', () => {
     expect(seq.indexOf('11')).toBeGreaterThan(seq.indexOf('10'));
     expect(seq[seq.length - 1]).toBe('6');
     expect(seq.filter((t) => t === '11')).toHaveLength(1);
+  });
+
+  it('refused when the kulp work would reach another door (where the bits go down, the clearing, the head)', () => {
+    // placed by hand far too close: the door D starts 20 mm past the kulp edge
+    const plate = { number: 1, width: 2100, height: 2800, parts: [
+      { name: 'K', width: 430, height: 700, x: 100, y: 100, placedWidth: 430, placedHeight: 700, rotated: false, kulps: right },
+      { name: 'D', width: 430, height: 700, x: 550, y: 100, placedWidth: 430, placedHeight: 700, rotated: false },
+    ] };
+    expect(() => buildNestingPlateGcode(plate, cfg)).toThrow(/giriyor/);
+    // with the room nesting would leave, it is fine
+    plate.parts[1].x = 100 + 430 + 54 + 8;
+    expect(() => buildNestingPlateGcode(plate, cfg)).not.toThrow();
   });
 
   it('refused when a model on the plate also uses the kulp bit\'s number', () => {

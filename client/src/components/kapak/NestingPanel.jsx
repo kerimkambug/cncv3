@@ -240,6 +240,7 @@ export default function NestingPanel({ cfg, plateCfg, defaultModelName }) {
         },
         // a door with a kulp needs room past that edge (10 mm clearing + the kulp bit's head)
         kulp: kulpSet,
+        thickness: Number(cfg.thickness) || 18,
       });
 
       const presetMap = buildPresetMap(expanded);

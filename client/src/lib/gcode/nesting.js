@@ -16,7 +16,8 @@ import { parseGcode } from './gcodeToDxf.js';
 import { buildCamPartProgram } from './camTarama.js';
 import { rowNeedsOffset } from './features.js';
 import { buildKapakGcode } from './kapak.js';
-import { buildKulpLines, kulpMargins, kulpProblem, kulpSettings } from './kulp.js';
+import { buildKulpLines, kulpMargins, kulpProblem, kulpSettings, kulpTouchRegion } from './kulp.js';
+import { intersectionArea } from '../cerezlik/geom.js';
 
 function rectsIntersect(a, b) {
   return a.x < b.x + b.w - 1e-9 && a.x + a.w > b.x + 1e-9 && a.y < b.y + b.h - 1e-9 && a.y + a.h > b.y + 1e-9;
@@ -312,7 +313,7 @@ export function calculateNesting(opts) {
         const why = kulpProblem(door, k, opts.kulp);
         if (why) throw new Error(`${p.name || 'Parça'} (${p.width}×${p.height}): ${why}`);
       }
-      const m = kulpMargins(p.kulps, opts.kulp);
+      const m = kulpMargins({ w: Number(p.width), h: Number(p.height) }, p.kulps, opts.kulp, { top: numOr(opts.thickness, 18) });
       return { ...p, width: p.width + m.left + m.right, height: p.height + m.bottom + m.top, kulpRoom: { w: p.width, h: p.height, m } };
     });
   const usableW = plateW - edge * 2;
@@ -686,10 +687,23 @@ function plateKulpLines(plate, cfg, groups, { safeZ, thickness }) {
     }
   }
   const out = [];
+  const cutR = numOr(cfg.cutToolDia, 6) / 2;
   for (const part of withKulp) {
     const w = part.rotated ? numOr(part.width, part.placedHeight) : part.placedWidth;
     const h = part.rotated ? numOr(part.height, part.placedWidth) : part.placedHeight;
     const door = part.rotated ? { x: 0, y: 0, w, h, kulps: part.kulps } : { x: part.x, y: part.y, w, h, kulps: part.kulps };
+    // Nothing the kulp work touches — where the bits go down first, the clearing,
+    // the kulp bit's head — may reach another door or its outer cut.
+    const touch = kulpTouchRegion(door, part.kulps, s, { top: thickness })
+      .map((loop) => (part.rotated ? loop.map(([x, y]) => [part.x + y, part.y + w - x]) : loop));
+    for (const other of plate.parts) {
+      if (other === part) continue;
+      const r = [[other.x - cutR, other.y - cutR], [other.x + other.placedWidth + cutR, other.y - cutR],
+        [other.x + other.placedWidth + cutR, other.y + other.placedHeight + cutR], [other.x - cutR, other.y + other.placedHeight + cutR]];
+      if (intersectionArea(touch, [r]) > 0.01) {
+        throw new Error(`${part.name || 'Parça'} kapağının kulp işi yanındaki ${other.name || 'parçaya'} giriyor (kulp bıçağı ya da ön temizlik). Parçaları yeniden dizin ya da kulpu değiştirin.`);
+      }
+    }
     const lines = buildKulpLines([door], s, safeZ, { nest: true, top: thickness });
     out.push(...(part.rotated ? lines.map((l) => rotatePartLine(l, w, part.x, part.y)) : lines));
   }

@@ -6,6 +6,7 @@
 import { buildKapakGcode } from '../gcode/kapak.js';
 import { generatePanjurGcode } from '../gcode/panjur.js';
 import { simulate } from '../sim/millSim.js';
+import { buildKulpLines } from '../gcode/kulp.js';
 
 /** The Panjur screen's own defaults (T14 conical ball raster, 40.5 mm slats, 60 mm frame). */
 export const PANJUR = {
@@ -20,15 +21,20 @@ export const PANJUR = {
  * @param {number} w       door width (mm)
  * @param {number} h       door height (mm)
  * @param {object} [tools] simulation tools (the workshop magazine)
+ * @param {{edge:string, settings:object}|null} [kulp] a hidden kulp the whole length of that edge
  * @returns {{w:number, h:number, normal:Uint8Array, shade:Uint8Array} | null}  null: the model does not fit this door
  */
-export function doorRelief(preset, w, h, tools = {}) {
+export function doorRelief(preset, w, h, tools = {}, kulp = null) {
   if (!preset || (!preset.panjur && (!Array.isArray(preset.rows) || !preset.rows.length))) return null;
   const top = Number(preset.thickness) || 18;
   let gcode;
   try {
     gcode = preset.panjur ? generatePanjurGcode({ ...PANJUR, ...preset.panjur, width: w, height: h }).gcode : buildKapakGcode(w, h, preset);
   } catch { return null; }
+  // the hidden kulp, cut as on a single door (the kulp bit goes down beside it)
+  if (kulp && kulp.edge) {
+    gcode += `\n${buildKulpLines([{ x: 0, y: 0, w, h, kulps: [{ edge: kulp.edge, mode: 'full' }] }], kulp.settings, 30, { top }).join('\n')}`;
+  }
   // ~0.8 mm per pixel, coarser on big doors (≤ ~600k pixels)
   const cell = Math.max(0.8, Math.sqrt((w * h) / 6e5));
   const { grid } = simulate(gcode, { top, cell, box: { x0: 0, y0: 0, x1: w, y1: h }, tools });

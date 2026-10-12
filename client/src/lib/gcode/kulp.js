@@ -172,22 +172,37 @@ export function flatRadius(settings, top) {
 }
 
 /**
- * How far the kulp work reaches past each edge of a door in a plate (the 10 mm
- * bit's holes and the kulp bit's head), in the door's own frame: nesting keeps it free.
+ * Everything the kulp work can touch on a door lying in a plate, as polygons: the
+ * kulp bit's head along its whole path, and the 10 mm bit's holes and band.
+ * Nothing of another door may lie in it (nor its outer cut).
+ */
+export function kulpTouchRegion(door, kulps, settings, { top = 18 } = {}) {
+  const s = kulpSettings(settings);
+  const loops = [];
+  for (const k of kulps || []) {
+    const pts = kulpPasses(door, k, s, { nest: true }).flatMap((p) => p.pts);
+    for (let i = 0; i + 1 < pts.length; i++) loops.push(capsule(pts[i], pts[i + 1], s.dia / 2));
+  }
+  const clear = kulpClearRegion(door, kulps, s, { top, nest: true });
+  if (!loops.length && !clear.length) return [];
+  return union([...loops, ...clear.filter((l) => l.length >= 3)]).map((sh) => sh.outer);
+}
+
+/**
+ * How far the kulp work reaches past each edge of a door in a plate (measured
+ * from what it really touches, plus 1 mm), in the door's own frame: nesting keeps
+ * that room free, corners included.
+ * @param {{w:number,h:number}} door
  * @returns {{left:number,right:number,bottom:number,top:number}}
  */
-export function kulpMargins(kulps, settings) {
-  const s = kulpSettings(settings);
-  const reach = approachOf(s, true) + s.dia / 2 + 1;
+export function kulpMargins(door, kulps, settings, { top = 18 } = {}) {
   const m = { left: 0, right: 0, bottom: 0, top: 0 };
-  const ends = { left: ['bottom', 'top'], right: ['bottom', 'top'], bottom: ['left', 'right'], top: ['left', 'right'] };
-  for (const k of kulps || []) {
-    if (!KULP_EDGES[k.edge]) continue;
-    m[k.edge] = Math.max(m[k.edge], reach);
-    // a whole-length kulp goes down and comes up beyond the edge's ends
-    if (k.mode !== 'window') for (const e of ends[k.edge]) m[e] = Math.max(m[e], reach);
-  }
-  return m;
+  const region = kulpTouchRegion({ x: 0, y: 0, w: door.w, h: door.h }, kulps, settings, { top });
+  if (!region.length) return m;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const loop of region) for (const [x, y] of loop) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  const out = (v) => (v > 1e-6 ? Math.ceil(v + 1) : 0);
+  return { left: out(-x0), right: out(x1 - door.w), bottom: out(-y0), top: out(y1 - door.h) };
 }
 
 /** A disc as a polygon. */

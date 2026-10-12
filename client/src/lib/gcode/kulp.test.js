@@ -91,10 +91,19 @@ describe('kulp in a plate (nesting): the 10 mm bit clears first', () => {
     expect(zAt(530 - 7 - 19.5, 450)).toBeCloseTo(18, 3);
   });
 
-  it('nesting keeps the room the kulp work needs past the edge', () => {
-    const m = kulpMargins(door.kulps, set);
-    expect(m.right).toBeCloseTo(25 + 2 + 25 + 1, 6);
-    expect(m.left).toBe(0);
-    expect(kulpMargins([{ edge: 'left', mode: 'full' }], set)).toMatchObject({ left: 53, top: 53, bottom: 53, right: 0 });
+  it('nesting keeps the room the kulp work really touches past the edges', () => {
+    // a window: the holes (Ø52) centred 27 mm outside the right edge reach 53 mm, +1
+    const m = kulpMargins(door, door.kulps, set);
+    expect(m.right).toBe(54);
+    expect([m.left, m.top, m.bottom]).toEqual([0, 0, 0]);
+    // whole length: it goes down beyond both ends too
+    const full = kulpMargins(door, [{ edge: 'left', mode: 'full' }], set);
+    expect(full.left).toBe(28); // the head 25 + the bit 1 mm outside the edge, +1 (the holes are beyond the ends)
+    expect(full.top).toBeGreaterThanOrEqual(53);
+    expect(full.bottom).toBeGreaterThanOrEqual(53);
+    expect(full.right).toBe(0);
+    // a window right at the top corner, where the bit goes down: the room goes round the corner
+    const corner = kulpMargins(door, [{ edge: 'right', mode: 'window', from: 500, to: 700 }], set);
+    expect(corner.top).toBe(2); // the hole (radius 26) centred 25 below the top reaches 1 mm past it, +1
   });
 });
