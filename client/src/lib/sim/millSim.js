@@ -5,7 +5,14 @@
 // tool loaded at that moment: wherever the tool passes, each column is cut down
 // to the tool's lower surface there. What is left is the part as the machine
 // will make it — ridges, scallops, steps and gouges included.
+//
+// Tools that are narrower higher up than lower down (a kulp bit, a T-slot
+// cutter: drawn in Atölye → Bıçaklar) cut UNDER the surface: the material
+// above their head stays. A column then also keeps a list of its hollow
+// stretches (`grid.voids`: column index → [[from, to], …] below its top), and
+// such a tool cuts with its full side view, height by height.
 import { parseGcode } from '../gcode/gcodeToDxf.js';
+import { dexelTriangles, trianglesToStl } from './dexelMesh.js';
 
 /** The workshop's tools (see the tool table): profile type and size. */
 export const TOOL_TABLE = {
@@ -82,6 +89,63 @@ function profileTable(tool) {
 }
 
 /**
+ * The tool's side view as its radius at every height above the tip, from a drawn
+ * outline (Atölye → Bıçaklar, DXF): the widest point of the drawing at that height.
+ * Above the drawing the shank goes on with the drawing's top width.
+ * @param {{pts:number[][],closed:boolean}[]} outline  axis at x=0, tip at y=0
+ * @returns {{dh:number, r:Float32Array, rTop:number, undercut:boolean} | null}
+ */
+export function silhouette(outline, dh = 0.05) {
+  const segs = [];
+  let H = 0;
+  for (const o of outline || []) {
+    const n = o.pts.length;
+    for (let i = 0; i + 1 < n; i++) segs.push([o.pts[i], o.pts[i + 1]]);
+    if (o.closed && n > 2) segs.push([o.pts[n - 1], o.pts[0]]);
+    for (const [, y] of o.pts) H = Math.max(H, y);
+  }
+  if (!segs.length || !(H > 0)) return null;
+  const K = Math.ceil(H / dh);
+  const r = new Float32Array(K + 1);
+  for (let k = 0; k <= K; k++) {
+    const y = Math.min(H, k * dh);
+    let best = 0;
+    for (const [[x0, y0], [x1, y1]] of segs) {
+      if (y < Math.min(y0, y1) - 1e-9 || y > Math.max(y0, y1) + 1e-9) continue;
+      if (Math.abs(y1 - y0) < 1e-9) { best = Math.max(best, Math.abs(x0), Math.abs(x1)); continue; }
+      best = Math.max(best, Math.abs(x0 + ((x1 - x0) * (y - y0)) / (y1 - y0)));
+    }
+    r[k] = best;
+  }
+  // narrower higher up than somewhere below (more than a hair): the tool undercuts
+  let widest = 0, undercut = false;
+  for (let k = 0; k <= K; k++) { if (r[k] < widest - 0.05) undercut = true; widest = Math.max(widest, r[k]); }
+  return { dh, r, rTop: r[K], undercut };
+}
+
+/**
+ * For a tool that undercuts: at distance d from the axis, the heights above the tip
+ * the tool fills, as [from, to] stretches (to = Infinity: up the shank).
+ * Looked up by d in 0.02 mm steps.
+ */
+function undercutTable(sil, R) {
+  const dd = 0.02, nb = Math.ceil(R / dd) + 1;
+  const bins = new Array(nb);
+  const { dh, r, rTop } = sil, K = r.length - 1;
+  for (let b = 0; b < nb; b++) {
+    const d = b * dd, list = [];
+    let from = -1;
+    for (let k = 0; k <= K; k++) {
+      // a stretch runs from its first to its last sample inside the tool
+      if (r[k] >= d) { if (from < 0) from = k; } else if (from >= 0) { list.push([from * dh, (k - 1) * dh]); from = -1; }
+    }
+    if (from >= 0) list.push([from * dh, rTop >= d ? Infinity : K * dh]);
+    bins[b] = list;
+  }
+  return (d2) => { const b = Math.round(Math.sqrt(d2) / dd); return b < nb ? bins[b] : null; };
+}
+
+/**
  * @param {string} text  G-code
  * @param {object} o
  * @param {number} o.top        material top (Z)
@@ -111,14 +175,43 @@ export function simulate(text, { top, cell = 0.4, tools = {}, box = null } = {})
   const stats = { cuttingMm: 0, rapidCuts: 0, belowTable: 0, byTool: {}, emptySlots: [] };
   let started = false;
   const tables = new Map();
+  // hollow stretches under the top of a column (only tools that undercut make them)
+  const voids = new Map();
+  // a column's top came down: a hollow it now reaches opens up (its floor becomes the top)
+  const settle = (idx) => {
+    const list = voids.get(idx);
+    if (!list) return;
+    while (list.length && list[list.length - 1][1] >= z[idx] - 1e-6) z[idx] = Math.min(z[idx], list.pop()[0]);
+    if (!list.length) voids.delete(idx);
+  };
+  // the tool fills heights a…b of column idx
+  const carve = (idx, a, b) => {
+    if (a < 0) a = 0;
+    if (a >= z[idx]) return;
+    if (b >= z[idx]) { z[idx] = a; settle(idx); return; }
+    const list = voids.get(idx) || [];
+    let lo = a, hi = b;
+    const kept = [];
+    for (const v of list) {
+      if (v[1] < lo - 1e-6 || v[0] > hi + 1e-6) kept.push(v);
+      else { lo = Math.min(lo, v[0]); hi = Math.max(hi, v[1]); }
+    }
+    kept.push([lo, hi]);
+    kept.sort((p, q) => p[0] - q[0]);
+    voids.set(idx, kept);
+    settle(idx);
+  };
   for (const s of segs) {
     // the first move starts from an unknown position (the parser assumes 0,0,0): not a cut
     if (!started) { started = true; if (!s.from.x && !s.from.y && !s.from.z) continue; }
     const zMin = Math.min(s.from.z, s.to.z);
     if (zMin >= top) continue; // in the air
     const tool = toolOf(s.tool);
-    if (!tables.has(tool)) tables.set(tool, profileTable(tool));
-    const hOf = tables.get(tool);
+    if (!tables.has(tool)) {
+      const sil = tool.type === 'custom' && tool.outline ? silhouette(tool.outline) : null;
+      tables.set(tool, { hOf: profileTable(tool), fills: sil && sil.undercut ? undercutTable(sil, tool.dia / 2) : null });
+    }
+    const { hOf, fills } = tables.get(tool);
     if (s.type === 'G0') stats.rapidCuts++;
     if (zMin < 0) stats.belowTable++;
     const L = Math.hypot(s.to.x - s.from.x, s.to.y - s.from.y, s.to.z - s.from.z);
@@ -152,15 +245,24 @@ export function simulate(text, { top, cell = 0.4, tools = {}, box = null } = {})
           if (t < 0) t = 0; else if (t > 1) t = 1;
           const dx = px - ux * t, dy = py - uy * t, d2 = dx * dx + dy * dy;
           if (d2 > R2) continue;
-          const v = az + (bz - az) * t + hOf(d2);
           const idx = j * w + i;
-          if (v < z[idx]) z[idx] = v;
+          const zt = az + (bz - az) * t;
+          if (fills) {
+            // a tool that undercuts: every stretch of its side view at this distance
+            const list = fills(d2);
+            if (list) for (const [h0, h1] of list) carve(idx, zt + h0, zt + h1);
+            continue;
+          }
+          const v = zt + hOf(d2);
+          if (v < z[idx]) { z[idx] = v; if (voids.size) settle(idx); }
         }
       }
     }
   }
   for (let k = 0; k < z.length; k++) if (z[k] < 0) z[k] = 0; // the table
-  return { grid: { x0: b.x0, y0: b.y0, w, h, cell, z }, stats };
+  const grid = { x0: b.x0, y0: b.y0, w, h, cell, z };
+  if (voids.size) grid.voids = voids;
+  return { grid, stats };
 }
 
 // a column at or below this height was cut through to the table
@@ -170,6 +272,8 @@ const THROUGH_Z = 0.02;
 
 export function gridToStl(grid, stlCell = 0.8) {
   const f = Math.max(1, Math.ceil(stlCell / grid.cell - 1e-9));
+  // hollows under the surface: the part is built column by column (dexelMesh.js)
+  if (grid.voids && grid.voids.size) return trianglesToStl(dexelTriangles(grid, f));
   const W = Math.floor(grid.w / f), H = Math.floor(grid.h / f);
   const c = grid.cell * f;
   const hz = (i, j) => {

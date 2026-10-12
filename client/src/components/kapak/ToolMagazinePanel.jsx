@@ -193,7 +193,7 @@ export default function ToolMagazinePanel({ isAdmin = true }) {
                     <tr className="mag-custom-row">
                       <td colSpan={9}>
                         {t.profile
-                          ? <div className="mag-custom"><ToolGlyph tool={t} big /><span>{t.dxfName || 'çizim'} · Ø{t.dia} mm · {t.height} mm yükseklik<br />Simülasyon bıçağın alttan görünen hattıyla keser.</span></div>
+                          ? <div className="mag-custom"><ToolGlyph tool={t} big /><span>{t.dxfName || 'çizim'} · Ø{t.dia} mm · {t.height} mm yükseklik<br />Simülasyon bıçağın yan görünüşüyle keser: yukarıda daralan bıçak (kulp, T kanal) yüzeyin altında oyuk bırakır, üstteki malzeme durur.</span></div>
                           : <span className="hint-warn">Bu bıçağın yan görünüşünü AutoCAD'de çizip “DXF yükle” ile ekleyin.</span>}
                       </td>
                     </tr>

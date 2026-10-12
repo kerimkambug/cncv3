@@ -75,7 +75,8 @@ export function toolProblem(tool) {
 
 /** The tool's shape as the simulation's profile() expects it (numbers, only its own fields). */
 export function simShape(tool) {
-  if (tool.type === 'custom') return { type: 'custom', dia: Number(tool.dia), profile: tool.profile };
+  // the outline too: a tool narrower higher up cuts under the surface with its full side view
+  if (tool.type === 'custom') return { type: 'custom', dia: Number(tool.dia), profile: tool.profile, ...(tool.outline ? { outline: tool.outline } : {}) };
   const shape = { type: tool.type };
   for (const f of TOOL_TYPES[tool.type].fields) {
     const v = Number(tool[f]);

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { gridToStl } from '../lib/sim/millSim.js';
+import { dexelTriangles } from '../lib/sim/dexelMesh.js';
 import { toSimTools } from '../lib/sim/toolMagazine.js';
 import { useToolMagazine } from '../hooks/useToolMagazine.js';
 
@@ -118,6 +119,77 @@ function roughBox(text, top) {
 // a column at or below this height was cut through to the table
 const THROUGH_Z = 0.02;
 
+/** Smooth height-map surface, sides and bottom (parts without hollows under the surface). */
+function addHeightField(scene, grid) {
+  // surface mesh, at most ~800 points on the long side
+  const S = Math.max(1, Math.ceil(Math.max(grid.w, grid.h) / 800));
+  const W = Math.floor((grid.w - 1) / S) + 1, H = Math.floor((grid.h - 1) / S) + 1;
+  const pos = new Float32Array(W * H * 3);
+  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+    const k = (j * W + i) * 3;
+    pos[k] = grid.x0 + (i * S + 0.5) * grid.cell;
+    pos[k + 1] = grid.y0 + (j * S + 0.5) * grid.cell;
+    pos[k + 2] = grid.z[Math.min(grid.h - 1, j * S) * grid.w + Math.min(grid.w - 1, i * S)];
+  }
+  // cut through to the table (Z0): no surface there, the part is open
+  const through = (p) => pos[p * 3 + 2] <= THROUGH_Z;
+  const hole = (i, j) => { const a = j * W + i; return through(a) && through(a + 1) && through(a + W) && through(a + W + 1); };
+  const idx = new Uint32Array((W - 1) * (H - 1) * 6);
+  let o = 0;
+  for (let j = 0; j < H - 1; j++) for (let i = 0; i < W - 1; i++) {
+    if (hole(i, j)) continue;
+    const a = j * W + i, b = a + 1, c = a + W, d = c + 1;
+    idx[o++] = a; idx[o++] = b; idx[o++] = d; idx[o++] = a; idx[o++] = d; idx[o++] = c;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setIndex(new THREE.BufferAttribute(idx.subarray(0, o), 1));
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({ color: 0xe8dcc6, roughness: 0.85, metalness: 0 });
+  const mesh = new THREE.Mesh(geo, mat);
+  scene.add(mesh);
+
+  // closed block: the four sides from the surface edge down to the table, and the bottom
+  const ring = [];
+  for (let i = 0; i < W; i++) ring.push(i);
+  for (let j = 1; j < H; j++) ring.push(j * W + W - 1);
+  for (let i = W - 2; i >= 0; i--) ring.push((H - 1) * W + i);
+  for (let j = H - 2; j > 0; j--) ring.push(j * W);
+  const sides = [];
+  const v = (p, z) => [pos[p * 3], pos[p * 3 + 1], z ?? pos[p * 3 + 2]];
+  for (let r = 0; r < ring.length; r++) {
+    const a = ring[r], b = ring[(r + 1) % ring.length];
+    sides.push(...v(a), ...v(a, 0), ...v(b, 0), ...v(a), ...v(b, 0), ...v(b));
+  }
+  // the bottom, one strip per row of cells, leaving the through-cut holes open
+  for (let j = 0; j < H - 1; j++) {
+    for (let i = 0; i < W - 1;) {
+      if (hole(i, j)) { i++; continue; }
+      let k = i;
+      while (k < W - 1 && !hole(k, j)) k++;
+      const p0 = j * W + i, p1 = j * W + k, p2 = (j + 1) * W + k, p3 = (j + 1) * W + i;
+      sides.push(...v(p0, 0), ...v(p2, 0), ...v(p1, 0), ...v(p0, 0), ...v(p3, 0), ...v(p2, 0));
+      i = k;
+    }
+  }
+  const sideGeo = new THREE.BufferGeometry();
+  sideGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(sides), 3));
+  sideGeo.computeVertexNormals();
+  const sideMat = new THREE.MeshStandardMaterial({ color: 0xcdbb98, roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
+  scene.add(new THREE.Mesh(sideGeo, sideMat));
+  return [geo, mat, sideGeo, sideMat];
+}
+
+/** Parts with hollows under the surface (kulp, T-slot): built column by column, overhangs included. */
+function addDexels(scene, grid) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(dexelTriangles(grid, Math.max(1, Math.ceil(Math.max(grid.w, grid.h) / 600))), 3));
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({ color: 0xe8dcc6, roughness: 0.85, metalness: 0, side: THREE.DoubleSide });
+  scene.add(new THREE.Mesh(geo, mat));
+  return [geo, mat];
+}
+
 /** three.js view of the simulated stock. */
 function SimView({ grid, top }) {
   const host = useRef(null);
@@ -133,62 +205,7 @@ function SimView({ grid, top }) {
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x1d2027);
 
-    // surface mesh, at most ~800 points on the long side
-    const S = Math.max(1, Math.ceil(Math.max(grid.w, grid.h) / 800));
-    const W = Math.floor((grid.w - 1) / S) + 1, H = Math.floor((grid.h - 1) / S) + 1;
-    const pos = new Float32Array(W * H * 3);
-    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
-      const k = (j * W + i) * 3;
-      pos[k] = grid.x0 + (i * S + 0.5) * grid.cell;
-      pos[k + 1] = grid.y0 + (j * S + 0.5) * grid.cell;
-      pos[k + 2] = grid.z[Math.min(grid.h - 1, j * S) * grid.w + Math.min(grid.w - 1, i * S)];
-    }
-    // cut through to the table (Z0): no surface there, the part is open
-    const through = (p) => pos[p * 3 + 2] <= THROUGH_Z;
-    const hole = (i, j) => { const a = j * W + i; return through(a) && through(a + 1) && through(a + W) && through(a + W + 1); };
-    const idx = new Uint32Array((W - 1) * (H - 1) * 6);
-    let o = 0;
-    for (let j = 0; j < H - 1; j++) for (let i = 0; i < W - 1; i++) {
-      if (hole(i, j)) continue;
-      const a = j * W + i, b = a + 1, c = a + W, d = c + 1;
-      idx[o++] = a; idx[o++] = b; idx[o++] = d; idx[o++] = a; idx[o++] = d; idx[o++] = c;
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geo.setIndex(new THREE.BufferAttribute(idx.subarray(0, o), 1));
-    geo.computeVertexNormals();
-    const mat = new THREE.MeshStandardMaterial({ color: 0xe8dcc6, roughness: 0.85, metalness: 0 });
-    const mesh = new THREE.Mesh(geo, mat);
-    scene.add(mesh);
-
-    // closed block: the four sides from the surface edge down to the table, and the bottom
-    const ring = [];
-    for (let i = 0; i < W; i++) ring.push(i);
-    for (let j = 1; j < H; j++) ring.push(j * W + W - 1);
-    for (let i = W - 2; i >= 0; i--) ring.push((H - 1) * W + i);
-    for (let j = H - 2; j > 0; j--) ring.push(j * W);
-    const sides = [];
-    const v = (p, z) => [pos[p * 3], pos[p * 3 + 1], z ?? pos[p * 3 + 2]];
-    for (let r = 0; r < ring.length; r++) {
-      const a = ring[r], b = ring[(r + 1) % ring.length];
-      sides.push(...v(a), ...v(a, 0), ...v(b, 0), ...v(a), ...v(b, 0), ...v(b));
-    }
-    // the bottom, one strip per row of cells, leaving the through-cut holes open
-    for (let j = 0; j < H - 1; j++) {
-      for (let i = 0; i < W - 1;) {
-        if (hole(i, j)) { i++; continue; }
-        let k = i;
-        while (k < W - 1 && !hole(k, j)) k++;
-        const p0 = j * W + i, p1 = j * W + k, p2 = (j + 1) * W + k, p3 = (j + 1) * W + i;
-        sides.push(...v(p0, 0), ...v(p2, 0), ...v(p1, 0), ...v(p0, 0), ...v(p3, 0), ...v(p2, 0));
-        i = k;
-      }
-    }
-    const sideGeo = new THREE.BufferGeometry();
-    sideGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(sides), 3));
-    sideGeo.computeVertexNormals();
-    const sideMat = new THREE.MeshStandardMaterial({ color: 0xcdbb98, roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
-    scene.add(new THREE.Mesh(sideGeo, sideMat));
+    const owned = grid.voids && grid.voids.size ? addDexels(scene, grid) : addHeightField(scene, grid);
 
     // low, grazing light shows every ridge; a soft fill keeps the shadows readable
     scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8274, 0.55));
@@ -215,7 +232,7 @@ function SimView({ grid, top }) {
     window.addEventListener('resize', onResize);
     return () => {
       window.removeEventListener('resize', onResize);
-      controls.dispose(); geo.dispose(); mat.dispose(); sideGeo.dispose(); sideMat.dispose(); renderer.dispose();
+      controls.dispose(); owned.forEach((x) => x.dispose()); renderer.dispose();
       el.removeChild(renderer.domElement);
     };
   }, [grid, top]);
