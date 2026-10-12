@@ -992,13 +992,29 @@ details.collapsible[open] > summary{margin-bottom:10px}
 .mutfak-noimg.panjur{background:#c9bfae repeating-linear-gradient(180deg,#b3a893 0 3px,#d8cfbf 3px 9px,#c9bfae 9px 11px);box-shadow:inset 0 0 0 9px #c9bfae}
 
 /* Serbest Kesim */
-.serbest .serbest-layers{grid-column:1/-1}
+.serbest{display:flex;flex-direction:column;gap:16px}
+.serbest .card + .card{margin-top:0}
+.serbest-top{display:grid;grid-template-columns:minmax(260px,320px) minmax(0,1fr);gap:16px;align-items:start}
 .serbest-chips{display:flex;flex-wrap:wrap;gap:6px}
 .serbest-chips .tab{padding:6px 10px;font-size:12px}
-.serbest-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px}
-.serbest-layers .tool-table td small{color:var(--muted);font-size:10.5px}
-.serbest-layers .tool-table input[type=number]{width:78px}
+.serbest-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:10px}
+.serbest-toolbar button{width:auto;margin:0}
+.serbest-selinfo{font-size:12px;color:var(--muted);min-width:150px}
+.serbest-selinfo b{color:#ffd400}
+.serbest-layer-pick{width:auto;padding:5px 8px;font-size:12px}
+.serbest-paths{display:flex;align-items:center;gap:6px;margin:0 0 0 auto;font-size:12px}
+.serbest-paths input{width:auto}
+.serbest-canvas{height:clamp(360px,62vh,760px);background:#0f1217;border:1px solid var(--border);border-radius:9px;overflow:hidden;display:flex;align-items:center;justify-content:center;touch-action:none;user-select:none}
+.serbest-canvas svg{width:100%;height:100%;display:block}
+.serbest-form{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;align-items:end;margin-bottom:14px}
+.serbest-form label{margin-top:0}
+.serbest-form .serbest-tabs{grid-column:span 2}
+.serbest-form .serbest-add{grid-column:span 2;margin:0;width:100%}
+.serbest-dot{display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:-1px}
+.serbest-optable input[type=number]{width:74px}
+.serbest-optable td.name-cell input{min-width:110px}
 .serbest-tabs{white-space:nowrap}
-.serbest-tabs input[type=number]{width:52px!important;margin-right:3px}
-.serbest-legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;font-size:11.5px;color:var(--muted)}
-.serbest-legend i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:6px;vertical-align:3px}
+.serbest-tabs input[type=number]{width:52px!important;margin-right:3px;display:inline-block}
+.serbest-rowbtns{white-space:nowrap}
+.serbest-rowbtns button{width:auto;margin:0 2px}
+@media (max-width:900px){.serbest-top{grid-template-columns:1fr}}
