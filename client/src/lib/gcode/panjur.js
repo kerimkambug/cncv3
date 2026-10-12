@@ -67,12 +67,15 @@ export function panjurGroups(c) {
     if (length - deepPull <= 0) {
       throw new Error('Panjur boyu konik bıçağın derin uçtaki genişliğine yetmiyor.');
     }
+    // the first panjur's first row sits on the frame (or the flat) a hair under the
+    // top: its ball would cut that wide into it, so that row starts this much in
+    const shallow = deepEndShallowInset(c);
     let pos = start;
     for (let i = 0; i < count; i++) {
       const last = i === count - 1;
       // before another panjur the cone may cover the exit gap; before the frame / flat it may not
       const pull = last ? deepPull : Math.max(0, deepPull - gap);
-      groups.push({ start: pos, end: pos + length - pull, face: pos + length, side });
+      groups.push({ start: pos + (i === 0 ? shallow : 0), end: pos + length - pull, face: pos + length, side });
       pos += length + (last ? 0 : gap);
     }
   };
@@ -179,11 +182,11 @@ function validatePanjurConfig(c) {
 /**
  * En derin noktada konik bıçağın (T14) gerçek yarıçapını hesaplar.
  *
- * Konik geometri: uç çapı (tipDia) → gövde çapı (bodyDia), konik yükseklik
- * (height) boyunca doğrusal açılır. Eğim (tan açı):
+ * Konik geometri: uç çapı (tipDia) küre uç, gövde çapına (bodyDia) konik
+ * yükseklik (height) boyunca açılır. Eğim (tan açı):
  *   eğim = (gövdeYarıçap - uçYarıçap) / konikYükseklik
- * maxDerinlik kadar inince takımın efektif yarıçapı:
- *   r_eff = uçYarıçap + maxDerinlik × eğim  (gövdeYarıçapını geçmez)
+ * maxDerinlik kadar inince takımın efektif yarıçapı, küreye teğet koniden
+ * (coneRadius): gövde yarıçapını geçmez.
  *
  * @param {object} c - Panjur konfigürasyonu
  * @returns {{ tipR:number, bodyR:number, taperTan:number, maxDepth:number, rEff:number }}
@@ -194,8 +197,23 @@ export function t14EffectiveRadius(c) {
   const taperH = Number(c.t14Height) || 0;
   const taperTan = taperH > 0 ? (bodyR - tipR) / taperH : 0;
   const maxDepth = Math.max(0, (Number(c.startZ) || 0) - (Number(c.endZ) || 0));
-  const rEff = Math.min(bodyR, tipR + maxDepth * taperTan);
+  const rEff = coneRadius(tipR, bodyR, taperTan, maxDepth);
   return { tipR, bodyR, taperTan, maxDepth, rEff };
+}
+
+/**
+ * Radius of a tapered ball-nose bit `h` mm above its tip: the ball (radius tipR),
+ * then the cone tangent to it (flank slope taperTan per mm), up to the body.
+ * (Taking the tip as flat — tipR + h·taperTan — overstates it by ~0.1 mm with a
+ * Ø3 tip, enough to leave a hair-thin ridge between two panjurs.)
+ */
+function coneRadius(tipR, bodyR, taperTan, h) {
+  if (!(h > 0)) return 0;
+  const a = Math.atan(taperTan), ht = tipR * (1 - Math.sin(a));
+  const r = h <= ht
+    ? Math.sqrt(Math.max(0, tipR * tipR - (tipR - h) * (tipR - h)))
+    : tipR / Math.cos(a) - tipR * taperTan + h * taperTan;
+  return Math.min(bodyR, r);
 }
 
 /**
@@ -231,8 +249,7 @@ export function resolveEdgeInset(c) {
  */
 export function t14RadiusAtDepth(c, depth) {
   const { tipR, bodyR, taperTan } = t14EffectiveRadius(c);
-  const d = Math.max(0, Number(depth) || 0);
-  return Math.min(bodyR, tipR + d * taperTan);
+  return coneRadius(tipR, bodyR, taperTan, Math.max(0, Number(depth) || 0));
 }
 
 /**
@@ -262,7 +279,17 @@ export function resolveEdgeInsetAtDepth(c, depth) {
  * @returns {number} mm (>= 0)
  */
 export function deepEndPullback(c) {
-  return resolveEdgeInsetAtDepth(c, Math.max(0, (Number(c.startZ) || 0) - (Number(c.endZ) || 0)));
+  return resolveEdgeInsetAtDepth(c, Math.max(0, materialTop(c) - (Number(c.endZ) || 0)));
+}
+
+/** Half-width of the shallowest row's cut at the surface (the ball a hair under the top). */
+function deepEndShallowInset(c) {
+  return resolveEdgeInsetAtDepth(c, Math.max(0, materialTop(c) - (Number(c.startZ) || 0)));
+}
+
+/** The material's top (Z): the thickness when given, otherwise 18 (never under Start Z). */
+function materialTop(c) {
+  return Math.max(Number(c.thickness) || 18, Number(c.startZ) || 0);
 }
 
 /** How far past the frame line the 4 mm bit goes at both ends of an opening (mm): `t4Extend`, default 0. */
@@ -312,13 +339,16 @@ function emitRasterPass(axis, lines, n, c, crossStart, crossEnd, safeStart, step
   for (let i = 0; i < passes; i++) {
     const t = i / (passes - 1);
     const z = c.startZ + (c.endZ - c.startZ) * t;
-    const depth = Math.max(0, c.startZ - z);
+    // how far up the bit cuts here: from its tip to the material's top (not Start Z, which may sit a hair under it)
+    const depth = Math.max(0, materialTop(c) - z);
     const inset = insetAt(depth);
     const innerStart = crossStart + inset;
     const innerEnd = crossEnd - inset;
+    const lo = innerEnd > innerStart ? innerStart : crossStart, hi = innerEnd > innerStart ? innerEnd : crossEnd;
     bounds.push({
-      cross: innerEnd > innerStart ? (i % 2 === 0 ? innerEnd : innerStart) : (i % 2 === 0 ? crossEnd : crossStart),
-      entryCross: innerEnd > innerStart ? innerStart : crossStart,
+      cross: i % 2 === 0 ? hi : lo, // where the row ends
+      start: i % 2 === 0 ? lo : hi, // where it starts (the side the previous row ended on)
+      entryCross: lo,
     });
   }
 
@@ -333,7 +363,10 @@ function emitRasterPass(axis, lines, n, c, crossStart, crossEnd, safeStart, step
     if (i < passes - 1) {
       const nextAlong = safeStart + (i + 1) * step;
       const zn = c.startZ + (c.endZ - c.startZ) * ((i + 1) / (passes - 1));
-      lines.push(`N${n++} G1 ${stepAxis}${fmt(nextAlong)}`);
+      // step over and, before going deeper, in to the next row's own edge: the bit is
+      // wider down there, going down on this row's edge would cut past the frame
+      const inward = Math.abs(bounds[i + 1].start - cross) > 1e-6;
+      lines.push(`N${n++} G1 ${stepAxis}${fmt(nextAlong)}${inward ? ` ${crossAxis}${fmt(bounds[i + 1].start)}` : ''}`);
       lines.push(`N${n++} G1 Z${fmt(zn)}`);
     }
   }

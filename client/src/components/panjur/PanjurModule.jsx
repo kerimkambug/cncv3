@@ -34,9 +34,9 @@ export default function PanjurModule({ onBackToMenu }) {
   const [drillTool, setDrillTool] = useState('4');
   const [exitToolDia, setExitToolDia] = useState(4);
   const [drillSpindle, setDrillSpindle] = useState(12000);
-  const [t14TipDia, setT14TipDia] = useState(2);
-  const [t14BodyDia, setT14BodyDia] = useState(12);
-  const [t14Height, setT14Height] = useState(65);
+  const [t14TipDia, setT14TipDia] = useState(3);
+  const [t14BodyDia, setT14BodyDia] = useState(8);
+  const [t14Height, setT14Height] = useState(30);
 
   const [safeZ, setSafeZ] = useState(30);
   const [toolChangeZ, setToolChangeZ] = useState(30);

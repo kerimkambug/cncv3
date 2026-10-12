@@ -252,9 +252,9 @@
       "id": "b14",
       "name": "konik (panjur)",
       "type": "taper",
-      "dia": 12,
-      "tipDia": 2,
-      "angle": 8.8
+      "dia": 8,
+      "tipDia": 3,
+      "angle": 9.53
     },
     {
       "id": "bkulp50",

@@ -30,7 +30,8 @@ export const TOOL_TABLE = {
   11: { type: 'flat', dia: 10, name: 'T11 kulp' },
   12: { type: 'v', dia: 80, angle: 135, name: 'T12 135° V' },
   13: { type: 'ball', dia: 6, name: 'T13 rölyef' },
-  14: { type: 'taper', dia: 12, tipDia: 2, angle: 8.8, name: 'T14 konik (panjur)' },
+  // panjur relief bit: Ø3 ball tip, Ø8 at the top of a 30 mm cone (included angle 2·atan(2.5/30))
+  14: { type: 'taper', dia: 8, tipDia: 3, angle: 9.53, name: 'T14 konik (panjur)' },
 };
 
 /** Height of the tool's lower surface above its tip, at distance d from its axis (Infinity outside it). */
