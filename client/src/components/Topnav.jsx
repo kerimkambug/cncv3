@@ -26,12 +26,17 @@ export const TOOL_SCREENS = [
  */
 export default function Topnav({ screen, onNavigate, theme, setTheme, me = null }) {
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState(null);
   const toolsRef = useRef(null);
+  const menuRef = useRef(null);
   useEffect(() => {
     if (!toolsOpen) return undefined;
-    const close = (e) => { if (!toolsRef.current?.contains(e.target)) setToolsOpen(false); };
+    const close = (e) => { if (!toolsRef.current?.contains(e.target) && !menuRef.current?.contains(e.target)) setToolsOpen(false); };
+    const shut = () => setToolsOpen(false);
     window.addEventListener('mousedown', close);
-    return () => window.removeEventListener('mousedown', close);
+    window.addEventListener('resize', shut);
+    window.addEventListener('scroll', shut, true);
+    return () => { window.removeEventListener('mousedown', close); window.removeEventListener('resize', shut); window.removeEventListener('scroll', shut, true); };
   }, [toolsOpen]);
   const go = (key) => { setToolsOpen(false); onNavigate(key); };
   const activeTool = TOOL_SCREENS.find((t) => t.key === screen);
@@ -52,12 +57,17 @@ export default function Topnav({ screen, onNavigate, theme, setTheme, me = null 
             type="button"
             className={`nav-btn${activeTool ? ' active' : ''}`}
             aria-expanded={toolsOpen}
-            onClick={() => setToolsOpen((o) => !o)}
+            onClick={(e) => {
+              // the menu is drawn fixed under the button: the scrolling nav bar would clip it
+              const r = e.currentTarget.getBoundingClientRect();
+              setMenuPos({ top: r.bottom + 6, left: Math.min(r.left, window.innerWidth - 200) });
+              setToolsOpen((o) => !o);
+            }}
           >
             {activeTool ? activeTool.label : 'Araçlar'} ▾
           </button>
           {toolsOpen && (
-            <div className="nav-menu" role="menu">
+            <div className="nav-menu" role="menu" ref={menuRef} style={menuPos ? { position: 'fixed', top: menuPos.top, left: menuPos.left } : undefined}>
               {TOOL_SCREENS.map((t) => (
                 <button key={t.key} type="button" role="menuitem" className={screen === t.key ? 'active' : ''} onClick={() => go(t.key)}>
                   {t.label}
