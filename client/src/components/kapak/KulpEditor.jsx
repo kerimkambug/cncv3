@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { KULP_EDGES } from '../../lib/gcode/kulp.js';
 
 /**
@@ -44,6 +45,44 @@ export default function KulpEditor({ door, kulps, onChange }) {
         </div>
       ))}
       <button type="button" className="link-btn kulp-add" onClick={add}>+ Kulp ekle</button>
+    </div>
+  );
+}
+
+/**
+ * One kulp for every part at once (Nesting, Toplu Liste): the same edge, the
+ * whole length — or a window of one length in the middle of each part's edge.
+ * Applying replaces the parts' own kulps; each part can still be changed after.
+ * @param {{onApply:(kulpsOf:(part:{width:number|string,height:number|string})=>object[])=>void}} props
+ */
+export function BulkKulp({ onApply }) {
+  const [edge, setEdge] = useState('right');
+  const [mode, setMode] = useState('full');
+  const [length, setLength] = useState(200);
+  const kulpsOf = (p) => {
+    if (mode === 'full') return [{ edge, mode: 'full' }];
+    const L = edge === 'left' || edge === 'right' ? Number(p.height) || 0 : Number(p.width) || 0;
+    const w = Math.min(Number(length) || 0, L);
+    return [{ edge, mode: 'window', from: +((L - w) / 2).toFixed(1), to: +((L + w) / 2).toFixed(1) }];
+  };
+  return (
+    <div className="kulp-row kulp-bulk">
+      <span className="kulp-tag">Hepsine kulp</span>
+      <select value={edge} onChange={(e) => setEdge(e.target.value)}>
+        {Object.entries(KULP_EDGES).map(([v, label]) => <option key={v} value={v}>{label} kenar</option>)}
+      </select>
+      <select value={mode} onChange={(e) => setMode(e.target.value)}>
+        <option value="full">Boydan boya</option>
+        <option value="window">Ortada, uzunluk</option>
+      </select>
+      {mode === 'window' && (
+        <>
+          <input type="number" step="1" min="1" value={length} onChange={(e) => setLength(e.target.value)} title="Kulp uzunluğu (mm), kenarın ortasında" />
+          <span className="kulp-unit">mm</span>
+        </>
+      )}
+      <button type="button" className="btn-secondary" onClick={() => onApply(kulpsOf)}>Hepsine uygula</button>
+      <button type="button" className="link-btn" onClick={() => onApply(() => [])}>Hepsinden kaldır</button>
     </div>
   );
 }

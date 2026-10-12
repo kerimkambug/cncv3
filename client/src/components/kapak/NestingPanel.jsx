@@ -16,7 +16,7 @@ import { validateCarvingWarnings } from '../../lib/gcode/kapak.js';
 import { useCtrlEnter } from '../../hooks/useCtrlEnter.js';
 import { usePresets } from '../../hooks/usePresets.js';
 import { useKulpSettings } from '../../hooks/useKulpSettings.js';
-import KulpEditor from './KulpEditor.jsx';
+import KulpEditor, { BulkKulp } from './KulpEditor.jsx';
 import { sortPresets } from '../../hooks/useKapakWorkspace.js';
 
 function getPresetId(p) { return p._id || p.id; }
@@ -613,6 +613,7 @@ export default function NestingPanel({ cfg, plateCfg, defaultModelName }) {
 
           <div className="card-lite">
             <h3>Parçalar</h3>
+            <BulkKulp onApply={(kulpsOf) => setParts(parts.map((x) => ({ ...x, kulps: kulpsOf(x) })))} />
             <table className="parts-table">
               <thead>
                 <tr>

@@ -1040,3 +1040,5 @@ details.collapsible[open] > summary{margin-bottom:10px}
 .kulp-tag{font-size:11px;padding:2px 8px;border-radius:9px;border:1px solid var(--accent);color:var(--accent)}
 .kulp-unit{color:var(--muted);font-size:12px}
 .kulp-add{font-size:12px}
+.kulp-bulk{margin:4px 0 10px}
+.kulp-bulk .btn-secondary{width:auto;margin:0;padding:5px 12px;font-size:13px}
