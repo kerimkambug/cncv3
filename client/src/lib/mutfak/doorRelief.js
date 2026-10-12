@@ -4,7 +4,7 @@
 //   normal — the slopes of every groove, profile and pocket (lighting)
 //   shade  — darker where the cut is deeper (ambient occlusion)
 import { buildKapakGcode } from '../gcode/kapak.js';
-import { generatePanjurGcode } from '../gcode/panjur.js';
+import { generatePanjurGcode, panjurSimTools } from '../gcode/panjur.js';
 import { simulate } from '../sim/millSim.js';
 import { buildKulpLines } from '../gcode/kulp.js';
 
@@ -29,7 +29,11 @@ export function doorRelief(preset, w, h, tools = {}, kulp = null) {
   const top = Number(preset.thickness) || 18;
   let gcode;
   try {
-    gcode = preset.panjur ? generatePanjurGcode({ ...PANJUR, ...preset.panjur, width: w, height: h }).gcode : buildKapakGcode(w, h, preset);
+    if (preset.panjur) {
+      const pc = { ...PANJUR, ...preset.panjur, width: w, height: h };
+      gcode = generatePanjurGcode(pc).gcode;
+      tools = { ...tools, ...panjurSimTools(pc) }; // the panjur's own relief bit
+    } else gcode = buildKapakGcode(w, h, preset);
   } catch { return null; }
   // the hidden kulp, cut as on a single door (the kulp bit goes down beside it)
   if (kulp && kulp.edge) {

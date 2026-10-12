@@ -282,6 +282,22 @@ export function deepEndPullback(c) {
   return resolveEdgeInsetAtDepth(c, Math.max(0, materialTop(c) - (Number(c.endZ) || 0)));
 }
 
+/**
+ * The simulation's tools for a panjur program: the relief bit exactly as set on
+ * the Panjur screen (a straight ball nose when the tip and the body are the same
+ * width, a tapered one otherwise) and the 4 mm bit — so "Simüle et" cuts with the
+ * bit the program was computed for, not the magazine's default.
+ */
+export function panjurSimTools(c) {
+  const tip = Number(c.t14TipDia) || 0, body = Number(c.t14BodyDia) || 0, h = Number(c.t14Height) || 0;
+  const relief = body > tip + 1e-6 && h > 0
+    ? { type: 'taper', dia: body, tipDia: tip, angle: (2 * Math.atan((body - tip) / 2 / h) * 180) / Math.PI }
+    : { type: 'ball', dia: Math.max(tip, body) };
+  const tools = { [Number(c.toolNo) || 14]: { ...relief, name: `T${c.toolNo || 14} panjur bıçağı` } };
+  if (c.groundEntry) tools[Number(c.drillTool) || 4] = { type: 'flat', dia: Number(c.exitToolDia) || 4, name: `T${c.drillTool || 4} Ø${Number(c.exitToolDia) || 4}` };
+  return tools;
+}
+
 /** Half-width of the shallowest row's cut at the surface (the ball a hair under the top). */
 function deepEndShallowInset(c) {
   return resolveEdgeInsetAtDepth(c, Math.max(0, materialTop(c) - (Number(c.startZ) || 0)));

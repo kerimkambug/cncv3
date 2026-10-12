@@ -1,6 +1,6 @@
 import SimPanel from '../SimPanel.jsx';
 import { useState, useEffect, useMemo } from 'react';
-import { generatePanjurGcode, panjurGroups } from '../../lib/gcode/panjur.js';
+import { generatePanjurGcode, panjurGroups, panjurSimTools } from '../../lib/gcode/panjur.js';
 import { useCtrlEnter } from '../../hooks/useCtrlEnter.js';
 
 export default function PanjurModule({ onBackToMenu }) {
@@ -544,6 +544,7 @@ function downloadFile() {
           <SimPanel
             gcode={output}
             top={currentConfig.thickness ?? 18}
+            tools={panjurSimTools(currentConfig)}
             size={covers.length > 1
               ? { w: covers.reduce((s, cv) => s + (cv.width || 0), 0) + coverGap * (covers.length - 1), h: Math.max(...covers.map((cv) => cv.height || 0)) }
               : { w: currentConfig.width, h: currentConfig.height }}
