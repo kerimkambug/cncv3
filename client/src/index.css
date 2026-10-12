@@ -779,7 +779,7 @@ body{padding:0;display:block}
 .model-card-check{position:absolute;top:8px;right:8px;width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700}
 
 .size-rows{display:flex;flex-direction:column;gap:8px}
-.size-row{display:flex;align-items:flex-end;gap:10px}
+.size-row{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap}
 .size-row label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);flex:1 1 0}
 .size-row input{font-size:20px;font-weight:700;padding:10px 12px}
 .size-x{font-size:20px;color:var(--muted);padding-bottom:12px}
@@ -1031,3 +1031,12 @@ details.collapsible[open] > summary{margin-bottom:10px}
 .scope-bar .btn-secondary { margin: 0; width: auto; }
 .preset-scope { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 9px; border: 1px solid var(--border); color: var(--muted); }
 .preset-scope.own, .preset-scope.changed { border-color: var(--accent); color: var(--accent); }
+
+/* kulp of a door (Tek Ölçü): under its size */
+.kulp-editor{flex:1 0 100%;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.kulp-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px}
+.kulp-row select,.kulp-row input{width:auto;font-size:13px;padding:5px 8px;font-weight:500}
+.kulp-row input{width:80px}
+.kulp-tag{font-size:11px;padding:2px 8px;border-radius:9px;border:1px solid var(--accent);color:var(--accent)}
+.kulp-unit{color:var(--muted);font-size:12px}
+.kulp-add{font-size:12px}

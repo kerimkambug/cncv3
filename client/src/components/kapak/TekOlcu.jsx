@@ -6,6 +6,10 @@ import { buildKapakGcode, validateKapakSize, validateCarvingWarnings, planNarrow
 import { useCtrlEnter } from '../../hooks/useCtrlEnter.js';
 import { usePersistentState } from '../../hooks/usePersistentState.js';
 import ModelGallery from './ModelGallery.jsx';
+import KulpEditor from './KulpEditor.jsx';
+import { buildKulpLines, kulpProblem, KULP_EDGES } from '../../lib/gcode/kulp.js';
+import { useToolMagazine } from '../../hooks/useToolMagazine.js';
+import { toSimTools } from '../../lib/sim/toolMagazine.js';
 import PartPreview from './PartPreview.jsx';
 
 /**
@@ -21,6 +25,15 @@ export default function TekOlcu({ workspace, presets, presetsLoading }) {
   const plateW = plateCfg?.width || 2100;
   const plateH = plateCfg?.height || 2800;
 
+  const [magazine] = useToolMagazine();
+  // the kulp settings, with the bit's diameter from the magazine when it knows it
+  const kulpSet = useMemo(() => {
+    const k = { ...(cfg.kulp || {}) };
+    const bit = toSimTools(magazine)[Number(k.toolNo || 11)];
+    if (bit && !bit.empty && bit.dia > 0) k.dia = bit.dia;
+    return k;
+  }, [cfg.kulp, magazine]);
+  const setKulps = (id, kulps) => setMeasurements(measurements.map((m) => (m.id === id ? { ...m, kulps } : m)));
   const update = (id, field, value) => setMeasurements(measurements.map((m) => (m.id === id ? { ...m, [field]: value === '' ? '' : parseFloat(value) } : m)));
   const remove = (id) => measurements.length > 1 && setMeasurements(measurements.filter((m) => m.id !== id));
   const add = () => setMeasurements([...measurements, { id: Math.max(...measurements.map((m) => m.id)) + 1, width: 500, height: 500 }]);
@@ -54,15 +67,30 @@ export default function TekOlcu({ workspace, presets, presetsLoading }) {
         if (plan.dropped) parts.push('sığmayan iç çerçeve atılıp içi tarandı');
         notes.push(`${m.width}×${m.height} dar kapak: ${parts.join(', ')}.`);
       }
-      doors.push({ x, y: 0, w: m.width, h: m.height });
+      doors.push({ x, y: 0, w: m.width, h: m.height, kulps: m.kulps || [] });
       x += m.width;
+    }
+    // kulp: after the door's own work, one tool change for all doors
+    for (let i = 0; i < doors.length; i++) {
+      for (const k of doors[i].kulps) {
+        const why = kulpProblem(doors[i], k, kulpSet);
+        if (why) return { error: `${doors[i].w}×${doors[i].h}: ${why}` };
+        const shared = (k.edge === 'right' && i < doors.length - 1) || (k.edge === 'left' && i > 0);
+        if (shared) return { error: `${doors[i].w}×${doors[i].h}: ${KULP_EDGES[k.edge].toLowerCase()} kenar yanındaki kapağa bitişik; kulp bıçağı oraya inemez.` };
+      }
+    }
+    const kulpLines = buildKulpLines(doors, kulpSet, cfg.safeZ);
+    if (kulpLines.length) {
+      lines.push(...kulpLines);
+      const kt = String(kulpSet.toolNo || 11);
+      if ((cfg.rows || []).some((r) => String(r.toolNo) === kt)) notes.push(`Model de T${kt} kullanıyor; kulp da T${kt} ile açılacak. Kulp bıçağı farklıysa Atölye → Makine → Kulp'tan numarasını değiştirin.`);
     }
     const hz = Number(cfg.homeZ || 0).toFixed(2);
     lines.push(`G0 X0.00 Y0.00 Z${hz}`, `G0Z${hz}`, 'X0.00Y0.00', 'M5', 'M16', 'M30');
     validateCarvingWarnings(cfg.rows).forEach((w) => notes.push(w));
     // side-by-side doors: each tool once for all of them
     return { gcode: guardZ(mergeToolBlocks(lines.join('\n'))), doors, notes };
-  }, [measurements, cfg, canGenerate, plateW, plateH]);
+  }, [measurements, cfg, canGenerate, plateW, plateH, kulpSet]);
 
   const modelName = workspace.modelName(presets);
   const fileName = () => {
@@ -113,6 +141,7 @@ export default function TekOlcu({ workspace, presets, presetsLoading }) {
               {measurements.length > 1 && (
                 <button type="button" className="icon-btn" title="Bu kapağı kaldır" onClick={() => remove(m.id)}>✕</button>
               )}
+              <KulpEditor door={{ w: Number(m.width) || 0, h: Number(m.height) || 0 }} kulps={m.kulps || []} onChange={(k) => setKulps(m.id, k)} />
             </div>
           ))}
         </div>

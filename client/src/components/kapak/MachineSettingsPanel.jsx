@@ -2,11 +2,12 @@ import { useState } from 'react';
 import { DEFAULT_MACHINE_CONFIG, DEFAULT_PLATE_CONFIG } from '../../lib/gcode/common.js';
 import { handleAuthError } from '../../hooks/useAuth.js';
 import { ScopeBar } from './ToolMagazinePanel.jsx';
+import { KULP_DEFAULTS } from '../../lib/gcode/kulp.js';
 
 // The values this panel sets (a chosen model may bring its own over them)
 const MACHINE_FIELDS = [
   'thickness', 'spindleSpeed', 'safeZ', 'toolChangeZ', 'homeZ', 'plungeFeed', 'cutFeed',
-  'offsetMode', 'topStyle', 'riseRatio', 'narrowAdapt', 'narrowMinPanel', 'narrowMinFirst',
+  'offsetMode', 'topStyle', 'riseRatio', 'narrowAdapt', 'narrowMinPanel', 'narrowMinFirst', 'kulp',
 ];
 const pick = (o) => Object.fromEntries(MACHINE_FIELDS.filter((f) => o[f] !== undefined).map((f) => [f, o[f]]));
 
@@ -205,6 +206,50 @@ export default function MachineSettingsPanel({ cfg, setCfg, plateCfg, setPlateCf
         Dar kenarda orta panel bu değerin altında kalırsa çerçeveler kenara doğru kaydırılır; aralarındaki mesafeler korunur.
         Sığmayan çerçeveler çıkarılır ve kalan alanın içi taranır.
       </div>
+
+      <KulpSettings cfg={cfg} setCfg={setCfg} />
     </div>
+  );
+}
+
+/** Kulp (gizli kulp) cutting settings; where a door gets a kulp is chosen per door. */
+function KulpSettings({ cfg, setCfg }) {
+  const k = { ...KULP_DEFAULTS, ...(cfg.kulp || {}) };
+  const set = (field, value) => setCfg({ ...cfg, kulp: { ...k, [field]: value } });
+  const num = (field, label, step = 1) => (
+    <div>
+      <label>{label}</label>
+      <input type="number" step={step} value={k[field]} onChange={(e) => set(field, e.target.value)} />
+    </div>
+  );
+  return (
+    <>
+      <h3 style={{ marginTop: 20, marginBottom: 8 }}>Kulp</h3>
+      <div className="row3">
+        <div>
+          <label>Kulp bıçağı (T)</label>
+          <input type="text" value={k.toolNo} onChange={(e) => set('toolNo', e.target.value)} />
+        </div>
+        {num('spindle', 'Devir S', 100)}
+        {num('z', 'Bıçak ucu yüksekliği Z (mm)', 0.1)}
+      </div>
+      <div className="row3">
+        <div>
+          <label title="Her paso için bıçak merkezinin kapak kenarına uzaklığı: + kapağın içine, − dışına. Örn. “-1, 7”: önce kenarın 1 mm dışından, sonra 7 mm içinden.">Pasolar (mm, + içeri)</label>
+          <input type="text" value={k.passes} onChange={(e) => set('passes', e.target.value)} />
+        </div>
+        {num('approach', 'Dışarıda iniş mesafesi (mm)')}
+        {num('dia', 'Bıçak çapı (mm)', 0.5)}
+      </div>
+      <div className="row2">
+        {num('plungeFeed', 'İniş feed', 50)}
+        {num('cutFeed', 'Kesim feed', 50)}
+      </div>
+      <div className="hint">
+        Kulp bıçağı malzemeye dalamaz: kapağın dışında, boşlukta bu Z'ye iner, kenara yandan girer, pasolarla derinleşir,
+        dışarı çıkıp kalkar. Bıçak çapı Atölye → Bıçaklar'da bu yuvadaki bıçaktan alınır; orada yoksa buradaki değer kullanılır.
+        Kulpun hangi kapağın hangi kenarında olacağı kapak ölçüsünü girdiğiniz yerde seçilir.
+      </div>
+    </>
   );
 }
