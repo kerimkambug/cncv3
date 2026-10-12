@@ -314,15 +314,27 @@ function t4ExtendOf(c) {
   return Number.isFinite(v) ? Math.max(0, Math.min(v, Number(c.exitToolDia) || 4)) : 0;
 }
 
-/** T4 step-down depth (mm): `t4Step`, default 6. */
+/** T4 peck (mm) when going down to a level: `t4Peck`, default 2. */
+function t4PeckOf(c) {
+  const v = Number(c.t4Peck);
+  return Number.isFinite(v) && v > 0 ? v : 2;
+}
+
+/** T4's own plunge feed: `t4Plunge`, default 800 (not the relief bit's). */
+function t4PlungeOf(c) {
+  const v = Number(c.t4Plunge);
+  return Number.isFinite(v) && v > 0 ? v : 800;
+}
+
+/** T4 step-down depth (mm): `t4Step`, default 4. */
 function t4StepOf(c) {
-  const v = c.t4Step === undefined || c.t4Step === null || c.t4Step === '' ? 6 : Number(c.t4Step);
+  const v = c.t4Step === undefined || c.t4Step === null || c.t4Step === '' ? 4 : Number(c.t4Step);
   return Number.isFinite(v) ? v : 0;
 }
 
 /**
  * The T4 ground-entry levels, top down: the material thickness split into equal
- * passes no deeper than `t4Step` (18 mm, 6 → [12, 6, 0]). The last one is Z0.
+ * passes no deeper than `t4Step` (18 mm, 4 → [14.4, 10.8, 7.2, 3.6, 0]). The last one is Z0.
  * @param {object} c
  * @returns {number[]}
  */
@@ -504,7 +516,7 @@ export function generatePanjurGcode(c, offsetX = 0, offsetY = 0, isCombined = fa
       // 3 mm eski + 1 mm yeni panjur), yan yana seri üretimde kapağın kaydırmasıyla birlikte
       const end = (grp.face ?? grp.end) + (c.direction === 'y' ? offsetY : offsetX);
       // T4 kanal temizliği: kalın malzemede düşük ilerleme
-      const t4Feed = c.t4Feed || 5000;
+      const t4Feed = c.t4Feed || 2000;
 
       const a = end + newSideOverlap - toolRT4; // kanal ekseni (panjur boyunca)
 
@@ -523,8 +535,22 @@ export function generatePanjurGcode(c, offsetX = 0, offsetY = 0, isCombined = fa
       lines.push(c.direction === 'y'
         ? `N${n++} G0 X${fmt(from)} Y${fmt(a)} Z${fmt(c.safeZ)}`
         : `N${n++} G0 X${fmt(a)} Y${fmt(from)} Z${fmt(c.safeZ)}`);
+      // Down to each level by pecking: `t4Peck` mm at a time at the T4's own plunge
+      // feed, up over the material after each peck to clear the chips, back in just
+      // above where it was. A thin 4 mm bit must not be pushed straight into solid wood.
+      const top = materialTop(c), peck = t4PeckOf(c), plungeF = t4PlungeOf(c);
+      let depthNow = top;
+      lines.push(`N${n++} G0 Z${fmt(top + 2)}`); // quickly down to just over the material
       levels.forEach((z, k) => {
-        lines.push(`N${n++} G1 Z${fmt(z)} F${c.plunge}`);
+        while (depthNow > z + 1e-6) {
+          const next = Math.max(z, depthNow - peck);
+          lines.push(`N${n++} G1 Z${fmt(next)} F${plungeF}`);
+          if (next > z + 1e-6) {
+            lines.push(`N${n++} G0 Z${fmt(top + 2)}`);
+            lines.push(`N${n++} G0 Z${fmt(next + 0.5)}`);
+          }
+          depthNow = next;
+        }
         lines.push(`N${n++} G1 ${across}${fmt(k % 2 === 0 ? to : from)} F${t4Feed}`);
       });
       lines.push(`N${n++} G0 Z${fmt(c.safeZ)}`);

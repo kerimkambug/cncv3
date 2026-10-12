@@ -24,9 +24,11 @@ export default function PanjurModule({ onBackToMenu }) {
   const [feed, setFeed] = useState(20000);
   const [groundEntry, setGroundEntry] = useState(false);
   const [exitCut, setExitCut] = useState(4);
-  const [t4Step, setT4Step] = useState(6); // T4 paso derinliği: 18 mm → Z12, Z6, Z0
+  const [t4Step, setT4Step] = useState(4); // T4 paso derinliği: 18 mm → 5 paso
+  const [t4Peck, setT4Peck] = useState(2); // her pasoya inerken gagalama: bu kadar iner, talaşı atmak için çıkar, tekrar girer
+  const [t4Plunge, setT4Plunge] = useState(800); // T4'ün kendi dalış hızı
   const [t4Extend, setT4Extend] = useState(0); // T4 açıklığın iki ucunda çerçeveye doğru bu kadar ileri gider
-  const [t4Feed, setT4Feed] = useState(5000); // T4 kesim hızı (rölyef feed'i T14 için)
+  const [t4Feed, setT4Feed] = useState(2000); // T4 kesim hızı (Ø4 bıçak: yavaş)
 
   const [toolNo, setToolNo] = useState('14');
   const [spindle, setSpindle] = useState(12000);
@@ -93,7 +95,9 @@ export default function PanjurModule({ onBackToMenu }) {
       exitCut: parseFloat(exitCut) || 0,
       t4Step: parseFloat(t4Step) || 0,
       t4Extend: Math.max(0, parseFloat(t4Extend) || 0),
-      t4Feed: parseFloat(t4Feed) || 5000,
+      t4Feed: parseFloat(t4Feed) || 2000,
+      t4Peck: parseFloat(t4Peck) || 2,
+      t4Plunge: parseFloat(t4Plunge) || 800,
       drillTool,
       drillSpindle: parseFloat(drillSpindle) || 0,
       exitToolDia: parseFloat(exitToolDia) || 0,
@@ -104,7 +108,7 @@ export default function PanjurModule({ onBackToMenu }) {
   }, [
     width, height, offsetMode, direction, offset, offsetLeft, offsetRight, offsetBottom, offsetTop, centerFlat,
     pitch, exitGap, stepover, edgeInset, startZ, endZ, feed, plunge, toolNo, spindle, groundEntry, exitCut,
-    drillTool, drillSpindle, exitToolDia, t14TipDia, t14BodyDia, t14Height, safeZ, toolChangeZ, homeZ, t4Step, t4Extend, t4Feed
+    drillTool, drillSpindle, exitToolDia, t14TipDia, t14BodyDia, t14Height, safeZ, toolChangeZ, homeZ, t4Step, t4Extend, t4Feed, t4Peck, t4Plunge
   ]);
 
   const summaryText = useMemo(() => {
@@ -434,7 +438,7 @@ function downloadFile() {
               <input type="number" value={exitCut} min="0.1" step="0.1" onChange={(e) => setExitCut(parseFloat(e.target.value) || 0)} />
             </div>
             <div>
-              <label title="T4 tek seferde dalmaz: kalınlık bu derinliği geçmeyen eşit pasolara bölünür (18 mm, 6 → Z12, Z6, Z0).">T4 paso derinliği (mm)</label>
+              <label title="T4 tek seferde dalmaz: kalınlık bu derinliği geçmeyen eşit pasolara bölünür (18 mm, 4 → 5 paso).">T4 paso derinliği (mm)</label>
               <input type="number" value={t4Step} min="0.5" step="0.5" onChange={(e) => setT4Step(e.target.value)} />
             </div>
             <div>
@@ -443,7 +447,15 @@ function downloadFile() {
             </div>
             <div>
               <label>T4 Kesim Hızı</label>
-              <input type="number" value={t4Feed} min="100" step="100" onChange={(e) => setT4Feed(parseFloat(e.target.value) || 5000)} />
+              <input type="number" value={t4Feed} min="100" step="100" onChange={(e) => setT4Feed(parseFloat(e.target.value) || 2000)} />
+            </div>
+            <div>
+              <label title="Her pasoya inerken T4 bu kadar iner, talaşı atmak için malzemenin üstüne çıkar, tekrar girer.">T4 gagalama (mm)</label>
+              <input type="number" value={t4Peck} min="0.5" step="0.5" onChange={(e) => setT4Peck(e.target.value)} />
+            </div>
+            <div>
+              <label title="T4'ün kendi dalış hızı (panjur bıçağının dalışından ayrı).">T4 dalış F</label>
+              <input type="number" value={t4Plunge} min="100" step="100" onChange={(e) => setT4Plunge(e.target.value)} />
             </div>
           </div>
         )}
