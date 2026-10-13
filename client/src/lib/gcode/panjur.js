@@ -143,7 +143,7 @@ function validatePanjurConfig(c) {
   if (c.stepover <= 0) {
     throw new Error('Raster adımı 0’dan büyük olmalı.');
   }
-  if (c.edgeInset !== undefined && c.edgeInset !== 'auto' && !(c.edgeInset === null || c.edgeInset === '')) {
+  if (c.edgeInset !== undefined && c.edgeInset !== 'auto' && c.edgeInset !== 'duz' && !(c.edgeInset === null || c.edgeInset === '')) {
     if (!Number.isFinite(Number(c.edgeInset)) || Number(c.edgeInset) < 0) {
       throw new Error('Kenar içeri çekme negatif olamaz (sayı veya "auto").');
     }
@@ -226,6 +226,7 @@ function coneRadius(tipR, bodyR, taperTan, h) {
  */
 export function resolveEdgeInset(c) {
   const raw = c.edgeInset;
+  if (raw === 'duz') return straightEdgeInset(c);
   if (raw === 'auto' || raw === undefined || raw === null || raw === '') {
     return t14EffectiveRadius(c).rEff;
   }
@@ -262,11 +263,26 @@ export function t14RadiusAtDepth(c, depth) {
  */
 export function resolveEdgeInsetAtDepth(c, depth) {
   const raw = c.edgeInset;
+  if (raw === 'duz') return straightEdgeInset(c);
   if (raw === 'auto' || raw === undefined || raw === null || raw === '') {
     return t14RadiusAtDepth(c, depth);
   }
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * 'duz' (straight edges): every row is pulled in by the same amount, the bit's
+ * widest radius in the cut (at the deepest row). The tool path is a plain
+ * rectangle, nothing depends on the material being exactly 18 mm: the bit never
+ * reaches past the frame line however thick the board is (the per-depth 'auto'
+ * insets assume an exact 18 mm top; a thicker board made the shallow rows bite
+ * past the frame, a bump at every panjur's top corner). The first mm or so of
+ * each panjur, where the ball is not yet in to its full width, stops a little
+ * short of the frame instead.
+ */
+function straightEdgeInset(c) {
+  return t14RadiusAtDepth(c, Math.max(0, materialTop(c) - (Number(c.endZ) || 0)));
 }
 
 /**

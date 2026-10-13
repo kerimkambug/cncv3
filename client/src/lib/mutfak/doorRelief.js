@@ -11,7 +11,7 @@ import { buildKulpLines } from '../gcode/kulp.js';
 /** The Panjur screen's own defaults (T14 conical ball raster, 40.5 mm slats, 60 mm frame). */
 export const PANJUR = {
   offset: 60, offsetMode: 'normal', offsetLeft: 60, offsetRight: 60, offsetBottom: 60, offsetTop: 60, centerFlat: 0,
-  direction: 'y', pitch: 40.5, exitGap: 0.45, stepover: 0.468, edgeInset: 'auto', t14TipDia: 3, t14BodyDia: 8, t14Height: 30,
+  direction: 'y', pitch: 40.5, exitGap: 0.45, stepover: 0.468, edgeInset: 'duz', t14TipDia: 3, t14BodyDia: 8, t14Height: 30,
   startZ: 17.937, endZ: 3.105, feed: 20000, plunge: 3000, toolNo: '14', spindle: 12000, groundEntry: false, exitCut: 4,
   t4Step: 4, t4Extend: 0, t4Feed: 2000, drillTool: '4', drillSpindle: 12000, exitToolDia: 4, safeZ: 30, toolChangeZ: 30, homeZ: 30,
 };

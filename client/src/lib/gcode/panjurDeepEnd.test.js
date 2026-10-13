@@ -101,3 +101,23 @@ describe('the shop\'s new relief bit (Ø3 tip, Ø8 root, 30 mm cone)', () => {
     expect(y0).toBeGreaterThan(60 - 0.03); expect(y1).toBeLessThan(240 + 0.03);
   });
 });
+
+describe('straight edges (edgeInset "duz", the default)', () => {
+  it('every row runs between the same two X; the bit never passes the frame, even on a board thicker than 18', () => {
+    const c = { ...base, edgeInset: 'duz', endZ: 5, t14TipDia: 3, t14BodyDia: 3, t14Height: 30, feed: 20000, plunge: 3000, toolNo: '14', spindle: 18000, groundEntry: false, exitCut: 4, drillTool: '4', drillSpindle: 12000, exitToolDia: 4, safeZ: 30, toolChangeZ: 30, homeZ: 30 };
+    const gcode = generatePanjurGcode(c).gcode;
+    const xs = new Set(gcode.split('\n').filter((l) => / G1 X/.test(l)).map((l) => l.match(/X([\d.]+)/)[1]));
+    expect([...xs].sort()).toEqual(['338.50', '61.50']); // Ø3 ball: 1.5 in from both frame lines
+    for (const top of [18, 18.3]) {
+      const { grid } = simulate(gcode, { top, cell: 0.05, tools: { 14: { type: 'ball', dia: 3, name: 'b' } }, box: { x0: 50, y0: 50, x1: 350, y1: 250 } });
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      for (let j = 0; j < grid.h; j++) for (let i = 0; i < grid.w; i++) {
+        if (grid.z[j * grid.w + i] >= top - 0.01) continue;
+        const x = grid.x0 + (i + 0.5) * grid.cell, y = grid.y0 + (j + 0.5) * grid.cell;
+        x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+      }
+      expect(x0).toBeGreaterThan(60 - 0.03); expect(x1).toBeLessThan(340 + 0.03);
+      expect(y0).toBeGreaterThan(60 - 0.03); expect(y1).toBeLessThan(240 + 0.03);
+    }
+  });
+});

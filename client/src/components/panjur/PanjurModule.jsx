@@ -18,7 +18,7 @@ export default function PanjurModule({ onBackToMenu }) {
   const [pitch, setPitch] = useState(40.5);
   const [exitGap, setExitGap] = useState(0.45);
   const [stepover, setStepover] = useState(0.468);
-  const [edgeInset, setEdgeInset] = useState('auto');
+  const [edgeInset, setEdgeInset] = useState('duz'); // düz kenar: her sıra aynı X'ten aynı X'e
   const [startZ, setStartZ] = useState(17.937);
   const [endZ, setEndZ] = useState(3.105);
   const [feed, setFeed] = useState(20000);
@@ -391,15 +391,16 @@ function downloadFile() {
             <input type="number" value={stepover} min="0.05" step="0.001" onChange={(e) => setStepover(parseFloat(e.target.value) || 0)} />
           </div>
           <div>
-            <label title="auto = konik bıçak açısından otomatik hesaplanır (en derin noktada takımın gerçek yarıçapı). Sayı girersen sabit mm içeri çeker.">Kenar içeri çekme</label>
-            <select value={edgeInset === 'auto' ? 'auto' : 'manual'} onChange={(e) => setEdgeInset(e.target.value === 'auto' ? 'auto' : 1)}>
-              <option value="auto">Otomatik (konik açıdan)</option>
+            <label title="Düz: her sıra aynı X'ten aynı X'e gider, bıçağın en geniş yarıçapı kadar içeriden; çerçeveye hiç taşmaz, malzeme 18'den kalın olsa da. Derinliğe göre: her sıra kendi derinliğindeki bıçak genişliğine göre (malzeme tam 18 mm olmalı). Elle: sabit mm.">Kenar içeri çekme</label>
+            <select value={edgeInset === 'auto' || edgeInset === 'duz' ? edgeInset : 'manual'} onChange={(e) => setEdgeInset(e.target.value === 'manual' ? 1 : e.target.value)}>
+              <option value="duz">Düz kenar (bıçak yarıçapı)</option>
+              <option value="auto">Derinliğe göre</option>
               <option value="manual">Elle (mm)</option>
             </select>
           </div>
         </div>
         <div className="row2" style={{ marginTop: 10 }}>
-          {edgeInset !== 'auto' && (
+          {edgeInset !== 'auto' && edgeInset !== 'duz' && (
             <div>
               <label>Elle içeri çekme (mm)</label>
               <input type="number" value={edgeInset} min="0" step="0.1" onChange={(e) => setEdgeInset(parseFloat(e.target.value) || 0)} />
