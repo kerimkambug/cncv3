@@ -384,7 +384,11 @@ function emitRasterPass(axis, lines, n, c, crossStart, crossEnd, safeStart, step
   const gy = isY ? safeStart : bounds[0].entryCross;
   lines.push(`N${n++} G0 X${fmt(gx)} Y${fmt(gy)}`);
   lines.push(`N${n++} G0 Z${fmt(c.safeZ)}`);
-  lines.push(`N${n++} G0 Z${fmt(c.startZ)}`);
+  // rapid only to just above the material; the last stretch onto the surface at the
+  // plunge feed (a rapid onto Start Z, a hair under the top, marked every panjur's start)
+  const above = materialTop(c) + 1;
+  if (above < c.safeZ) lines.push(`N${n++} G0 Z${fmt(above)}`);
+  lines.push(`N${n++} G1 Z${fmt(c.startZ)} F${c.plunge}`);
   for (let i = 0; i < passes; i++) {
     const cross = bounds[i].cross;
     lines.push(`N${n++} G1 ${crossAxis}${fmt(cross)} F${c.feed}`);
