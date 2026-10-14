@@ -271,8 +271,11 @@ function poolMask(m, g, f, G) {
  * shapes per level (the caller turns them into rings).
  * @returns {Array<{z:number, shapes:Array<{outer, holes}>}>}
  */
-export function roughLevels(g, { r, stepdown, leave, top, outside = top }) {
-  const T = maxDisk(g.z, g.w, g.h, r / g.cell, outside);
+export function roughLevels(g, { r, stepdown, leave, top, outside = top, floorPass = true }) {
+  // the skin is left sideways too: the end mill keeps `leave` away from a steep wall
+  // (a skin measured only upwards was ~0.1 mm on a near-vertical wall, and the
+  // finishing ball's smallest deviation then showed the roughing step as a line)
+  const T = maxDisk(g.z, g.w, g.h, (r + leave) / g.cell, outside);
   let lowest = Infinity;
   for (let k = 0; k < g.z.length; k++) if (g.z[k] < lowest) lowest = g.z[k];
   const out = [];
@@ -287,7 +290,9 @@ export function roughLevels(g, { r, stepdown, leave, top, outside = top }) {
   }
   // flat floors (large areas at one depth): one more ring set exactly at that
   // depth, so the floor is finished by the end mill and the ball nose only has
-  // the curves to do
+  // the curves to do. Off when the ball finishes the floors too (no seam where
+  // two tools end at the same depth: any tool-length difference shows there).
+  if (!floorPass) return out;
   const hist = new Map();
   for (let k = 0; k < g.z.length; k++) {
     if (g.z[k] >= top - 0.01) continue;
@@ -361,7 +366,7 @@ function refine(pts, tipAt, tol = 0.005) {
  * @param {number[][][]} loops  compartment outline (+ islands), mm
  * @returns {number[][][]} passes of [x, y, z]
  */
-export function contourFinish(g, loops, { R, stepover, top, outside = top, climb = true, maxOffset = Infinity, step = 1, simplifyTol = 0.02, stopAtFloor = true, keep = null }) {
+export function contourFinish(g, loops, { R, stepover, top, outside = top, climb = true, maxOffset = Infinity, step = 1, simplifyTol = 0.02, stopAtFloor = true, floorFill = false, keep = null }) {
   const mask = maskPolys(g, loops);
   const exact = wallDistance(g, mask, loops, R + 2);
   // average surface height by distance from the wall (0.1 mm buckets)
@@ -443,6 +448,11 @@ export function contourFinish(g, loops, { R, stepover, top, outside = top, climb
     // to the ball radius measures ~0.18 here and machines to a few hundredths)
     for (let k = offs.length - 2; k >= 0 && worst(chosen) > 0.25; k--) chosen.push(offs[k]);
     offs.splice(0, offs.length, ...chosen.sort((u, v) => u - v));
+  }
+  if (stopAtFloor && floorFill && offs.length) {
+    // the ball finishes the floor too: after the floor ring (which alone makes a curve
+    // of its own radius), rings every `stepover` across the floor to the middle
+    for (let d = offs[offs.length - 1] + stepover, guard = 0; d <= Math.min(maxD + R, maxOffset) && guard < 5000; d += stepover, guard++) offs.push(d);
   }
   const at = (x, y) => Math.min(top, dropAtXY(g, R, x, y, outside));
   const passes = [];

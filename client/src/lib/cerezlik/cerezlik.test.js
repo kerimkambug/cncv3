@@ -336,10 +336,16 @@ describe('dished bowls (kase) on every catalog model', async () => {
       expect(bowls.length).toBeGreaterThan(0);
       const ops = partToolpaths(part, kase);
       expect(ops.some((o) => o.kind === 'pocket')).toBe(false);
-      // one T7 ring per bowl: the floor radius equals the ball radius
       const bowl = ops.find((o) => o.kind === 'bowl');
       expect(bowl.tool).toBe(7);
-      expect(bowl.passes.length).toBeLessThanOrEqual(bowls.length);
+      // default: the ball finishes the floors too — the end mill never reaches the floor
+      // (no seam where two tools would end at the same depth)
+      const floorZ = 18 - Math.max(...bowls.map((c) => Number(c.depth) || 0));
+      const roughZ = Math.min(...ops.find((o) => o.kind === 'rough').passes.flat().map((p) => p[2]));
+      expect(roughZ).toBeGreaterThanOrEqual(floorZ + 0.29);
+      // the floor left to the end mill (finishFloor off): one T7 ring per bowl, the floor radius equals the ball radius
+      const oneRing = partToolpaths(part, { ...kase, d3: { ...kase.d3, bowl: { ...kase.d3.bowl, finishFloor: false } } });
+      expect(oneRing.find((o) => o.kind === 'bowl').passes.length).toBeLessThanOrEqual(bowls.length);
       // never below the surface (cell-centre sampling tolerance)
       const g = dished.surface.grid;
       const target = (x, y) => { const i = Math.floor((x - g.x0) / g.cell), j = Math.floor((y - g.y0) / g.cell); return i < 0 || j < 0 || i >= g.w || j >= g.h ? 18 : 18 - g.z[j * g.w + i]; };

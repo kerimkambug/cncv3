@@ -36,7 +36,9 @@ export const DEFAULT_RECIPE = {
   vline: { tool: 1, depth: 2, feed: 4000, plunge: 2000 },
   d3: {
     rough: { tool: 10, dia: 10, stepdown: 3, stepoverPct: 45, leave: 0.5, feed: 5000, plunge: 2000 },
-    bowl: { tool: 7, dia: 30, stepover: 2, feed: 5000, plunge: 2000 },
+    // finishFloor: the ball finishes the compartment floors too (the end mill leaves its skin there):
+    // no seam on the floor where two tools would end at the same depth
+    bowl: { tool: 7, dia: 30, stepover: 2, feed: 5000, plunge: 2000, finishFloor: true },
     semi: { enabled: true, tool: 2, dia: 10, stepover: 1.2, leave: 2, feed: 4500, plunge: 1500 },
     relief: { tool: 13, dia: 6, stepover: 0.6, feed: 3500, plunge: 1000 },
   },
@@ -148,7 +150,10 @@ function surfaceOps(part, recipe) {
   const r = (Number(rg.dia) || 10) / 2;
   const step = Math.max(0.5, ((Number(rg.stepoverPct) || 45) / 100) * 2 * r);
   const roughPasses = [];
-  for (const lv of roughLevels(H, { r, stepdown: Number(rg.stepdown) || 5, leave: Number(rg.leave) || 0, top })) {
+  const ballFloor = (d3.bowl || {}).finishFloor !== false;
+  // with the ball finishing the floors the end mill leaves a skin everywhere (≥ 0.3 mm)
+  const leave = ballFloor ? Math.max(0.3, Number(rg.leave) || 0) : Number(rg.leave) || 0;
+  for (const lv of roughLevels(H, { r, stepdown: Number(rg.stepdown) || 5, leave, top, floorPass: !ballFloor })) {
     for (const sh of lv.shapes) {
       const loops = [sh.outer, ...sh.holes].map((l) => simplifyLoop(l, 0.1)).filter((l) => l.length >= 3);
       const rings = [];
@@ -166,7 +171,7 @@ function surfaceOps(part, recipe) {
   // each compartment on its own: rings along the wall, evenly spaced over the curve
   const bowlPasses = part.comps
     .filter((c) => c.kind === 'cep3d' && !c.figure)
-    .flatMap((c) => contourFinish(H, [c.pts, ...(c.islands || [])], { R: (Number(bw.dia) || 30) / 2, stepover: Number(bw.stepover) || 2, top, climb: recipe.climb, step: 1.5, simplifyTol: 0.015 }));
+    .flatMap((c) => contourFinish(H, [c.pts, ...(c.islands || [])], { R: (Number(bw.dia) || 30) / 2, stepover: Number(bw.stepover) || 2, top, climb: recipe.climb, step: 1.5, simplifyTol: 0.015, floorFill: ballFloor }));
   // a compartment deeper than the ball radius has a vertical wall above the
   // floor ring's reach: waterline rings at the same offset finish it
   const Rb = (Number(bw.dia) || 30) / 2;

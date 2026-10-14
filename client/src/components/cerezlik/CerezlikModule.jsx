@@ -314,6 +314,12 @@ export default function CerezlikModule() {
                           <Num key={k} label={label} suffix={unit} value={recipe.d3[sec]?.[k]} step={k === 'tool' ? '1' : 'any'} onChange={(v) => setD3(sec, k, v)} />
                         ))}
                       </div>
+                      {sec === 'bowl' && (
+                        <label className="cz-check" title="Kapalıysa tabanı T10 tam derinliğe keser, T7 yalnız kavisi yapar: iki bıçağın bittiği yerde (boy farkı) tabanda çizgi kalabilir.">
+                          <input type="checkbox" checked={recipe.d3.bowl?.finishFloor !== false} onChange={(e) => setD3('bowl', 'finishFloor', e.target.checked)} />
+                          {' '}Tabanı da küre bitirsin (T10 pay bırakır; tabanda iki bıçağın birleşme çizgisi olmaz)
+                        </label>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -326,7 +332,7 @@ export default function CerezlikModule() {
               <div>
                 <label>Bölme tipi</label>
                 <select value={recipe.bowlStyle || 'kase'} onChange={(e) => set('bowlStyle', e.target.value)}>
-                  <option value="kase">Kase (T10 düz taban + T7 tek tur kavis)</option>
+                  <option value="kase">Kase (T10 kaba + T7 kavis ve taban)</option>
                   <option value="duz">Düz taban, dik duvar (tarama bıçağı)</option>
                 </select>
               </div>
