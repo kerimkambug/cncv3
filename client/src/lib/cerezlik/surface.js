@@ -230,13 +230,16 @@ export function ballRaster(g, region, { R, stepover, top, outside = top, poolTo 
     return refine(pts, at).slice(1, -1);
   };
   for (let L = 0; L <= lines; L++) {
+    // every pass exactly `stepover` apart: the pass runs at its own Y (not on the
+    // nearest grid row, which made the spacing jump between one and two cells)
     const y = y0 + ((y1 - y0) * L) / lines;
     const j = Math.min(G.h - 1, Math.max(0, Math.round((y - G.y0) / G.cell - 0.5)));
+    const onRow = Math.abs(cy(G, j) - y) < 1e-6;
     const row = [];
     for (let i = iMin; i <= iMax; i++) {
       if (!reg[j * G.w + i]) { row.push(null); continue; }
-      const z = Math.min(top, dropAt(G, K, i, j, outside) + leave);
-      row.push(z < skim ? [cx(G, i), cy(G, j), +z.toFixed(3)] : null);
+      const z = Math.min(top, (onRow ? dropAt(G, K, i, j, outside) : dropAtXY(G, Rd, cx(G, i), y, outside)) + leave);
+      row.push(z < skim ? [cx(G, i), +y.toFixed(4), +z.toFixed(3)] : null);
     }
     if (flip) row.reverse();
     flip = !flip;

@@ -38,14 +38,21 @@ export default function SimPanel({ gcode = null, getGcode = null, top = 18, tool
     try { if (!text && getGcode) text = getGcode(); } catch (err) { setState({ status: 'error', message: err.message }); return; }
     if (!text) return;
     workerRef.current?.terminate();
-    // grid size: 0.4 mm on a single part, coarser on a whole plate (≤ ~4 million columns)
-    // the real stock when the screen knows it (the whole door, uncut margins included)
+    // the real stock when the screen knows it (the whole door, uncut margins included)…
     const stock = size && size.w > 0 && size.h > 0
       ? { x0: size.x0 || 0, y0: size.y0 || 0, x1: (size.x0 || 0) + Number(size.w), y1: (size.y0 || 0) + Number(size.h) }
       : null;
-    const box = stock ? { w: stock.x1 - stock.x0, h: stock.y1 - stock.y0 } : roughBox(text, topVal);
-    const area = Math.max(1, box.w * box.h);
-    const cell = Math.max(0.4, +Math.sqrt(area / 4e6).toFixed(2));
+    // …but only the part of it the tools reach is simulated: one tray on a whole
+    // plate gets a fine grid instead of the plate's coarse one
+    const reach = roughBox(text, topVal);
+    let box = stock ? {
+      x0: Math.max(stock.x0, reach.x0), y0: Math.max(stock.y0, reach.y0),
+      x1: Math.min(stock.x1, reach.x1), y1: Math.min(stock.y1, reach.y1),
+    } : reach;
+    if (!(box.x1 > box.x0 && box.y1 > box.y0)) box = stock || reach;
+    // grid: 0.2 mm where it fits, coarser on a big area (≤ ~5 million columns)
+    const area = Math.max(1, (box.x1 - box.x0) * (box.y1 - box.y0));
+    const cell = Math.max(0.2, +Math.sqrt(area / 5e6).toFixed(2));
     const w = new Worker(new URL('../lib/sim/sim.worker.js', import.meta.url), { type: 'module' });
     workerRef.current = w;
     const t0 = performance.now();
@@ -60,7 +67,7 @@ export default function SimPanel({ gcode = null, getGcode = null, top = 18, tool
       setState({ status: 'done', grid: e.data.grid, surface: e.data.surface, stats: e.data.stats, cell, seconds: (performance.now() - t0) / 1000 });
     };
     w.onerror = (e) => { setState({ status: 'error', message: e.message || 'Simülasyon çalışmadı.' }); w.terminate(); };
-    w.postMessage({ text, top: Number(topVal) || 18, cell, tools: simTools, box: stock });
+    w.postMessage({ text, top: Number(topVal) || 18, cell, tools: simTools, box });
   }
 
   function downloadStl() {
@@ -118,7 +125,9 @@ function roughBox(text, top) {
     if (mx) x = +mx[1]; if (my) y = +my[1]; if (mz) z = +mz[1];
     if (z < top) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
   }
-  return Number.isFinite(x0) ? { w: x1 - x0 + 40, h: y1 - y0 + 40 } : { w: 100, h: 100 };
+  // room for the widest tool around the moves
+  const m = 20;
+  return Number.isFinite(x0) ? { x0: x0 - m, y0: y0 - m, x1: x1 + m, y1: y1 + m } : { x0: 0, y0: 0, x1: 100, y1: 100 };
 }
 
 /**

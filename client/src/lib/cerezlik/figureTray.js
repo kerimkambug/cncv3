@@ -20,7 +20,7 @@ export const FIGURE_TRAY_DEFAULTS = {
   figW: 170, figX: 0, figY: 0, rot: 0,
   figH: 10, figTop: 0, pad: 7,
   rim: 14, wall: 9, n: 6, a0: 90,
-  depth: 12, fillet: 15, cell: 0.4,
+  depth: 12, fillet: 15, cell: 0.25, // a finer grid keeps the depth map's detail for a 3 mm relief bit
   ballR: 15, // radius of the ball nose that finishes the compartments (T7 Ø30)
   reliefDia: 6, // the relief bit: the moat around the figure must be wider than it
 };

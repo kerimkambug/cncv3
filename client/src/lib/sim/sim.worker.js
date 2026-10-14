@@ -3,8 +3,8 @@
 import { simulate } from './millSim.js';
 import { partSurface } from './dexelMesh.js';
 
-/** Column stride of the 3D view: at most ~800 points along the long side. */
-export const viewStride = (grid) => Math.max(1, Math.ceil(Math.max(grid.w, grid.h) / 800));
+/** Column stride of the 3D view: at most ~1600 points along the long side (fine relief stays visible). */
+export const viewStride = (grid) => Math.max(1, Math.ceil(Math.max(grid.w, grid.h) / 1600));
 
 self.onmessage = (e) => {
   try {

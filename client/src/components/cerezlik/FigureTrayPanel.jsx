@@ -20,7 +20,7 @@ const FIELDS = [
 async function loadFigure(file) {
   if (/\.stl$/i.test(file.name)) return figureFromStl(await file.arrayBuffer());
   const bmp = await createImageBitmap(file);
-  const k = Math.min(1, 900 / Math.max(bmp.width, bmp.height));
+  const k = Math.min(1, 1800 / Math.max(bmp.width, bmp.height));
   const c = document.createElement('canvas');
   c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
   const ctx = c.getContext('2d');
