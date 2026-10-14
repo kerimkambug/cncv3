@@ -3,6 +3,8 @@ import { DEFAULT_MACHINE_CONFIG, DEFAULT_PLATE_CONFIG } from '../../lib/gcode/co
 import { handleAuthError } from '../../hooks/useAuth.js';
 import { ScopeBar } from './ToolMagazinePanel.jsx';
 import { KULP_DEFAULTS } from '../../lib/gcode/kulp.js';
+import { useToolMagazine } from '../../hooks/useToolMagazine.js';
+import { kulpBit } from '../../hooks/useKulpSettings.js';
 
 // The values this panel sets (a chosen model may bring its own over them)
 const MACHINE_FIELDS = [
@@ -216,6 +218,8 @@ export default function MachineSettingsPanel({ cfg, setCfg, plateCfg, setPlateCf
 function KulpSettings({ cfg, setCfg }) {
   const k = { ...KULP_DEFAULTS, ...(cfg.kulp || {}) };
   const set = (field, value) => setCfg({ ...cfg, kulp: { ...k, [field]: value } });
+  const [magazine] = useToolMagazine();
+  const bit = kulpBit(magazine, k.toolNo);
   const num = (field, label, step = 1) => (
     <div>
       <label>{label}</label>
@@ -241,6 +245,15 @@ function KulpSettings({ cfg, setCfg }) {
         {num('approach', 'Dışarıda iniş mesafesi (mm)')}
         {num('dia', 'Bıçak çapı (mm)', 0.5)}
       </div>
+      {bit ? (
+        <div className="hint">Kulp bıçağı: {bit.name} — çizimden Ø{bit.dia} mm (buradaki çap kullanılmaz).</div>
+      ) : (
+        <div className="hint" style={{ color: 'var(--danger)' }}>
+          ⚠ T{k.toolNo || 11} yuvasında çizilmiş (DXF profilli) bir kulp bıçağı yok. Yollar buradaki çapa göre ({k.dia} mm) hesaplanır:
+          bu değer gerçek bıçağın en geniş çapı değilse nestingde bıçak kapağın içine inebilir. Atölye → Bıçaklar'da kulp bıçağını
+          (ör. “Dia kulp yeri açma 009 17 01”, Ø50) bu yuvaya takın.
+        </div>
+      )}
       <div className="row2">
         {num('plungeFeed', 'İniş feed', 50)}
         {num('cutFeed', 'Kesim feed', 50)}
@@ -271,7 +284,7 @@ function KulpSettings({ cfg, setCfg }) {
       </div>
       <div className="hint">
         Kulp bıçağı malzemeye dalamaz: kapağın dışında, boşlukta bu Z'ye iner, kenara yandan girer, pasolarla derinleşir,
-        dışarı çıkıp kalkar. Bıçak çapı Atölye → Bıçaklar'da bu yuvadaki bıçaktan alınır; orada yoksa buradaki değer kullanılır.
+        dışarı çıkıp kalkar. Bıçak çapı, bu yuvada çizilmiş (DXF profilli) bir bıçak varsa ondan alınır; yoksa buradaki değer kullanılır.
         Kulpun hangi kapağın hangi kenarında olacağı kapak ölçüsünü girdiğiniz yerde seçilir.
       </div>
     </>

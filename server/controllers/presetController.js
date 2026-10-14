@@ -173,6 +173,8 @@ export async function renderPresetImages(req, res) {
       if ((p.category || 'kapak') !== 'kapak') continue;
       const r = renderPresetImage(p, tools);
       if (!r) { skipped.push(p.name); continue; }
+      // an unchanged picture is not written again (no new updatedAt, no noise in presets.json)
+      if (r.dataUrl === p.imageDataUrl) { done.push(p.name); continue; }
       if (isMongoConnected()) await Preset.updateOne({ _id: p._id }, { $set: { imageDataUrl: r.dataUrl } });
       else await fileStore.update(p._id, { imageDataUrl: r.dataUrl });
       done.push(p.name);
