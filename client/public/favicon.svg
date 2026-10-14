@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Empire CNC: an end mill coming down, the groove it has cut behind it -->
+  <rect width="64" height="64" rx="14" fill="#151922"/>
+  <!-- the cut groove (glow + line) -->
+  <path d="M5 57 C 14 57, 18 49, 31 49" fill="none" stroke="#2ecc8f" stroke-opacity=".35" stroke-width="11" stroke-linecap="round"/>
+  <path d="M5 57 C 14 57, 18 49, 31 49" fill="none" stroke="#2ecc8f" stroke-width="6" stroke-linecap="round"/>
+  <!-- collet -->
+  <rect x="19" y="3" width="26" height="11" rx="3" fill="#4f8cff"/>
+  <!-- cutter body with two flutes -->
+  <path d="M22 14 H42 V38 L32 50 L22 38 Z" fill="#dbe6ff"/>
+  <path d="M22 22 L42 16.5 M22 32 L42 26.5" stroke="#4f8cff" stroke-width="3.6" stroke-linecap="round"/>
+  <!-- spark at the tip -->
+  <circle cx="32" cy="50" r="3.4" fill="#ffd166"/>
+</svg>
