@@ -318,14 +318,20 @@ export function panjurSimTools(c) {
   return tools;
 }
 
+/** The Ø4 edge lap's Z: `edgeLapZ`, or (empty) the panjurs' Start Z — the same level, no step between them. */
+function edgeLapZOf(c) {
+  const v = c.edgeLapZ;
+  return v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? Number(c.startZ) : Number(v);
+}
+
 /**
- * The Ø4 edge lap: between the panjurs' start depth and the top (deeper, the flat
- * bit would cut a step into every panjur's start), and the bit must fit a block.
+ * The Ø4 edge lap: from the panjurs' start depth up to the top (deeper, the flat
+ * bit would cut a step into every panjur's start).
  */
 function validateEdgeLap(c) {
-  const z = Number(c.edgeLapZ), top = materialTop(c);
-  if (!Number.isFinite(z) || z >= top) throw new Error(`Kenar turu derinliği malzeme üstünden (${top}) aşağıda olmalı.`);
-  if (z <= c.startZ) throw new Error(`Kenar turu derinliği (${z}) panjur başlangıç Z'sinden (${c.startZ}) yukarıda olmalı; yoksa Ø4 her panjurun başına basamak açar.`);
+  const z = edgeLapZOf(c), top = materialTop(c);
+  if (z >= top) throw new Error(`Kenar turu derinliği malzeme üstünden (${top}) aşağıda olmalı.`);
+  if (z < c.startZ - 1e-6) throw new Error(`Kenar turu derinliği (${z}) panjur başlangıç Z'sinden (${c.startZ}) derin olamaz; yoksa Ø4 her panjurun başına basamak açar.`);
   if (!(c.exitToolDia > 0)) throw new Error('Kenar turu için Ø4 düz bıçak seçilmeli.');
 }
 
@@ -636,7 +642,7 @@ export function generatePanjurGcode(c, offsetX = 0, offsetY = 0, isCombined = fa
       lines.push(`N${n++} M7`);
     }
     spindleState.on = true;
-    const r = c.exitToolDia / 2, z = Number(c.edgeLapZ), top = materialTop(c);
+    const r = c.exitToolDia / 2, z = edgeLapZOf(c), top = materialTop(c);
     const P = (cross, along) => (c.direction === 'y' ? `X${fmt(cross)} Y${fmt(along)}` : `X${fmt(along)} Y${fmt(cross)}`);
     g.blocks.forEach((b) => {
       const c0 = crossLo + r, c1 = crossHi - r, a0 = b.start + alongOff + r, a1 = b.end + alongOff - r;

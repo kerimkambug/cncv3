@@ -58,10 +58,25 @@ describe('panjur: Ø4 edge lap', () => {
     expect(lines.filter((l) => /M6T4/.test(l))).toHaveLength(1);
   });
 
-  it('refuses a lap at or under the panjurs\' start depth', () => {
-    expect(() => generatePanjurGcode({ ...base, edgeLap: true, edgeLapZ: 17.5 })).toThrow(/başlangıç/);
+  it('a lap deeper than the panjurs\' start is refused; the same level (or empty) is fine', () => {
+    expect(() => generatePanjurGcode({ ...base, edgeLap: true, edgeLapZ: 17.4 })).toThrow(/başlangıç/);
     expect(() => generatePanjurGcode({ ...base, edgeLap: true, edgeLapZ: 18 })).toThrow();
+    expect(generatePanjurGcode({ ...base, edgeLap: true, edgeLapZ: 17.5 }).gcode).toMatch(/G1 Z17\.50 F800/);
+    expect(generatePanjurGcode({ ...base, edgeLap: true, edgeLapZ: '' }).gcode).toMatch(/G1 Z17\.50 F800/);
   });
+
+  it('at the start level: nothing left above it by the frame, and nothing cut under it', () => {
+    const sim = (cfg) => simulate(generatePanjurGcode(cfg).gcode, { top: 18, cell: 0.1, box: { x0: 50, y0: 50, x1: 150, y1: 150 }, tools }).grid;
+    const a = sim(base), b = sim({ ...base, edgeLap: true, edgeLapZ: '' });
+    let above = 0, deeper = 0;
+    for (let k = 0; k < a.z.length; k++) {
+      const x = a.x0 + ((k % a.w) + 0.5) * a.cell, y = a.y0 + (Math.floor(k / a.w) + 0.5) * a.cell;
+      if (x > 60.05 && x < 139.95 && y > 60.05 && y < 139.95 && b.z[k] > 17.55) above++;
+      if (b.z[k] < Math.min(a.z[k], 17.5) - 0.01) deeper++; // the lap only takes what stands above 17.5
+    }
+    expect(above * 0.01).toBeLessThan(4); // the Ø4's R2 at the area's outer corners
+    expect(deeper).toBe(0);
+  }, 60000);
 
   it('centre flat: a lap around each block, the flat untouched', () => {
     const cfg = { ...base, height: 300, offsetMode: 'detailed', centerFlat: 60, edgeLap: true, edgeLapZ: 17.6 };

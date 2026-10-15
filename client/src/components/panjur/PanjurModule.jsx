@@ -28,7 +28,8 @@ export default function PanjurModule({ onBackToMenu }) {
   const [groundEntry, setGroundEntry] = useState(false);
   // Ø4 kenar temizleme turu: her panjur bloğunun çevresinde bu Z'de bir tur
   const [edgeLap, setEdgeLap] = usePersistentState('empire-cnc-panjur-edge-lap', false);
-  const [edgeLapZ, setEdgeLapZ] = usePersistentState('empire-cnc-panjur-edge-lap-z', 17.6);
+  // boş = başlangıç Z ile aynı seviye
+  const [edgeLapZ, setEdgeLapZ] = usePersistentState('empire-cnc-panjur-edge-lap-z2', '');
   const [exitCut, setExitCut] = useState(4);
   const [t4Step, setT4Step] = useState(4); // T4 paso derinliği: 18 mm → 5 paso
   const [t4Peck, setT4Peck] = useState(2); // her pasoya inerken gagalama: bu kadar iner, talaşı atmak için çıkar, tekrar girer
@@ -116,7 +117,7 @@ export default function PanjurModule({ onBackToMenu }) {
       spindle: parseFloat(spindle) || 0,
       groundEntry,
       edgeLap: !!edgeLap,
-      edgeLapZ: parseFloat(edgeLapZ),
+      edgeLapZ: edgeLapZ === '' ? '' : parseFloat(edgeLapZ),
       exitCut: parseFloat(exitCut) || 0,
       t4Step: parseFloat(t4Step) || 0,
       t4Extend: Math.max(0, parseFloat(t4Extend) || 0),
@@ -480,11 +481,11 @@ function downloadFile() {
         {edgeLap && (
           <div className="row2" style={{ marginTop: 10 }}>
             <div>
-              <label title="Ø4 düz bıçak her panjur bloğunun çevresinde bu Z'de bir tur atar; üstünde kalan her şeyi keser. Başlangıç Z'sinden yukarıda olmalı.">Kenar turu Z</label>
-              <input type="number" value={edgeLapZ} step="0.1" onChange={(e) => setEdgeLapZ(e.target.value)} />
+              <label title="Ø4 düz bıçak her panjur bloğunun çevresinde bu Z'de bir tur atar; üstünde kalan her şeyi keser. Boş: başlangıç Z'si ile aynı.">Kenar turu Z</label>
+              <input type="number" value={edgeLapZ} step="0.1" placeholder={`${startZ} (başlangıç Z)`} onChange={(e) => setEdgeLapZ(e.target.value)} />
             </div>
             <div className="hint" style={{ alignSelf: 'end' }}>
-              Başlangıç Z'sinden ({startZ}) yukarıda olmalı. Orta düz alan varsa tur iki bloğun etrafında ayrı döner, düz alana girmez.
+              Boş bırakılırsa başlangıç Z'si ({startZ}) ile aynı seviyeden gider; daha derin olamaz. Orta düz alan varsa tur iki bloğun etrafında ayrı döner, düz alana girmez.
             </div>
           </div>
         )}
