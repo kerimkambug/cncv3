@@ -63,6 +63,9 @@ function LogoStyleFields({ style, logo, setLogo }) {
       {style === 'vcarve' && (
         <label className="cz-check cz-text-check"><input type="checkbox" checked={o.flatClear} onChange={(e) => setLogo({ flatClear: e.target.checked })} /> Geniş zemini T{o.flatTool} Ø{o.flatDia} düz temizlesin</label>
       )}
+      {style === 'tarama' && o.hatch === 'bant' && (
+        <label className="cz-check cz-text-check"><input type="checkbox" checked={o.toCentre} onChange={(e) => setLogo({ toCentre: e.target.checked })} /> İç hattı olmayan şekilleri (yıldız…) merkeze doğru tara</label>
+      )}
       {style === 'tarama' && (
         <label className="cz-check cz-text-check"><input type="checkbox" checked={o.outline} onChange={(e) => setLogo({ outline: e.target.checked })} /> Dış hattı da çiz</label>
       )}

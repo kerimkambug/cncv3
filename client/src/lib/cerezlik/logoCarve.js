@@ -15,7 +15,7 @@
 // gaps inside the logo (letters cut out of a dark ring become V grooves).
 //
 // Passes are [[x, y, depth]...] in the part's coordinates, depth below the top.
-import { bbox, clipLines, differenceOriented, evenOddShapes, offset, simplifyLoop, union } from './geom.js';
+import { area, bbox, clipLines, differenceOriented, evenOddShapes, offset, pathLength, simplifyLoop, union } from './geom.js';
 import { edt, makeGrid, maskPolys } from './surface.js';
 import { simplify3, thin, traceSkeleton } from './textCarve.js';
 
@@ -27,6 +27,7 @@ export const LOGO_STYLES = [
 ];
 
 export const HATCH_PATTERNS = [
+  ['bant', 'Bant: dış hattan içteki hatta dik çizgiler'],
   ['paralel', 'Paralel çizgi'],
   ['capraz', 'Çapraz (ızgara)'],
   ['isinsal', 'Işınsal (merkezden güneş)'],
@@ -42,7 +43,9 @@ export const LOGO_DEFAULTS = {
   floorStep: 0.4, // V rings on the flat floor
   flatClear: true, flatTool: 6, flatDia: 6, // flat end mill for wide floors
   lineDepth: 1, // kontur / tarama
-  hatch: 'paralel', hatchStep: 3, hatchAngle: 45, outline: true,
+  hatch: 'bant', hatchStep: 3, hatchAngle: 45, outline: true,
+  toCentre: false, // band hatching: shapes with no inner line hatched towards their centre (stars…)
+  islandGap: 1, // band hatching: clear margin around islands in the band (letters stay readable)
 };
 
 const cot = (deg) => 1 / Math.tan(((deg / 2) * Math.PI) / 180);
@@ -147,7 +150,79 @@ function vcarve(regions, o) {
   return { vPasses, clearPasses };
 }
 
+/** First crossing of the ray p + t·u (t > 0) with a loop, or Infinity. */
+function rayHit(p, u, loop) {
+  let best = Infinity;
+  for (let i = 0, j = loop.length - 1; i < loop.length; j = i++) {
+    const a = loop[j], b = loop[i];
+    const ex = b[0] - a[0], ey = b[1] - a[1];
+    const den = u[0] * ey - u[1] * ex;
+    if (Math.abs(den) < 1e-12) continue;
+    const wx = a[0] - p[0], wy = a[1] - p[1];
+    const t = (wx * ey - wy * ex) / den, sgm = (wx * u[1] - wy * u[0]) / den;
+    if (t > 1e-6 && sgm >= 0 && sgm <= 1 && t < best) best = t;
+  }
+  return best;
+}
+
+/**
+ * Band hatching: every region is the band between an outline and the line
+ * inside it (its large holes). From points `step` apart along the outline a
+ * line runs inwards, square to it, up to that inner line; small islands in
+ * the band (letters…) interrupt it. A region with no inner line is hatched
+ * from its outline towards its centre.
+ */
+function bandLines(regions, o) {
+  const out = [];
+  const step = Math.max(0.3, o.hatchStep);
+  for (const sh of regions) {
+    const outerA = area(sh.outer);
+    const inner = sh.holes.filter((h) => area(h) > 0.05 * outerA); // the inner line(s); smaller holes are islands
+    const islands = sh.holes.filter((h) => area(h) <= 0.05 * outerA);
+    if (!inner.length && !o.toCentre) continue; // only the band between two lines is hatched
+    const ob = bbox([sh.outer]);
+    const centre = [(ob.minX + ob.maxX) / 2, (ob.minY + ob.maxY) / 2];
+    const loop = simplifyLoop(sh.outer, 0.05);
+    const L = pathLength(loop);
+    const n = Math.max(3, Math.round(L / step));
+    // points along the outline, and the outline's direction smoothed over ±1.5 steps
+    const cum = [0];
+    for (let i = 1; i <= loop.length; i++) cum.push(cum[i - 1] + Math.hypot(loop[i % loop.length][0] - loop[i - 1][0], loop[i % loop.length][1] - loop[i - 1][1]));
+    const at = (s) => {
+      s = ((s % L) + L) % L;
+      let i = 1;
+      while (i < cum.length - 1 && cum[i] < s) i++;
+      const a = loop[i - 1], b = loop[i % loop.length], t = (s - cum[i - 1]) / ((cum[i] - cum[i - 1]) || 1);
+      return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+    };
+    const segs = [];
+    for (let k = 0; k < n; k++) {
+      const s = (k * L) / n;
+      const p = at(s), q0 = at(s - 1.5 * step), q1 = at(s + 1.5 * step);
+      const tx = q1[0] - q0[0], ty = q1[1] - q0[1], tl = Math.hypot(tx, ty) || 1;
+      let u = [-ty / tl, tx / tl]; // left of a CCW outline = inwards
+      let reach;
+      if (inner.length) {
+        reach = Math.min(...inner.map((h) => rayHit(p, u, h)));
+        if (!Number.isFinite(reach)) continue;
+      } else {
+        u = [centre[0] - p[0], centre[1] - p[1]];
+        reach = Math.hypot(u[0], u[1]);
+        u = [u[0] / reach, u[1] / reach];
+      }
+      segs.push([[p[0] - u[0] * 0.05, p[1] - u[1] * 0.05], [p[0] + u[0] * (reach + 0.05), p[1] + u[1] * (reach + 0.05)]]);
+    }
+    // islands (letters…) keep a clear margin; the outer and inner lines are met exactly
+    const gap = Math.max(0, Number(o.islandGap) || 0);
+    const grown = gap && islands.length ? offset(islands.map((h) => h.slice().reverse()), gap, { keepOrientation: true }) : islands.map((h) => h.slice().reverse());
+    const clip = shapeLoops(differenceOriented([sh.outer, ...inner], grown));
+    out.push(...clipLines(segs, clip));
+  }
+  return out;
+}
+
 function hatchLines(regions, o) {
+  if (o.hatch === 'bant') return bandLines(regions, o);
   const loops = shapeLoops(regions);
   const b = bbox(loops);
   const cx = (b.minX + b.maxX) / 2, cy = (b.minY + b.maxY) / 2;
