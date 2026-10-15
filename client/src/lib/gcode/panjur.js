@@ -48,6 +48,8 @@ export function panjurGroups(c) {
   }
   const available = usableAlong - flat;
   const groups = [];
+  // each run of panjurs between frame / centre flat (one, or two with a centre flat)
+  const blocks = [];
   // Every panjur ends deep, and there the T14 cone is wider at the surface than at
   // its tip. Each panjur's cut stops short so that the cone, at the surface, ends
   // exactly where the next panjur starts (the exit gap between them is cut, the
@@ -70,6 +72,7 @@ export function panjurGroups(c) {
     // the first panjur's first row sits on the frame (or the flat) a hair under the
     // top: its ball would cut that wide into it, so that row starts this much in
     const shallow = deepEndShallowInset(c);
+    blocks.push({ start, end: start + limit, side });
     let pos = start;
     for (let i = 0; i < count; i++) {
       const last = i === count - 1;
@@ -106,6 +109,7 @@ export function panjurGroups(c) {
     usableAlong,
     centerFlat: flat,
     groups,
+    blocks,
     actualLength,
     actualPitch,
   };
@@ -315,6 +319,17 @@ export function panjurSimTools(c) {
 }
 
 /**
+ * The Ø4 edge lap: between the panjurs' start depth and the top (deeper, the flat
+ * bit would cut a step into every panjur's start), and the bit must fit a block.
+ */
+function validateEdgeLap(c) {
+  const z = Number(c.edgeLapZ), top = materialTop(c);
+  if (!Number.isFinite(z) || z >= top) throw new Error(`Kenar turu derinliği malzeme üstünden (${top}) aşağıda olmalı.`);
+  if (z <= c.startZ) throw new Error(`Kenar turu derinliği (${z}) panjur başlangıç Z'sinden (${c.startZ}) yukarıda olmalı; yoksa Ø4 her panjurun başına basamak açar.`);
+  if (!(c.exitToolDia > 0)) throw new Error('Kenar turu için Ø4 düz bıçak seçilmeli.');
+}
+
+/**
  * The panjur relief bit's numbers (t14TipDia / t14BodyDia / t14Height) from a
  * magazine tool: a ball nose is a "cone" as wide at the top as at its tip; a
  * tapered ball nose gives its cone height from the included angle. Anything else
@@ -453,8 +468,10 @@ export function generatePanjurGcode(c, offsetX = 0, offsetY = 0, isCombined = fa
   // Seri üretimde faz kontrolü:
   //  - phase 'raster': yalnız T14 raster; 'exit': yalnız T4 çıkış; 'all': ikisi birden (tek kapak)
   //  - t14Header / t4Header: takım değişim + M3/M7 başlıklarını yaz (seri modda sadece ilk kapakta)
-  const { phase = 'all', t14Header = true, t4Header = true } = options;
+  //  - lapHeader: the Ø4 edge lap's tool change (phase 'lap'; in 'all' it follows from groundEntry)
+  const { phase = 'all', t14Header = true, t4Header = true, lapHeader = !c.groundEntry } = options;
   validatePanjurConfig(c);
+  if (c.edgeLap) validateEdgeLap(c);
   // T14 başlığı = yeni bir zincirin (ya da tek kapağın) başı: önceki bir çağrının
   // (yarıda kalan / hata veren) bıraktığı spindle durumu bu programa taşınmasın
   if (t14Header && (phase === 'all' || phase === 'raster')) spindleState.on = false;
@@ -463,10 +480,13 @@ export function generatePanjurGcode(c, offsetX = 0, offsetY = 0, isCombined = fa
   // Birleştirilmiş seri üretimde program kabuğu (%, O2000, G54) yalnızca ilk parçada yazılır
   const lines = isCombined ? [] : ['%', 'O2000', 'N1 G0 G17 G40 G49 G80 G90 G54'];
   let n = isCombined ? startN : 2;
-  const x0 = g.crossStart + offsetX;
-  const x1 = g.crossEnd + offsetX;
-  const y0 = g.alongStart + offsetY;
-  const y1 = g.alongEnd + offsetY;
+  // the panjur area across the panjurs, in machine coordinates: X for 'y' panjurs,
+  // Y for 'x' ones (it used to take the ALONG span for 'x': a non-square door was
+  // cut past its top edge)
+  const crossOff = c.direction === 'y' ? offsetX : offsetY;
+  const alongOff = c.direction === 'y' ? offsetY : offsetX;
+  const crossLo = g.crossStart + crossOff;
+  const crossHi = g.crossEnd + crossOff;
 
   // ── Spindle durumu IZLEME ────────────────────────────────────
   // ÖNEMLİ: M5'i "program sonuna erteleme" kuralı güvenli DEĞİLDİR. Takım
@@ -526,8 +546,8 @@ export function generatePanjurGcode(c, offsetX = 0, offsetY = 0, isCombined = fa
 
     const passes = Math.max(2, Math.ceil(span / c.stepover) + 1);
     const step = span / (passes - 1);
-    const crossStart = (c.direction === 'y' ? x0 : y0);
-    const crossEnd = (c.direction === 'y' ? x1 : y1);
+    const crossStart = crossLo;
+    const crossEnd = crossHi;
 
     const alongOffset = c.direction === 'y' ? offsetY : offsetX;
     n = emitRasterPass(c.direction, lines, n, c, crossStart, crossEnd, grp.start + alongOffset, step, passes);
@@ -572,8 +592,8 @@ export function generatePanjurGcode(c, offsetX = 0, offsetY = 0, isCombined = fa
       // bit can go `t4Extend` mm further at both ends to clean them (default 0: it
       // would notch the frame by as much).
       const ext = t4ExtendOf(c);
-      const from = (c.direction === 'y' ? x0 : y0) + toolRT4 - ext;
-      const to = (c.direction === 'y' ? x1 : y1) - toolRT4 + ext;
+      const from = crossLo + toolRT4 - ext;
+      const to = crossHi - toolRT4 + ext;
       lines.push(c.direction === 'y'
         ? `N${n++} G0 X${fmt(from)} Y${fmt(a)} Z${fmt(c.safeZ)}`
         : `N${n++} G0 X${fmt(a)} Y${fmt(from)} Z${fmt(c.safeZ)}`);
@@ -598,6 +618,39 @@ export function generatePanjurGcode(c, offsetX = 0, offsetY = 0, isCombined = fa
       lines.push(`N${n++} G0 Z${fmt(c.safeZ)}`);
     });
   }
+
+ // =========================================================
+ // 2b. AŞAMA: Ø4 KENAR TEMİZLEME TURU (isteğe bağlı)
+ // =========================================================
+ // Küre bıçak her panjurun başında, çerçeve dibinde ve panjur birleşimlerinde
+ // yüzeye yakın küçük üçgenler bırakır. Düz uçlu Ø4 her panjur bloğunun
+ // çevresinde edgeLapZ'de bir tur atar: o seviyenin üstünde kalan her şeyi
+ // keser, çevrede ince bir basamak (çerçeve) bırakır. Orta düz alan ayrı bir
+ // bloktur: tur onun içinden geçmez.
+ if (c.edgeLap && (phase === 'all' || phase === 'lap')) {
+    if (lapHeader) {
+      forceStopSpindle();
+      lines.push(`N${n++} G0 Z${fmt(c.toolChangeZ)}`);
+      lines.push(`N${n++} M6T${c.drillTool}`);
+      lines.push(`N${n++} S${c.drillSpindle} M3`);
+      lines.push(`N${n++} M7`);
+    }
+    spindleState.on = true;
+    const r = c.exitToolDia / 2, z = Number(c.edgeLapZ), top = materialTop(c);
+    const P = (cross, along) => (c.direction === 'y' ? `X${fmt(cross)} Y${fmt(along)}` : `X${fmt(along)} Y${fmt(cross)}`);
+    g.blocks.forEach((b) => {
+      const c0 = crossLo + r, c1 = crossHi - r, a0 = b.start + alongOff + r, a1 = b.end + alongOff - r;
+      lines.push(`N${n++} G0 ${P(c0, a0)} Z${fmt(c.safeZ)}`);
+      lines.push(`N${n++} G0 Z${fmt(top + 2)}`);
+      lines.push(`N${n++} G1 Z${fmt(z)} F${t4PlungeOf(c)}`);
+      const f = c.t4Feed || 2000;
+      lines.push(`N${n++} G1 ${P(c1, a0)} F${f}`);
+      lines.push(`N${n++} G1 ${P(c1, a1)}`);
+      lines.push(`N${n++} G1 ${P(c0, a1)}`);
+      lines.push(`N${n++} G1 ${P(c0, a0)}`);
+      lines.push(`N${n++} G0 Z${fmt(c.safeZ)}`);
+    });
+ }
 
  // =========================================================
  // 3. AŞAMA: GÜVENLİ BİTİŞ

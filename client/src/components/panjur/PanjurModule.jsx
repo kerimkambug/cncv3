@@ -26,6 +26,9 @@ export default function PanjurModule({ onBackToMenu }) {
   const [endZ, setEndZ] = useState(3.105);
   const [feed, setFeed] = useState(20000);
   const [groundEntry, setGroundEntry] = useState(false);
+  // Ø4 kenar temizleme turu: her panjur bloğunun çevresinde bu Z'de bir tur
+  const [edgeLap, setEdgeLap] = usePersistentState('empire-cnc-panjur-edge-lap', false);
+  const [edgeLapZ, setEdgeLapZ] = usePersistentState('empire-cnc-panjur-edge-lap-z', 17.6);
   const [exitCut, setExitCut] = useState(4);
   const [t4Step, setT4Step] = useState(4); // T4 paso derinliği: 18 mm → 5 paso
   const [t4Peck, setT4Peck] = useState(2); // her pasoya inerken gagalama: bu kadar iner, talaşı atmak için çıkar, tekrar girer
@@ -112,6 +115,8 @@ export default function PanjurModule({ onBackToMenu }) {
       toolNo,
       spindle: parseFloat(spindle) || 0,
       groundEntry,
+      edgeLap: !!edgeLap,
+      edgeLapZ: parseFloat(edgeLapZ),
       exitCut: parseFloat(exitCut) || 0,
       t4Step: parseFloat(t4Step) || 0,
       t4Extend: Math.max(0, parseFloat(t4Extend) || 0),
@@ -127,7 +132,7 @@ export default function PanjurModule({ onBackToMenu }) {
     };
   }, [
     width, height, offsetMode, direction, offset, offsetLeft, offsetRight, offsetBottom, offsetTop, centerFlat,
-    pitch, exitGap, stepover, edgeInset, startZ, endZ, feed, plunge, toolNo, spindle, groundEntry, exitCut,
+    pitch, exitGap, stepover, edgeInset, startZ, endZ, feed, plunge, toolNo, spindle, groundEntry, edgeLap, edgeLapZ, exitCut,
     drillTool, drillSpindle, exitToolDia, bit, safeZ, toolChangeZ, homeZ, t4Step, t4Extend, t4Feed, t4Peck, t4Plunge
   ]);
 
@@ -149,6 +154,7 @@ export default function PanjurModule({ onBackToMenu }) {
     setMessage(null);
     try {
       if (bit.error) throw new Error(`${bit.error} Atölye → Bıçaklar'da magazine yükleyip buradan seç.`);
+      if (currentConfig.edgeLap && !drillTool) throw new Error("Kenar turu için magazinde Ø4 düz bıçak yok. Atölye → Bıçaklar'da yükleyip buradan seç.");
       if (currentConfig.groundEntry && !drillTool) throw new Error("Zemine giriş için magazinde Ø4 düz bıçak yok. Atölye → Bıçaklar'da yükleyip buradan seç.");
       // Yan yana seri üretim: her kapak kendi ölçüsüyle, X başlangıcı oransal artarak
       const multi = covers.length > 1;
@@ -168,7 +174,7 @@ export default function PanjurModule({ onBackToMenu }) {
         const cv = coverList[i];
         const cfg = { ...currentConfig, width: cv.width, height: cv.height };
         const res = generatePanjurGcode(cfg, xOffset, 0, true, n, {
-          phase: currentConfig.groundEntry ? 'raster' : 'all',
+          phase: currentConfig.groundEntry || currentConfig.edgeLap ? 'raster' : 'all',
           t14Header: i === 0,
         });
         for (const line of res.gcode.split('\n')) {
@@ -191,11 +197,24 @@ export default function PanjurModule({ onBackToMenu }) {
           n = res.nextN; t4Header = false;
           exX += cv.width + (multi ? coverGap : 0);
         }
-        combined.push(`N${n++} M5`);
-      } else {
-        // T4 kullanılmıyorsa spindle T14'den beri açıktı; yine de kapat.
-        combined.push(`N${n++} M5`);
       }
+
+      // FAZ 3: Ø4 kenar turu — bütün kapaklarda, her panjur bloğunun çevresinde
+      // (T4 zaten takılıysa takım değişimi yok)
+      if (currentConfig.edgeLap) {
+        let lapX = 0;
+        let lapHeader = !currentConfig.groundEntry;
+        for (const cv of coverList) {
+          const cfg = { ...currentConfig, width: cv.width, height: cv.height };
+          const res = generatePanjurGcode(cfg, lapX, 0, true, n, { phase: 'lap', t14Header: false, t4Header: false, lapHeader });
+          for (const line of res.gcode.split('\n')) {
+            if (line.trim()) combined.push(line);
+          }
+          n = res.nextN; lapHeader = false;
+          lapX += cv.width + (multi ? coverGap : 0);
+        }
+      }
+      combined.push(`N${n++} M5`);
 
       combined.push('N9998 G0 Z30.00');
       combined.push('N9999 M5');
@@ -453,6 +472,22 @@ function downloadFile() {
           />
           Zemine kadar in / alt çıkışı T4 ile en son aç
         </label>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+          <input type="checkbox" checked={!!edgeLap} style={{ width: 'auto' }} onChange={(e) => setEdgeLap(e.target.checked)} />
+          Ø4 ile kenar temizleme turu (panjur başlarında ve çerçeve dibinde kalan üçgenleri alır)
+        </label>
+        {edgeLap && (
+          <div className="row2" style={{ marginTop: 10 }}>
+            <div>
+              <label title="Ø4 düz bıçak her panjur bloğunun çevresinde bu Z'de bir tur atar; üstünde kalan her şeyi keser. Başlangıç Z'sinden yukarıda olmalı.">Kenar turu Z</label>
+              <input type="number" value={edgeLapZ} step="0.1" onChange={(e) => setEdgeLapZ(e.target.value)} />
+            </div>
+            <div className="hint" style={{ alignSelf: 'end' }}>
+              Başlangıç Z'sinden ({startZ}) yukarıda olmalı. Orta düz alan varsa tur iki bloğun etrafında ayrı döner, düz alana girmez.
+            </div>
+          </div>
+        )}
 
         {groundEntry && (
           <div className="row2" style={{ marginTop: 10 }}>
