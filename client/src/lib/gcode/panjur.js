@@ -314,6 +314,25 @@ export function panjurSimTools(c) {
   return tools;
 }
 
+/**
+ * The panjur relief bit's numbers (t14TipDia / t14BodyDia / t14Height) from a
+ * magazine tool: a ball nose is a "cone" as wide at the top as at its tip; a
+ * tapered ball nose gives its cone height from the included angle. Anything else
+ * can't cut the panjur slope cleanly → { error }.
+ */
+export function panjurBitFromTool(tool) {
+  if (!tool) return { error: 'Panjur bıçağı seçilmedi.' };
+  const dia = Number(tool.dia);
+  if (tool.type === 'ball' && dia > 0) return { t14TipDia: dia, t14BodyDia: dia, t14Height: 30 };
+  if (tool.type === 'taper') {
+    const tip = Number(tool.tipDia), half = (Number(tool.angle) * Math.PI) / 360;
+    if (tip > 0 && dia >= tip && half > 0 && half < Math.PI / 2) {
+      return { t14TipDia: tip, t14BodyDia: dia, t14Height: dia > tip ? (dia - tip) / 2 / Math.tan(half) : 30 };
+    }
+  }
+  return { error: 'Panjur bıçağı küre uçlu veya konik küre uçlu olmalı.' };
+}
+
 /** Half-width of the shallowest row's cut at the surface (the ball a hair under the top). */
 function deepEndShallowInset(c) {
   return resolveEdgeInsetAtDepth(c, Math.max(0, materialTop(c) - (Number(c.startZ) || 0)));

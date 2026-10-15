@@ -38,3 +38,20 @@ describe('panjur T4 opening', () => {
     expect(L.some((l) => /F1500$/.test(l))).toBe(true);
   });
 });
+
+describe('panjur bit from the magazine', async () => {
+  const { panjurBitFromTool } = await import('./panjur.js');
+  it('a ball nose: tip = body', () => {
+    expect(panjurBitFromTool({ type: 'ball', dia: 3 })).toEqual({ t14TipDia: 3, t14BodyDia: 3, t14Height: 30 });
+  });
+  it('a tapered ball nose: cone height from the included angle (the old T14)', () => {
+    const b = panjurBitFromTool({ type: 'taper', dia: 8, tipDia: 3, angle: 9.53 });
+    expect(b.t14TipDia).toBe(3);
+    expect(b.t14BodyDia).toBe(8);
+    expect(b.t14Height).toBeCloseTo(30, 0);
+  });
+  it('anything else is refused', () => {
+    expect(panjurBitFromTool({ type: 'flat', dia: 3 }).error).toBeTruthy();
+    expect(panjurBitFromTool(null).error).toBeTruthy();
+  });
+});

@@ -1,7 +1,10 @@
 import SimPanel from '../SimPanel.jsx';
 import { useState, useEffect, useMemo } from 'react';
-import { generatePanjurGcode, panjurGroups, panjurSimTools } from '../../lib/gcode/panjur.js';
+import { generatePanjurGcode, panjurGroups, panjurSimTools, panjurBitFromTool } from '../../lib/gcode/panjur.js';
 import { useCtrlEnter } from '../../hooks/useCtrlEnter.js';
+import { useToolMagazine } from '../../hooks/useToolMagazine.js';
+import { usePersistentState } from '../../hooks/usePersistentState.js';
+import { normalizeMagazine, toolProblem } from '../../lib/sim/toolMagazine.js';
 
 export default function PanjurModule({ onBackToMenu }) {
   const [width, setWidth] = useState(200);
@@ -30,15 +33,32 @@ export default function PanjurModule({ onBackToMenu }) {
   const [t4Extend, setT4Extend] = useState(0); // T4 açıklığın iki ucunda çerçeveye doğru bu kadar ileri gider
   const [t4Feed, setT4Feed] = useState(2000); // T4 kesim hızı (Ø4 bıçak: yavaş)
 
-  const [toolNo, setToolNo] = useState('14');
   const [spindle, setSpindle] = useState(12000);
   const [plunge, setPlunge] = useState(3000);
-  const [drillTool, setDrillTool] = useState('4');
-  const [exitToolDia, setExitToolDia] = useState(4);
   const [drillSpindle, setDrillSpindle] = useState(12000);
-  const [t14TipDia, setT14TipDia] = useState(3);
-  const [t14BodyDia, setT14BodyDia] = useState(8);
-  const [t14Height, setT14Height] = useState(30);
+  // the bits come from the magazine (Atölye → Bıçaklar): only the slot is chosen here,
+  // the shape and size are the tool's own
+  const [mag] = useToolMagazine();
+  const [toolSlots, setToolSlots] = usePersistentState('empire-cnc-panjur-tools', { relief: '', exit: '' });
+  const slotList = useMemo(() => {
+    const m = normalizeMagazine(mag);
+    const byId = new Map(m.library.map((t) => [t.id, t]));
+    return Array.from({ length: m.slotCount }, (_, k) => {
+      const tool = byId.get(m.slots[k + 1]);
+      return { no: String(k + 1), tool: tool && !toolProblem(tool) ? tool : null };
+    });
+  }, [mag]);
+  const isReliefBit = (t) => !!t && !panjurBitFromTool(t).error;
+  const isExitBit = (t) => !!t && t.type === 'flat' && Number(t.dia) === 4;
+  // the panjur bit is never guessed (the first ball in the magazine may be a Ø10);
+  // the Ø4 exit bit, when not chosen yet, is the first Ø4 flat one
+  const toolNo = slotList.some((s) => s.no === toolSlots.relief && isReliefBit(s.tool)) ? toolSlots.relief : '';
+  const drillTool = slotList.some((s) => s.no === toolSlots.exit && isExitBit(s.tool))
+    ? toolSlots.exit : (slotList.find((s) => isExitBit(s.tool))?.no || '');
+  const reliefTool = slotList.find((s) => s.no === toolNo)?.tool || null;
+  const exitTool = slotList.find((s) => s.no === drillTool)?.tool || null;
+  const bit = useMemo(() => panjurBitFromTool(reliefTool), [reliefTool]);
+  const exitToolDia = exitTool ? Number(exitTool.dia) : 0;
 
   const [safeZ, setSafeZ] = useState(30);
   const [toolChangeZ, setToolChangeZ] = useState(30);
@@ -82,9 +102,9 @@ export default function PanjurModule({ onBackToMenu }) {
       exitGap: parseFloat(exitGap) || 0,
       stepover: parseFloat(stepover) || 0,
       edgeInset,
-      t14TipDia: parseFloat(t14TipDia) || 0,
-      t14BodyDia: parseFloat(t14BodyDia) || 0,
-      t14Height: parseFloat(t14Height) || 0,
+      t14TipDia: bit.t14TipDia || 0,
+      t14BodyDia: bit.t14BodyDia || 0,
+      t14Height: bit.t14Height || 0,
       startZ: parseFloat(startZ) || 0,
       endZ: parseFloat(endZ) || 0,
       feed: parseFloat(feed) || 0,
@@ -100,7 +120,7 @@ export default function PanjurModule({ onBackToMenu }) {
       t4Plunge: parseFloat(t4Plunge) || 800,
       drillTool,
       drillSpindle: parseFloat(drillSpindle) || 0,
-      exitToolDia: parseFloat(exitToolDia) || 0,
+      exitToolDia,
       safeZ: parseFloat(safeZ) || 30,
       toolChangeZ: parseFloat(toolChangeZ) || 30,
       homeZ: parseFloat(homeZ) || 30,
@@ -108,7 +128,7 @@ export default function PanjurModule({ onBackToMenu }) {
   }, [
     width, height, offsetMode, direction, offset, offsetLeft, offsetRight, offsetBottom, offsetTop, centerFlat,
     pitch, exitGap, stepover, edgeInset, startZ, endZ, feed, plunge, toolNo, spindle, groundEntry, exitCut,
-    drillTool, drillSpindle, exitToolDia, t14TipDia, t14BodyDia, t14Height, safeZ, toolChangeZ, homeZ, t4Step, t4Extend, t4Feed, t4Peck, t4Plunge
+    drillTool, drillSpindle, exitToolDia, bit, safeZ, toolChangeZ, homeZ, t4Step, t4Extend, t4Feed, t4Peck, t4Plunge
   ]);
 
   const summaryText = useMemo(() => {
@@ -128,6 +148,8 @@ export default function PanjurModule({ onBackToMenu }) {
   function generate() {
     setMessage(null);
     try {
+      if (bit.error) throw new Error(`${bit.error} Atölye → Bıçaklar'da magazine yükleyip buradan seç.`);
+      if (currentConfig.groundEntry && !drillTool) throw new Error("Zemine giriş için magazinde Ø4 düz bıçak yok. Atölye → Bıçaklar'da yükleyip buradan seç.");
       // Yan yana seri üretim: her kapak kendi ölçüsüyle, X başlangıcı oransal artarak
       const multi = covers.length > 1;
       const coverList = multi ? covers : [{ id: 1, width: currentConfig.width, height: currentConfig.height }];
@@ -470,8 +492,15 @@ function downloadFile() {
         <h2>3. Takım ve Makine</h2>
         <div className="row3">
           <div>
-            <label>Panjur takımı</label>
-            <input type="text" value={toolNo} onChange={(e) => setToolNo(e.target.value)} />
+            <label>Panjur bıçağı (magazin)</label>
+            <select value={toolNo} onChange={(e) => setToolSlots((s) => ({ ...s, relief: e.target.value }))}>
+              {!toolNo && <option value="">— bıçak seç —</option>}
+              {slotList.map((s) => (
+                <option key={s.no} value={s.no} disabled={!isReliefBit(s.tool)}>
+                  T{s.no} {s.tool ? s.tool.name : '(boş)'}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label>Spindle S</label>
@@ -485,31 +514,29 @@ function downloadFile() {
 
         <div className="row3" style={{ marginTop: 10 }}>
           <div>
-            <label>Uç delme takımı</label>
-            <input type="text" value={drillTool} onChange={(e) => setDrillTool(e.target.value)} />
+            <label>Uç delme bıçağı (magazin, Ø4 düz)</label>
+            <select value={drillTool} onChange={(e) => setToolSlots((s) => ({ ...s, exit: e.target.value }))}>
+              {!drillTool && <option value="">— Ø4 düz bıçak yok —</option>}
+              {slotList.map((s) => (
+                <option key={s.no} value={s.no} disabled={!isExitBit(s.tool)}>
+                  T{s.no} {s.tool ? s.tool.name : '(boş)'}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
-            <label>Uç bıçağı çapı (mm)</label>
-            <input type="number" value={exitToolDia} min="4" max="4" step="0.1" onChange={(e) => setExitToolDia(parseFloat(e.target.value) || 0)} />
+            <label>Panjur bıçağı ölçüsü</label>
+            <div className="hint" style={{ marginTop: 6 }}>
+              {bit.error
+                ? bit.error
+                : bit.t14BodyDia > bit.t14TipDia
+                  ? `Konik: uç Ø${bit.t14TipDia}, gövde Ø${bit.t14BodyDia}, ${bit.t14Height.toFixed(1)} mm`
+                  : `Küre uç Ø${bit.t14TipDia}`}
+            </div>
           </div>
           <div>
             <label>Uç delme S</label>
             <input type="number" value={drillSpindle} min="1" step="100" onChange={(e) => setDrillSpindle(parseFloat(e.target.value) || 0)} />
-          </div>
-        </div>
-
-        <div className="row3" style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
-          <div>
-            <label>T14 uç çapı (mm, ballnose)</label>
-            <input type="number" value={t14TipDia} min="0.1" step="0.1" onChange={(e) => setT14TipDia(parseFloat(e.target.value) || 0)} />
-          </div>
-          <div>
-            <label>T14 gövde çapı (mm)</label>
-            <input type="number" value={t14BodyDia} min="1" step="0.5" onChange={(e) => setT14BodyDia(parseFloat(e.target.value) || 0)} />
-          </div>
-          <div>
-            <label>T14 konik yükseklik (mm)</label>
-            <input type="number" value={t14Height} min="1" step="1" onChange={(e) => setT14Height(parseFloat(e.target.value) || 0)} />
           </div>
         </div>
 
@@ -529,7 +556,7 @@ function downloadFile() {
         </div>
 
         <div className="hint" style={{ marginTop: 10 }}>
-          Zemine giriş açıksa önce bütün panjurlar T14 ile işlenir, ardından T4 her panjurun ucunu eğimi sürdürerek zemine kadar keser.
+          Bıçaklar Atölye → Bıçaklar'daki magazinden gelir; ölçüleri oradan okunur. Zemine giriş açıksa önce bütün panjurlar panjur bıçağıyla işlenir, ardından Ø4 bıçak her panjurun ucunu eğimi sürdürerek zemine kadar keser.
         </div>
       </div>
 
