@@ -85,3 +85,21 @@ describe('nesting: glass doors', () => {
     expect(between.some((l) => /^M6T/.test(l))).toBe(false);
   });
 });
+
+describe('cam: optional step-down of the through-cut', async () => {
+  const { buildCamKesimGcode } = await import('./cam.js');
+  const base = { ...MACHINE, ...CAM, width: W, height: H };
+
+  it('off by default: one pass at Z0 per opening', () => {
+    const g = buildCamKesimGcode(base);
+    expect(g.split('\n').filter((l) => /^G1 +Z/.test(l)).map((l) => l.match(/Z(\S+)/)[1])).toEqual(['0.00', '0.00', '0.00', '0.00']);
+  });
+
+  it('kesimStepdown 6 on 18 mm: Z12, Z6, Z0 around each opening', () => {
+    const g = buildCamKesimGcode({ ...base, kesimStepdown: 6 });
+    const zs = g.split('\n').filter((l) => /^G1 +Z/.test(l)).map((l) => l.match(/Z(\S+)/)[1]);
+    expect(zs).toEqual(Array(4).fill(['12.00', '6.00', '0.00']).flat());
+    const p = buildCamPartProgram(W, H, { ...base, kesimStepdown: 6 });
+    expect(p).toMatch(/G1 Z12\.00/);
+  });
+});

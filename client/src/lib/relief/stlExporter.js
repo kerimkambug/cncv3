@@ -100,8 +100,10 @@ export function exportDepthGridToSTL(
 
   const numQuads = (activeCols - 1) * (activeRows - 1);
   const numTris = numQuads * 2; // Üst rölyef yüzey üçgenleri
-  // Alt taban (2 üçgen) + 4 yan duvar üçgenleri
-  const totalTris = numTris + 2 + (activeCols - 1) * 4 + (activeRows - 1) * 4;
+  // Alt taban: merkezden kenar noktalarına yelpaze — yan duvarlarla aynı köşeleri
+  // paylaşır (iki büyük üçgen T-birleşimleri bırakıp modeli su sızdırmaz yapmıyordu)
+  const bottomTris = 2 * (activeCols - 1) + 2 * (activeRows - 1);
+  const totalTris = numTris + bottomTris + (activeCols - 1) * 4 + (activeRows - 1) * 4;
 
   const headerSize = 80;
   const countSize = 4;
@@ -171,12 +173,16 @@ export function exportDepthGridToSTL(
   }
 
   // 2. ALT DÜZ TABAN (Normaller -Z yönünde aşağı bakar, manifold standardı)
-  const b00 = { x: 0, y: 0, z: 0 };
-  const b10 = { x: realWidth, y: 0, z: 0 };
-  const b01 = { x: 0, y: realHeight, z: 0 };
-  const b11 = { x: realWidth, y: realHeight, z: 0 };
-  writeTriangle(b00, b01, b10);
-  writeTriangle(b10, b01, b11);
+  // Kenar üzerindeki her duvar köşesi tabanda da köşe: üstten saat yönü tersine
+  // dolaşılan kenar P→Q için (merkez, Q, P) üçgeni -Z'ye bakar.
+  const center = { x: realWidth / 2, y: realHeight / 2, z: 0 };
+  const base = (c, r) => { const p = getPoint(c, r); return { x: p.x, y: p.y, z: 0 }; };
+  const ring = [];
+  for (let c = 0; c < activeCols - 1; c++) ring.push(base(c, activeRows - 1));      // güney, x artar
+  for (let r = activeRows - 1; r > 0; r--) ring.push(base(activeCols - 1, r));     // doğu, y artar
+  for (let c = activeCols - 1; c > 0; c--) ring.push(base(c, 0));                  // kuzey, x azalır
+  for (let r = 0; r < activeRows - 1; r++) ring.push(base(0, r));                  // batı, y azalır
+  for (let k = 0; k < ring.length; k++) writeTriangle(center, ring[(k + 1) % ring.length], ring[k]);
 
   // 3. YAN DUVARLAR (Tüm kenarlarda normaller dışarıyı gösterir)
   // GÜNEY DUVARI (y = 0) -> Normal -Y

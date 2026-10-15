@@ -436,6 +436,9 @@ export function generatePanjurGcode(c, offsetX = 0, offsetY = 0, isCombined = fa
   //  - t14Header / t4Header: takım değişim + M3/M7 başlıklarını yaz (seri modda sadece ilk kapakta)
   const { phase = 'all', t14Header = true, t4Header = true } = options;
   validatePanjurConfig(c);
+  // T14 başlığı = yeni bir zincirin (ya da tek kapağın) başı: önceki bir çağrının
+  // (yarıda kalan / hata veren) bıraktığı spindle durumu bu programa taşınmasın
+  if (t14Header && (phase === 'all' || phase === 'raster')) spindleState.on = false;
 
   const g = panjurGroups(c);
   // Birleştirilmiş seri üretimde program kabuğu (%, O2000, G54) yalnızca ilk parçada yazılır

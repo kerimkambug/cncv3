@@ -8,7 +8,7 @@ export default function CamModule({ onBackToMenu }) {
     disMargin: 60, icerGap: 20, oturmaPayi: 10,
     thickness: 18, spindleSpeed: 18000, toolDia: 6,
     kesimToolNo: '6', taramaToolNo: '6', taramaDepth: 9, stepover: 3,
-    plungeFeed: 3000, cutFeed: 5000, safeZ: 61, homeZ: 96,
+    plungeFeed: 3000, cutFeed: 5000, safeZ: 61, homeZ: 96, kesimStepdown: 0,
   });
 
   function set(field, value) {
@@ -70,6 +70,9 @@ export default function CamModule({ onBackToMenu }) {
               <div><label>Tarama stepover (mm)</label><input type="number" value={cfg.stepover} onChange={(e) => setNum('stepover', e.target.value)} /></div>
               <div><label>Dalış feed</label><input type="number" value={cfg.plungeFeed} onChange={(e) => setNum('plungeFeed', e.target.value)} /></div>
               <div><label>Kesim feed</label><input type="number" value={cfg.cutFeed} onChange={(e) => setNum('cutFeed', e.target.value)} /></div>
+            </div>
+            <div className="row3">
+              <div><label>Kesim kademesi (mm, 0 = tek paso)</label><input type="number" min="0" value={cfg.kesimStepdown} onChange={(e) => setNum('kesimStepdown', e.target.value)} /></div>
             </div>
             <div className="row2">
               <div><label>Safe Z</label><input type="number" value={cfg.safeZ} onChange={(e) => setNum('safeZ', e.target.value)} /></div>

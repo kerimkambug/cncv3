@@ -2,7 +2,7 @@
 // Empire CNC — Profesyonel 3D Bas-Rölyef (3D Relief) G-Code Üretim Motoru
 // Küre uçlu (Ballnose) takım telafisi, çift yönlü pürüzsüzleştirme ve çok açılı işleme.
 import { guardZ } from './zGuard.js';
-import { fmt, fmt3 } from './common.js';
+import { fmt, fmt3, cutLevels } from './common.js';
 import { numOr, validateDepthAgainstThickness } from '../../../../shared/gcode/validation.js';
 import { reliefMachineZ } from '../../../../shared/gcode/reliefConvention.js';
 
@@ -179,6 +179,43 @@ export function calculateCompensatedZ(depthRatio, gradX, gradY, cfg, cellW_mm = 
 }
 
 /**
+ * Drop-cutter: the tool tip height at (x, y) so that the tool touches the relief
+ * surface and never cuts into it — every grid point under the tool is checked
+ * (a ball: its sphere; a flat end mill: its flat bottom). The old per-point slope
+ * correction (calculateCompensatedZ) looked at one point only and, capped at 35 %
+ * of the radius, let the ball's side bite into a steep wall next to it.
+ * Grid row 0 is the top of the picture (y = height).
+ */
+export function makeDropCutter(depthGrid, cols, rows, cfg) {
+  const thickness = numOr(cfg.thickness, 18);
+  const maxDepth = numOr(cfg.maxDepth, 5);
+  const width = Math.max(1, numOr(cfg.width, 200));
+  const height = Math.max(1, numOr(cfg.height, 200));
+  const R = Math.max(0, numOr(cfg.toolDia, 4) / 2);
+  const ball = (cfg.toolType || 'ballnose') === 'ballnose';
+  const cw = width / Math.max(1, cols - 1), ch = height / Math.max(1, rows - 1);
+  const S = new Float32Array(cols * rows);
+  for (let k = 0; k < S.length; k++) S[k] = reliefMachineZ(Math.max(0, Math.min(1, depthGrid[k] || 0)), thickness, maxDepth);
+  const ni = Math.ceil(R / cw) + 1, nj = Math.ceil(R / ch) + 1, R2 = R * R;
+  return (x, y) => {
+    const ci = Math.round(x / cw), cj = Math.round((height - y) / ch);
+    let best = -Infinity;
+    for (let j = Math.max(0, cj - nj); j <= Math.min(rows - 1, cj + nj); j++) {
+      const dy = (height - j * ch) - y, dy2 = dy * dy;
+      if (dy2 > R2) continue;
+      for (let i = Math.max(0, ci - ni); i <= Math.min(cols - 1, ci + ni); i++) {
+        const dx = i * cw - x, d2 = dx * dx + dy2;
+        if (d2 > R2) continue;
+        const t = S[j * cols + i] + (ball ? Math.sqrt(R2 - d2) - R : 0);
+        if (t > best) best = t;
+      }
+    }
+    // no grid point under a zero-size tool: the surface right there
+    return Number.isFinite(best) ? best : reliefMachineZ(sampleDepthGridUV(depthGrid, cols, rows, x / width, y / height).d, thickness, maxDepth);
+  };
+}
+
+/**
  * Takım yolu üzerindeki Z titreşimlerini ve sivri dikensi gürültüleri filtreler (Pürüzsüz CNC Hareketi)
  */
 function smoothZTrack(points, windowSize = 3) {
@@ -196,10 +233,12 @@ function smoothZTrack(points, windowSize = 3) {
         count++;
       }
     }
+    // never below the point's own (drop-cutter) height: averaging a peak with its
+    // lower neighbours would make the tool cut into the peak
     out.push({
       x: points[i].x,
       y: points[i].y,
-      z: +(sumZ / count).toFixed(3),
+      z: +Math.max(sumZ / count, points[i].z).toFixed(3),
     });
   }
   return out;
@@ -217,7 +256,11 @@ export function simplifyPathPoints(points, tolerance = 0.01) {
     const curr = points[i];
     const next = points[i + 1];
 
-    const expectedZ = prev.z + (next.z - prev.z) * ((curr.x - prev.x) / (next.x - prev.x || 1));
+    // where along prev→next this point lies, in 2D (a Y raster keeps X constant:
+    // a ratio on X alone was always 0 there, and dropped points the line then cut into)
+    const total = Math.hypot(next.x - prev.x, next.y - prev.y) || 1;
+    const t = Math.hypot(curr.x - prev.x, curr.y - prev.y) / total;
+    const expectedZ = prev.z + (next.z - prev.z) * t;
     if (Math.abs(curr.z - expectedZ) > tolerance) {
       result.push(curr);
       prev = curr;
@@ -314,12 +357,15 @@ export function buildReliefGcodeFromDepthGrid(depthGrid, gridCols, gridRows, cfg
 
   let totalPoints = 0;
   let isToolDown = false;
+  let lastZ = safeZ;
+  const dropZ = makeDropCutter(depthGrid, gridCols, gridRows, { ...cfg, width, height, thickness, maxDepth, toolDia, toolType });
 
   const passes = direction === 'cross' ? ['x', 'y'] : [direction];
-  const cellW_mm = width / Math.max(1, gridCols - 1);
-  const cellH_mm = height / Math.max(1, gridRows - 1);
 
   for (const dir of passes) {
+    // a new pass (cross: the Y raster after the X one) starts elsewhere: lift first,
+    // never feed across the relief at depth to its first point
+    if (isToolDown) { lines.push(`G0 Z${fmt(safeZ)}`); isToolDown = false; }
     if (dir === 'x') {
       const ySteps = Math.ceil(height / stepover);
       const xSteps = Math.ceil(width / resolution);
@@ -335,8 +381,7 @@ export function buildReliefGcodeFromDepthGrid(depthGrid, gridCols, gridRows, cfg
 
           const u = x / width;
           const v = y / height;
-          const { d, gradX, gradY } = sampleDepthGridUV(depthGrid, gridCols, gridRows, u, v);
-          const z = calculateCompensatedZ(d, gradX, gradY, cfg, cellW_mm, cellH_mm);
+          const z = dropZ(u * width, v * height);
 
           rowPoints.push({ x, y, z: +z.toFixed(3) });
         }
@@ -349,9 +394,17 @@ export function buildReliefGcodeFromDepthGrid(depthGrid, gridCols, gridRows, cfg
             lines.push(`G0 X${fmt(p.x)} Y${fmt(p.y)} Z${fmt(safeZ)}`);
             lines.push(`G1 Z${fmt3(p.z)} F${plungeFeed.toFixed(1)}`);
             isToolDown = true;
+          } else if (pIdx === 0) {
+            // step to the next row: climb first, cross at the higher Z, then go down;
+            // a straight diagonal link would cut through a wall between the two rows
+            const linkZ = Math.max(lastZ, p.z);
+            if (linkZ > lastZ) lines.push(`G1 Z${fmt3(linkZ)} F${plungeFeed.toFixed(1)}`);
+            lines.push(`G1 X${fmt(p.x)} Y${fmt(p.y)} Z${fmt3(linkZ)} F${cutFeed.toFixed(1)}`);
+            if (p.z < linkZ) lines.push(`G1 Z${fmt3(p.z)} F${plungeFeed.toFixed(1)}`);
           } else {
             lines.push(`G1 X${fmt(p.x)} Y${fmt(p.y)} Z${fmt3(p.z)} F${cutFeed.toFixed(1)}`);
           }
+          lastZ = p.z;
           totalPoints++;
         }
       }
@@ -371,8 +424,7 @@ export function buildReliefGcodeFromDepthGrid(depthGrid, gridCols, gridRows, cfg
 
           const u = x / width;
           const v = y / height;
-          const { d, gradX, gradY } = sampleDepthGridUV(depthGrid, gridCols, gridRows, u, v);
-          const z = calculateCompensatedZ(d, gradX, gradY, cfg, cellW_mm, cellH_mm);
+          const z = dropZ(u * width, v * height);
 
           colPoints.push({ x, y, z: +z.toFixed(3) });
         }
@@ -385,9 +437,17 @@ export function buildReliefGcodeFromDepthGrid(depthGrid, gridCols, gridRows, cfg
             lines.push(`G0 X${fmt(p.x)} Y${fmt(p.y)} Z${fmt(safeZ)}`);
             lines.push(`G1 Z${fmt3(p.z)} F${plungeFeed.toFixed(1)}`);
             isToolDown = true;
+          } else if (pIdx === 0) {
+            // step to the next row: climb first, cross at the higher Z, then go down;
+            // a straight diagonal link would cut through a wall between the two rows
+            const linkZ = Math.max(lastZ, p.z);
+            if (linkZ > lastZ) lines.push(`G1 Z${fmt3(linkZ)} F${plungeFeed.toFixed(1)}`);
+            lines.push(`G1 X${fmt(p.x)} Y${fmt(p.y)} Z${fmt3(linkZ)} F${cutFeed.toFixed(1)}`);
+            if (p.z < linkZ) lines.push(`G1 Z${fmt3(p.z)} F${plungeFeed.toFixed(1)}`);
           } else {
             lines.push(`G1 X${fmt(p.x)} Y${fmt(p.y)} Z${fmt3(p.z)} F${cutFeed.toFixed(1)}`);
           }
+          lastZ = p.z;
           totalPoints++;
         }
       }
@@ -412,11 +472,14 @@ export function buildReliefGcodeFromDepthGrid(depthGrid, gridCols, gridRows, cfg
     lines.push(`M6T${cutTool}`);
     lines.push(`M3 S${spindleSpeed}`);
     lines.push(`G0 X${fmt(-cutRadius)} Y${fmt(-cutRadius)} Z${fmt(safeZ)}`);
-    lines.push(`G1 Z0.000 F${plungeFeed.toFixed(1)}`);
-    lines.push(`G1 X${fmt(width + cutRadius)} F${cutFeed.toFixed(1)}`);
-    lines.push(` Y${fmt(height + cutRadius)} `);
-    lines.push(`X${fmt(-cutRadius)}  `);
-    lines.push(` Y${fmt(-cutRadius)} `);
+    // outerCutStepdown > 0: in passes of that depth down to Z0; 0 = one pass (as before)
+    for (const z of cutLevels(thickness, cfg.outerCutStepdown)) {
+      lines.push(`G1 Z${fmt3(z)} F${plungeFeed.toFixed(1)}`);
+      lines.push(`G1 X${fmt(width + cutRadius)} F${cutFeed.toFixed(1)}`);
+      lines.push(` Y${fmt(height + cutRadius)} `);
+      lines.push(`X${fmt(-cutRadius)}  `);
+      lines.push(` Y${fmt(-cutRadius)} `);
+    }
     lines.push(`G0 Z${fmt(safeZ)}`);
   }
 
@@ -500,3 +563,5 @@ export function estimateReliefTime(result, cfg) {
 
   return totalMinutes;
 }
+
+export { cutLevels };

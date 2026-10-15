@@ -10,7 +10,7 @@
 // equivalent (same depth, same coverage), just not the same aesthetic.
 import { guardZ } from './zGuard.js';
 import ClipperLib from 'clipper-lib';
-import { fmt3 } from './common.js';
+import { fmt3, cutLevels } from './common.js';
 import { camComputeOpenings } from './cam.js';
 
 const CAM_SCALE = 1000; // mm -> integer units for Clipper
@@ -103,8 +103,11 @@ export function buildCamPartProgram(width, height, cfg) {
     const x1 = o.x1 + r; const y1 = o.y1 + r; const x2 = o.x2 - r; const y2 = o.y2 - r;
     if (x2 <= x1 || y2 <= y1) throw new Error(`Takım çapı (${c.toolDia}mm) cam gözünden büyük.`);
     lines.push(`G0 X${f2(x2)} Y${f2(y1)} Z${safeZ}`);
-    lines.push(`G1 Z0.00 F${plunge}`);
-    lines.push(`G1 Y${f2(y2)} F${feed}`, `G1 X${f2(x1)}`, `G1 Y${f2(y1)}`, `G1 X${f2(x2)}`);
+    // kesimStepdown > 0: in passes of that depth down to Z0 (default: one pass)
+    for (const z of cutLevels(Number(c.thickness) || 0, c.kesimStepdown)) {
+      lines.push(`G1 Z${z.toFixed(2)} F${plunge}`);
+      lines.push(`G1 Y${f2(y2)} F${feed}`, `G1 X${f2(x1)}`, `G1 Y${f2(y1)}`, `G1 X${f2(x2)}`);
+    }
     lines.push(`G0 Z${safeZ}`);
   });
   return guardZ(lines.join('\n'));

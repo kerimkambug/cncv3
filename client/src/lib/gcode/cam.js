@@ -4,7 +4,7 @@
 // (through-cut) gcode for them. Validated against real production files —
 // see camTarama.js for the routing ("tarama") pass.
 import { guardZ } from './zGuard.js';
-import { fmt3 } from './common.js';
+import { fmt3, cutLevels } from './common.js';
 
 /**
  * @param {object} cfg - { width, height, gozSayisi, kolonSayisi, disMargin, icerGap }
@@ -67,11 +67,15 @@ export function buildCamKesimGcode(cfg) {
     } else {
       lines.push(`G0 X${fmt3(x1)} Y${fmt3(y1)} `);
     }
-    lines.push(`G1   Z0.00 F${plungeFeed.toFixed(1)}`);
-    lines.push(`G1 X${fmt3(x2)}   F${cutFeed.toFixed(1)}`);
-    lines.push(` Y${fmt3(y2)} `);
-    lines.push(`X${fmt3(x1)}  `);
-    lines.push(` Y${fmt3(y1)} `);
+    // kesimStepdown > 0: the opening is cut in passes of that depth down to Z0;
+    // 0 / empty = one pass at Z0 (the ArtCAM output, byte for byte)
+    cutLevels(Number(cfg.thickness) || 0, cfg.kesimStepdown).forEach((z) => {
+      lines.push(`G1   Z${z.toFixed(2)} F${plungeFeed.toFixed(1)}`);
+      lines.push(`G1 X${fmt3(x2)}   F${cutFeed.toFixed(1)}`);
+      lines.push(` Y${fmt3(y2)} `);
+      lines.push(`X${fmt3(x1)}  `);
+      lines.push(` Y${fmt3(y1)} `);
+    });
     lines.push(`G0   Z${fmt3(cfg.safeZ)}`);
   });
   lines.push(`G0 X0.00 Y0.00 Z${fmt3(cfg.homeZ)}`);

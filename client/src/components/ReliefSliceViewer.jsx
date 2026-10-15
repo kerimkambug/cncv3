@@ -67,8 +67,9 @@ export default function ReliefSliceViewer({
 
     points.forEach((p, idx) => {
       const screenX = padding + (idx / (points.length - 1)) * plotW;
-      // Normalleştirilmiş derinlik: 0 (üst) -> h - padding, 1 (alt) -> padding
-      const screenY = padding + p.d * plotH;
+      // d = 1 yüzey (en yüksek) -> üstte (padding), d = 0 en derin -> altta (h - padding);
+      // "0 mm (Yüzey)" etiketi de üstte
+      const screenY = padding + (1.0 - p.d) * plotH;
 
       if (idx === 0) ctx.moveTo(screenX, screenY);
       else ctx.lineTo(screenX, screenY);

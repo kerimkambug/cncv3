@@ -583,6 +583,19 @@ export default function ReliefGenerator({ onBackToMenu }) {
                 Rölyef bitiminde dış çevre konturunu kes (Ebatlama / Profil Kesimi)
               </label>
             </div>
+            {cfg.enableOuterCut && (
+              <div className="row3" style={{ marginTop: 8 }}>
+                <div>
+                  <label>Kontur kesim kademesi (mm, 0 = tek paso)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={cfg.outerCutStepdown ?? 0}
+                    onChange={(e) => updateField('outerCutStepdown', parseFloat(e.target.value) || 0)}
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="action-buttons-group" style={{ marginTop: 20 }}>
               <button

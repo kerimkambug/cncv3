@@ -180,6 +180,17 @@ describe('nesting: a rotated part is cut as itself, turned', async () => {
       });
     });
   }
+
+  it('3 NUMARA turned: every arc names both end axes (its "G3X…I…J…" has no Y of its own)', async () => {
+    const { partProgram } = await import('./nesting.js');
+    const cfg = presets.find((p) => p.name === '3 NUMARA');
+    const flatProg = partProgram({ x: 0, y: 0, width: 400, height: 600, placedWidth: 400, placedHeight: 600, rotated: false }, cfg);
+    expect(flatProg.split('\n').some((l) => /^G3X[^Y]*$/.test(l.trim()))).toBe(true); // the case exists
+    const arcs = partProgram({ x: 1000, y: 50, width: 400, height: 600, placedWidth: 600, placedHeight: 400, rotated: true }, cfg)
+      .split('\n').filter((l) => /^G0*[23](?!\d)/.test(l.trim()));
+    expect(arcs.length).toBeGreaterThan(0);
+    arcs.forEach((l) => expect(l).toMatch(/X-?\d.*Y-?\d/));
+  });
 });
 
 describe('nesting: final cut order', async () => {

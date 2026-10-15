@@ -603,11 +603,24 @@ function emitPartProgramsByTool(lines, parts, cfg, throughCuts = null) {
  * axis, so even a modal line naming only X (or only Y) stays correct, and a
  * rotation keeps G2/G3 directions.
  */
-function rotatePartLine(line, w, ox, oy) {
+function rotatePartLine(line, w, ox, oy, modal) {
   const words = {};
   const re = /([XYIJ])(-?\d+(?:\.\d+)?)/g;
   let m;
   while ((m = re.exec(line))) words[m[1]] = Number(m[2]);
+  if (modal && !line.trim().startsWith('(')) {
+    // track the original position and motion mode: an arc whose end point names
+    // only one axis (3 NUMARA's "G3X…I…J…") is written with BOTH, so the rotated
+    // arc never leans on the controller's modal memory of the other axis
+    const g = /G0*([0-3])(?!\d)/.exec(line);
+    if (g) modal.g = Number(g[1]);
+    if ((modal.g === 2 || modal.g === 3) && (words.X !== undefined || words.Y !== undefined)) {
+      if (words.X === undefined && modal.x !== undefined) words.X = modal.x;
+      if (words.Y === undefined && modal.y !== undefined) words.Y = modal.y;
+    }
+    if (words.X !== undefined) modal.x = words.X;
+    if (words.Y !== undefined) modal.y = words.Y;
+  }
   if (!Object.keys(words).length) return line;
   const head = (/^\s*(G\d+)/.exec(line) || [])[1];
   const z = /Z-?\d+(?:\.\d+)?/.exec(line);
@@ -637,14 +650,16 @@ export function partProgram(part, cfg) {
   if (cfg.cam) {
     // Glass door: tarama + iç kesim, built locally and then placed.
     const local = buildCamPartProgram(w, h, { ...fullCfg, ...cfg.cam });
+    const modal = {};
     return local.split('\n').map((l) => (part.rotated
-      ? rotatePartLine(l, w, part.x, part.y)
+      ? rotatePartLine(l, w, part.x, part.y, modal)
       : shiftPartLine(l, part.x, part.y))).join('\n');
   }
   if (!part.rotated) return buildKapakGcode(w, h, fullCfg, part.x, part.y, true);
+  const modal = {};
   return buildKapakGcode(w, h, fullCfg, 0, 0, true)
     .split('\n')
-    .map((l) => rotatePartLine(l, w, part.x, part.y))
+    .map((l) => rotatePartLine(l, w, part.x, part.y, modal))
     .join('\n');
 }
 
