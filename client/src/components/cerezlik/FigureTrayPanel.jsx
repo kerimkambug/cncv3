@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { DXF_PROFILES, figureFromDxf, figureFromImageData, figureFromStl, sampleShell } from '../../lib/cerezlik/figure.js';
+import { figureFromDxf, figureFromImageData, figureFromStl, sampleShell } from '../../lib/cerezlik/figure.js';
 import { FIGURE_TRAY_DEFAULTS, figureTrayPart } from '../../lib/cerezlik/figureTray.js';
+import { FLAT_BITS, LOGO_DEFAULTS } from '../../lib/cerezlik/logoCarve.js';
 import PartCanvas from './PartCanvas.jsx';
 
 const FIELDS = [
@@ -17,11 +18,31 @@ const FIELDS = [
   ]],
 ];
 
-async function loadFigure(file, profile) {
+/** V carving settings of a DXF logo (T1 90° V; a flat end mill clears floors wider than the depth allows). */
+function LogoFields({ logo, setLogo }) {
+  const o = { ...LOGO_DEFAULTS, ...logo };
+  return (
+    <div className="row3">
+      <div>
+        <label>En fazla derinlik (mm)</label>
+        <input type="number" min="0.5" step="0.5" value={o.maxDepth} onChange={(e) => setLogo({ maxDepth: e.target.value === '' ? '' : Number(e.target.value) })} />
+      </div>
+      <div>
+        <label>Geniş taban bıçağı</label>
+        <select value={o.flatTool} onChange={(e) => { const [t, d] = FLAT_BITS.find(([x]) => x === Number(e.target.value)); setLogo({ flatTool: t, flatDia: d }); }}>
+          {FLAT_BITS.map(([t, d]) => <option key={t} value={t}>T{t} · Ø{d} düz</option>)}
+        </select>
+      </div>
+      <label className="cz-check cz-text-check"><input type="checkbox" checked={!!o.flatClear} onChange={(e) => setLogo({ flatClear: e.target.checked })} /> Geniş tabanı düz bıçak temizlesin</label>
+    </div>
+  );
+}
+
+async function loadFigure(file) {
   if (/\.stl$/i.test(file.name)) return { fig: figureFromStl(await file.arrayBuffer()) };
   if (/\.dxf$/i.test(file.name)) {
     const dxf = await file.text();
-    return { fig: figureFromDxf(dxf, { profile }), dxf };
+    return { fig: figureFromDxf(dxf), dxf };
   }
   const bmp = await createImageBitmap(file);
   const k = Math.min(1, 1800 / Math.max(bmp.width, bmp.height));
@@ -35,7 +56,6 @@ async function loadFigure(file, profile) {
 /** Figure tray designer: load a figure (STL / depth map / DXF logo), shape the tray around it, add it to the job. */
 export default function FigureTrayPanel({ thickness, ballR = 15, reliefDia = 6, onAdd }) {
   const [figure, setFigure] = useState(null); // { name, fig, dxf? }
-  const [profile, setProfile] = useState('duz'); // edge profile of a DXF logo
   const [params, setParams] = useState(() => ({ ...FIGURE_TRAY_DEFAULTS, fillet: ballR }));
   const [part, setPart] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -64,7 +84,7 @@ export default function FigureTrayPanel({ thickness, ballR = 15, reliefDia = 6, 
     setError('');
     setBusy(true);
     try {
-      const { fig, dxf } = await loadFigure(file, profile);
+      const { fig, dxf } = await loadFigure(file);
       if (!fig.mask.some(Boolean)) throw new Error('Figür bulunamadı: zemin tamamen düz ya da siyah.');
       setFigure({ name: file.name.replace(/\.[^.]+$/, ''), fig, dxf });
     } catch (err) {
@@ -73,24 +93,16 @@ export default function FigureTrayPanel({ thickness, ballR = 15, reliefDia = 6, 
     }
   }
 
-  function onProfile(next) {
-    setProfile(next);
-    if (!figure?.dxf) return;
-    try {
-      setFigure({ ...figure, fig: figureFromDxf(figure.dxf, { profile: next }) });
-    } catch (err) {
-      setError(err.message);
-    }
-  }
-
   const setP = (k, v) => setParams((p) => ({ ...p, [k]: v }));
+  const setLogo = (patch) => setParams((p) => ({ ...p, logo: { ...p.logo, ...patch } }));
+  const carved = !!figure?.dxf; // a DXF logo is V carved into the flat top
   const num = (k) => params[k];
 
   return (
     <div className="cz-figure">
       <div className="cz-drop" onClick={() => input.current?.click()}>
         <strong>{figure ? figure.name : 'Figür seçin'}</strong>
-        <span>STL, DXF logo (kapalı hatlar kabartılır) ya da derinlik haritası (PNG/JPG: beyaz yüksek, siyah zemin)</span>
+        <span>STL, DXF logo (kapalı hatlar V ile oyulur) ya da derinlik haritası (PNG/JPG: beyaz yüksek, siyah zemin)</span>
       </div>
       <input ref={input} type="file" accept=".stl,.dxf,.png,.jpg,.jpeg,.webp" style={{ display: 'none' }} onChange={(e) => { onFile(e.target.files[0]); e.target.value = ''; }} />
       {!figure && (
@@ -126,16 +138,10 @@ export default function FigureTrayPanel({ thickness, ballR = 15, reliefDia = 6, 
               </select>
             </div>
           </div>
-          {figure.dxf && (
-            <div>
-              <label>Logo kenar profili</label>
-              <select value={profile} onChange={(e) => onProfile(e.target.value)}>
-                {Object.entries(DXF_PROFILES).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-              </select>
-            </div>
-          )}
+          {carved && <h3>Logo · V oyma (T1 90°)</h3>}
+          {carved && <LogoFields logo={params.logo} setLogo={setLogo} />}
           {figure.fig.openChains > 0 && (
-            <div className="hint hint-warn">⚠ DXF'te {figure.fig.openChains} açık hat var; yalnızca kapalı hatlar kabartıldı.</div>
+            <div className="hint hint-warn">⚠ DXF'te {figure.fig.openChains} açık hat var; yalnızca kapalı hatlar işlendi.</div>
           )}
           {FIELDS.map(([title, fields]) => (
             <div key={title}>
@@ -143,6 +149,7 @@ export default function FigureTrayPanel({ thickness, ballR = 15, reliefDia = 6, 
               <div className="row3">
                 {fields
                   .filter(([k]) => !(k === 'H' && params.shape === 'yuvarlak') && !(k === 'r' && params.shape !== 'dikdortgen'))
+                  .filter(([k]) => !(carved && ['figH', 'figTop'].includes(k)))
                   .map(([k, label, unit]) => (
                     <div key={k}>
                       <label>{label === 'En' && params.shape === 'yuvarlak' ? 'Çap' : label}{unit ? ` (${unit})` : ''}</label>

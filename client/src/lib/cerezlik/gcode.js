@@ -2,7 +2,7 @@
 // tool change and footer as the ArtCAM files in numuneler/): tool by tool,
 // pocket → rounding → ball-nose grooves → V lines → through cuts (small parts first).
 
-const KIND_ORDER = ['rough', 'pocket', 'bowl', 'semi', 'relief', 'round', 'groove', 'vline', 'vcarve', 'cut'];
+const KIND_ORDER = ['rough', 'pocket', 'bowl', 'semi', 'relief', 'logoClear', 'logo', 'round', 'groove', 'vline', 'vcarve', 'cut'];
 const RAPID = 10000; // mm/min, for the time estimate only
 const TOOL_CHANGE_S = 15;
 

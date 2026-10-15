@@ -35,7 +35,7 @@ function simTools(r) {
 }
 const KIND_LABELS = [
   ['rough', 'Kaba boşaltma'], ['pocket', 'Bölme taraması'], ['bowl', 'Bölme tabanı'],
-  ['semi', 'Figür ara bitirme'], ['relief', 'Figür detay'], ['round', 'Kenar yuvarlama'], ['groove', 'Oluk'],
+  ['semi', 'Figür ara bitirme'], ['relief', 'Figür detay'], ['logoClear', 'Logo düz bıçak'], ['logo', 'Logo V bıçak'], ['round', 'Kenar yuvarlama'], ['groove', 'Oluk'],
   ['vline', 'V çizgi'], ['vcarve', 'Yazı'], ['cut', 'Kesim'],
 ];
 const PLATE_KEY = 'empire-cnc-cerezlik-plate';

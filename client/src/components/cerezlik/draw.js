@@ -1,6 +1,6 @@
 // Shared canvas drawing for the çerezlik screens.
 
-export const PATH_COLORS = { rough: '#4f8cff', pocket: '#4f8cff', bowl: '#36c5f0', bowlRest: '#ffb86b', semi: '#ffb86b', relief: '#f7e463', round: '#e0a03c', groove: '#ff6f9c', vline: '#c46cff', vcarve: '#ff4fd8', cut: '#2fd08a' };
+export const PATH_COLORS = { rough: '#4f8cff', pocket: '#4f8cff', bowl: '#36c5f0', bowlRest: '#ffb86b', semi: '#ffb86b', relief: '#f7e463', round: '#e0a03c', groove: '#ff6f9c', vline: '#c46cff', vcarve: '#ff4fd8', logo: '#ff4fd8', logoClear: '#4f8cff', cut: '#2fd08a' };
 export const WOOD = { part: '#d8b88a', partEdge: '#8a6236', bowl: '#a97b4c', line: '#5b3a19' };
 
 export function cssVar(name, fallback) {
@@ -163,7 +163,8 @@ export function shadeSurface(surface) {
 
 /** Draws the shaded surface of a 3D part, clipped to its outline, through an affine point map. */
 export function drawSurface(ctx, part, map) {
-  const g = part.surface.grid;
+  const shown = part.surface.view || part.surface; // with a carved logo: its grooves shaded in
+  const g = shown.grid;
   const o = map([0, 0]), ex = map([1, 0]), ey = map([0, 1]);
   ctx.save();
   ctx.beginPath();
@@ -171,7 +172,7 @@ export function drawSurface(ctx, part, map) {
   ctx.clip();
   ctx.transform(ex[0] - o[0], ex[1] - o[1], ey[0] - o[0], ey[1] - o[1], o[0], o[1]);
   ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(shadeSurface(part.surface), g.x0, g.y0, g.w * g.cell, g.h * g.cell);
+  ctx.drawImage(shadeSurface(shown), g.x0, g.y0, g.w * g.cell, g.h * g.cell);
   ctx.restore();
   ctx.beginPath();
   tracePoly(ctx, part.outline, map);

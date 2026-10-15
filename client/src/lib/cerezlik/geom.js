@@ -194,3 +194,12 @@ export function roundShape(outer, holes = [], r = 0, rIn = 0) {
   if (rIn > 0) loops = offset(offset(loops, rIn, { keepOrientation: true }), -rIn, { keepOrientation: true });
   return shapes(clipExec(ClipperLib.ClipType.ctUnion, loops, []));
 }
+
+/** Loops filled even-odd (a drawing: nested outlines alternate solid / hole), as shapes. */
+export function evenOddShapes(loops) {
+  const c = new ClipperLib.Clipper();
+  c.AddPaths(loops.filter((p) => p.length >= 3).map(toClip), ClipperLib.PolyType.ptSubject, true);
+  const tree = new ClipperLib.PolyTree();
+  c.Execute(ClipperLib.ClipType.ctUnion, tree, ClipperLib.PolyFillType.pftEvenOdd, ClipperLib.PolyFillType.pftEvenOdd);
+  return shapes(tree);
+}
