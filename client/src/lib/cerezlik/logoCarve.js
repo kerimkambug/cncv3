@@ -93,23 +93,19 @@ function centreLines(regions, o, k) {
   const m = maskPolys(g, loops);
   const d = edt(m, g.w, g.h);
   const capCells = o.maxDepth / k / c;
-  // ridge cells: no 4-neighbour is a full cell further from the outline (off the
-  // axis the distance grows by one cell per cell inwards), and above the flat floor
-  const ridge = new Uint8Array(g.w * g.h);
-  for (let j = 1; j < g.h - 1; j++) for (let i = 1; i < g.w - 1; i++) {
-    const q = j * g.w + i;
-    if (!m[q] || d[q] < 1 || d[q] - 0.5 > capCells + 1) continue;
-    const up = Math.max(d[q + 1], d[q - 1], d[q + g.w], d[q - g.w]) - d[q];
-    if (up < 0.75) ridge[q] = 1;
-  }
-  const sk = thin(ridge, g.w, g.h);
+  // the region thinned to its centre lines (as the V-carved text does); stretches
+  // over the flat floor are left out, the floor rings cover them
+  const sk = thin(m, g.w, g.h);
+  for (let q = 0; q < sk.length; q++) if (sk[q] && d[q] - 0.5 > capCells + 1) sk[q] = 0;
   const toPt = (q) => {
     const i = q % g.w, j = (q / g.w) | 0;
     return [g.x0 + (i + 0.5) * c, g.y0 + (j + 0.5) * c, Math.min(o.maxDepth, Math.max(0.02, (d[q] - 0.5) * c * k))];
   };
+  const len = (p) => p.slice(1).reduce((a, q, i) => a + Math.hypot(q[0] - p[i][0], q[1] - p[i][1]), 0);
   return traceSkeleton(sk, g.w, g.h)
-    .filter((path) => path.length >= 3)
-    .map((path) => simplify3(path.map(toPt), 0.02));
+    .filter((path) => path.length >= 2)
+    .map((path) => simplify3(path.map(toPt), 0.02))
+    .filter((p) => len(p) >= 0.4); // specks: the rings already cut them
 }
 
 function vcarve(regions, o) {
@@ -133,7 +129,8 @@ function vcarve(regions, o) {
       if (!ring.length) break;
       for (const l of ring) rings.push(closedPass(l, o.maxDepth));
     }
-    vPasses.push(...rings);
+    // rings around a speck are too small to matter (the centre line covers them)
+    vPasses.push(...rings.filter((p) => p.length > 3 && p.slice(1).reduce((a, q, i) => a + Math.hypot(q[0] - p[i][0], q[1] - p[i][1]), 0) >= 0.5));
     if (o.flatClear) {
       let cur = offset(loops, -(capInset + r), { keepOrientation: true, arcTol: 0.05 });
       const step = 0.45 * o.flatDia;
