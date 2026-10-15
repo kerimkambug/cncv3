@@ -44,11 +44,14 @@ export default function SimPanel({ gcode = null, getGcode = null, top = 18, tool
       : null;
     // …but only the part of it the tools reach is simulated: one tray on a whole
     // plate gets a fine grid instead of the plate's coarse one
+    // (only when the stock is far bigger than that area — a door is shown whole,
+    // its uncut frame margins included)
     const reach = roughBox(text, topVal);
-    let box = stock ? {
+    const areaOf = (b) => (b.x1 - b.x0) * (b.y1 - b.y0);
+    let box = stock && areaOf(stock) > 4 * areaOf(reach) ? {
       x0: Math.max(stock.x0, reach.x0), y0: Math.max(stock.y0, reach.y0),
       x1: Math.min(stock.x1, reach.x1), y1: Math.min(stock.y1, reach.y1),
-    } : reach;
+    } : stock || reach;
     if (!(box.x1 > box.x0 && box.y1 > box.y0)) box = stock || reach;
     // grid: 0.2 mm where it fits, coarser on a big area (≤ ~5 million columns)
     const area = Math.max(1, (box.x1 - box.x0) * (box.y1 - box.y0));
