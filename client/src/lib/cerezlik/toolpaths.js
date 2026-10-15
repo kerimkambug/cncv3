@@ -15,6 +15,9 @@
 //   bowl   — large ball nose (T7) parallel finishing of the dished compartments
 //   semi   — T2 ball nose over the figure (takes the load off the small bit)
 //   relief — the small relief ball nose, figure only
+// A DXF logo carved into the flat top instead (part.logo, see logoCarve.js):
+//   logoClear — flat end mill over its wide floors
+//   logo      — the V bit: carving rings, single line or hatching
 import { offset, pathLength, signedArea, simplifyLoop } from './geom.js';
 import { ballRaster, contourFinish, roughLevels, wallWaterline } from './surface.js';
 import { dishPart } from './dish.js';
@@ -264,6 +267,11 @@ export function partToolpaths(part0, recipe) {
 
   // 1. pockets (3D parts: rough + finishing from the height map)
   if (part.surface) ops.push(...surfaceOps(part, recipe));
+  // 1b. a DXF logo carved into the flat top (V bit; wide floors cleared by a flat end mill first)
+  for (const op of part.logo?.ops || []) {
+    const src = op.kind === 'logoClear' ? recipe.pocket : recipe.vline;
+    ops.push({ kind: op.kind, tool: op.tool, feed: src.feed, plunge: src.plunge, passes: op.passes.map((p) => p.map(([x, y, d]) => [x, y, +(top - d).toFixed(3)])) });
+  }
   const pocketPassesAll = part.comps.filter((c) => c.kind === 'cep').flatMap((c) => pocketPasses(c, recipe));
   if (pocketPassesAll.length) ops.push({ kind: 'pocket', tool: recipe.pocket.tool, feed: recipe.pocket.feed, plunge: recipe.pocket.plunge, passes: pocketPassesAll });
 

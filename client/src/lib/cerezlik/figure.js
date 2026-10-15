@@ -124,7 +124,10 @@ export function figureFromDxf(text, { res = 700, profile = 'duz', edge = 0.04 } 
     const t = Math.min(1, dist[k] / ramp);
     data[k] = profile === 'yastik' ? Math.sqrt(1 - (1 - t) * (1 - t)) : t;
   }
-  return { w: g.w, h: g.h, data, mask, openChains: chains.length };
+  // the outlines on the figure's unit square (u, v ∈ [0, 1]), for the 2D carving styles
+  const W = g.w * cell, H = g.h * cell;
+  const loopsUV = polys.map((l) => l.map(([x, y]) => [(x - g.x0) / W, (y - g.y0) / H]));
+  return { w: g.w, h: g.h, data, mask, openChains: chains.length, loopsUV, size: [W, H] };
 }
 
 /** Built-in sample: a scallop shell (fan with ribs, two ears at the hinge). */

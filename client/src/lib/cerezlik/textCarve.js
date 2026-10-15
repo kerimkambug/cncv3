@@ -127,7 +127,7 @@ export function traceSkeleton(sk, w, h) {
   return paths;
 }
 
-function simplify3(pts, tol) {
+export function simplify3(pts, tol) {
   if (pts.length < 3) return pts;
   const keep = new Uint8Array(pts.length);
   keep[0] = keep[pts.length - 1] = 1;

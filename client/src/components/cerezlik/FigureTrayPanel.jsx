@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { DXF_PROFILES, figureFromDxf, figureFromImageData, figureFromStl, sampleShell } from '../../lib/cerezlik/figure.js';
 import { FIGURE_TRAY_DEFAULTS, figureTrayPart } from '../../lib/cerezlik/figureTray.js';
+import { HATCH_PATTERNS, LOGO_DEFAULTS, LOGO_STYLES } from '../../lib/cerezlik/logoCarve.js';
 import PartCanvas from './PartCanvas.jsx';
 
 const FIELDS = [
@@ -16,6 +17,58 @@ const FIELDS = [
     ['depth', 'Derinlik', 'mm'], ['fillet', 'Taban radüsü', 'mm'],
   ]],
 ];
+
+const V_BITS = [
+  { key: '1-90', tool: 1, angle: 90, label: 'T1 · 90° V' },
+  { key: '12-135', tool: 12, angle: 135, label: 'T12 · 135° V' },
+];
+
+/** Style options of a DXF logo carved into the flat top (V carving, single line, hatching). */
+function LogoStyleFields({ style, logo, setLogo }) {
+  const o = { ...LOGO_DEFAULTS, ...logo };
+  const bit = V_BITS.find((b) => b.tool === Number(o.tool)) || V_BITS[0];
+  const num = (k, label, extra = {}) => (
+    <div key={k}>
+      <label>{label}</label>
+      <input type="number" value={o[k]} {...extra} onChange={(e) => setLogo({ [k]: e.target.value === '' ? '' : Number(e.target.value) })} />
+    </div>
+  );
+  return (
+    <div className="row3">
+      <div>
+        <label>Oyulacak alan</label>
+        <select value={o.fill} onChange={(e) => setLogo({ fill: e.target.value })}>
+          <option value="koyu">Koyu alanlar (çizim oyulur)</option>
+          <option value="acik">Açık alanlar (yazı ve boşluklar oyulur)</option>
+        </select>
+      </div>
+      <div>
+        <label>V bıçak</label>
+        <select value={bit.key} onChange={(e) => { const b = V_BITS.find((x) => x.key === e.target.value); setLogo({ tool: b.tool, angle: b.angle }); }}>
+          {V_BITS.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
+        </select>
+      </div>
+      {style === 'vcarve' && num('maxDepth', 'En fazla derinlik (mm)', { min: 0.5, step: 0.5 })}
+      {style !== 'vcarve' && num('lineDepth', 'Çizgi derinliği (mm)', { min: 0.2, step: 0.1 })}
+      {style === 'tarama' && (
+        <div>
+          <label>Desen</label>
+          <select value={o.hatch} onChange={(e) => setLogo({ hatch: e.target.value })}>
+            {HATCH_PATTERNS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+        </div>
+      )}
+      {style === 'tarama' && num('hatchStep', 'Çizgi aralığı (mm)', { min: 0.5, step: 0.5 })}
+      {style === 'tarama' && ['paralel', 'capraz', 'isinsal'].includes(o.hatch) && num('hatchAngle', 'Desen açısı (°)', { step: 15 })}
+      {style === 'vcarve' && (
+        <label className="cz-check cz-text-check"><input type="checkbox" checked={o.flatClear} onChange={(e) => setLogo({ flatClear: e.target.checked })} /> Geniş zemini T{o.flatTool} Ø{o.flatDia} düz temizlesin</label>
+      )}
+      {style === 'tarama' && (
+        <label className="cz-check cz-text-check"><input type="checkbox" checked={o.outline} onChange={(e) => setLogo({ outline: e.target.checked })} /> Dış hattı da çiz</label>
+      )}
+    </div>
+  );
+}
 
 async function loadFigure(file, profile) {
   if (/\.stl$/i.test(file.name)) return { fig: figureFromStl(await file.arrayBuffer()) };
@@ -67,6 +120,7 @@ export default function FigureTrayPanel({ thickness, ballR = 15, reliefDia = 6, 
       const { fig, dxf } = await loadFigure(file, profile);
       if (!fig.mask.some(Boolean)) throw new Error('Figür bulunamadı: zemin tamamen düz ya da siyah.');
       setFigure({ name: file.name.replace(/\.[^.]+$/, ''), fig, dxf });
+      setParams((p) => ({ ...p, style: dxf ? (p.style === 'kabartma' ? 'vcarve' : p.style) : 'kabartma' }));
     } catch (err) {
       setError(`${file.name}: ${err.message}`);
       setBusy(false);
@@ -84,6 +138,8 @@ export default function FigureTrayPanel({ thickness, ballR = 15, reliefDia = 6, 
   }
 
   const setP = (k, v) => setParams((p) => ({ ...p, [k]: v }));
+  const setLogo = (patch) => setParams((p) => ({ ...p, logo: { ...p.logo, ...patch } }));
+  const carved = !!figure?.dxf && params.style !== 'kabartma';
   const num = (k) => params[k];
 
   return (
@@ -127,13 +183,24 @@ export default function FigureTrayPanel({ thickness, ballR = 15, reliefDia = 6, 
             </div>
           </div>
           {figure.dxf && (
-            <div>
-              <label>Logo kenar profili</label>
-              <select value={profile} onChange={(e) => onProfile(e.target.value)}>
-                {Object.entries(DXF_PROFILES).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-              </select>
+            <div className="row2">
+              <div>
+                <label>Logo stili</label>
+                <select value={params.style} onChange={(e) => setP('style', e.target.value)}>
+                  {LOGO_STYLES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+                </select>
+              </div>
+              {!carved && (
+                <div>
+                  <label>Logo kenar profili</label>
+                  <select value={profile} onChange={(e) => onProfile(e.target.value)}>
+                    {Object.entries(DXF_PROFILES).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+                  </select>
+                </div>
+              )}
             </div>
           )}
+          {carved && <LogoStyleFields style={params.style} logo={params.logo} setLogo={setLogo} />}
           {figure.fig.openChains > 0 && (
             <div className="hint hint-warn">⚠ DXF'te {figure.fig.openChains} açık hat var; yalnızca kapalı hatlar kabartıldı.</div>
           )}
@@ -143,6 +210,7 @@ export default function FigureTrayPanel({ thickness, ballR = 15, reliefDia = 6, 
               <div className="row3">
                 {fields
                   .filter(([k]) => !(k === 'H' && params.shape === 'yuvarlak') && !(k === 'r' && params.shape !== 'dikdortgen'))
+                  .filter(([k]) => !(carved && ['figH', 'figTop'].includes(k)))
                   .map(([k, label, unit]) => (
                     <div key={k}>
                       <label>{label === 'En' && params.shape === 'yuvarlak' ? 'Çap' : label}{unit ? ` (${unit})` : ''}</label>

@@ -14,6 +14,7 @@ import { circlePts, roundRect } from './catalog.js';
 import { makeGrid, maskPolys, maskToShapes, wallDistance } from './surface.js';
 import { rotateFigure, sampleFigure } from './figure.js';
 import { dishDepth } from './dish.js';
+import { logoCarve, logoDepth } from './logoCarve.js';
 
 export const FIGURE_TRAY_DEFAULTS = {
   shape: 'oval', W: 420, H: 320, r: 40,
@@ -23,7 +24,18 @@ export const FIGURE_TRAY_DEFAULTS = {
   depth: 12, fillet: 15, cell: 0.25, // a finer grid keeps the depth map's detail for a 3 mm relief bit
   ballR: 15, // radius of the ball nose that finishes the compartments (T7 Ø30)
   reliefDia: 6, // the relief bit: the moat around the figure must be wider than it
+  // DXF logos only: 'kabartma' = 3D relief in a recess (as any figure); 'vcarve' /
+  // 'kontur' / 'tarama' = the logo is carved into the flat top (see logoCarve.js)
+  style: 'kabartma',
+  logo: {},
 };
+
+/** The logo outlines (figure unit square) turned like rotateFigure and placed on the tray. */
+function placeLoops(loopsUV, quarter, fx0, fy0, fw, fh) {
+  const q = ((quarter % 4) + 4) % 4;
+  const turn = ([u, v]) => (q === 1 ? [1 - v, u] : q === 2 ? [1 - u, 1 - v] : q === 3 ? [v, 1 - u] : [u, v]);
+  return loopsUV.map((l) => l.map((pt) => { const [u, v] = turn(pt); return [fx0 + u * fw, fy0 + v * fh]; }));
+}
 
 function band(p, q, w) {
   const dx = q[0] - p[0], dy = q[1] - p[1], L = Math.hypot(dx, dy) || 1;
@@ -52,6 +64,8 @@ export function figureTrayPart(figure, params, thickness = 18, name = 'Figürlü
   const padRaised = p.pad < minPad;
   if (padRaised) p.pad = minPad;
   const warnings = [];
+  const carved = p.style && p.style !== 'kabartma' && figure.loopsUV ? p.style : null;
+  if (carved) { p.figH = 0; p.figTop = 0; }
   const fig = rotateFigure(figure, Math.round((p.rot || 0) / 90));
   const outline = outlineFor(p);
   const ob = bbox([outline]);
@@ -107,8 +121,8 @@ export function figureTrayPart(figure, params, thickness = 18, name = 'Figürlü
     const wd = wallDistance(g, m, [sh.outer, ...sh.holes], p.fillet + 2);
     for (let k = 0; k < m.length; k++) if (m[k]) { bowlMask[k] = 1; depth[k] = Math.max(depth[k], dishDepth(D, p.fillet, wd[k])); }
   }
-  const recessMask = recessSmooth.length ? maskPolys(g, recessSmooth) : new Uint8Array(g.w * g.h);
-  if (recessSmooth.length) {
+  const recessMask = recessSmooth.length && !carved ? maskPolys(g, recessSmooth) : new Uint8Array(g.w * g.h);
+  if (recessSmooth.length && !carved) {
     const wd = wallDistance(g, recessMask, recessSmooth, Math.min(4, p.pad + 1) + 2);
     for (let k = 0; k < recessMask.length; k++) {
       if (!recessMask[k]) continue;
@@ -117,14 +131,27 @@ export function figureTrayPart(figure, params, thickness = 18, name = 'Figürlü
       depth[k] = Math.max(depth[k], d);
     }
   }
-  if (padRaised) warnings.push(`Figür çevresi payı ${minPad} mm'ye çıkarıldı: rölyef bıçağı (Ø${p.reliefDia}) daha dar boşluğun dibine giremez.`);
+  if (padRaised && !carved) warnings.push(`Figür çevresi payı ${minPad} mm'ye çıkarıldı: rölyef bıçağı (Ø${p.reliefDia}) daha dar boşluğun dibine giremez.`);
   if (!sil.length) warnings.push('Figür tepsiye yerleşmedi; ölçü ve konumu kontrol edin.');
   if (p.fillet < p.ballR - 0.01) warnings.push(`Taban radüsü (${p.fillet} mm) bitirme topunun yarıçapından (${p.ballR} mm) küçük: top kavise tam oturmaz, dip kavisi küçük bıçakla ayrıca temizlenir. En temiz ve en hızlı sonuç için ${p.ballR} mm girin.`);
 
   const comps = [
     ...bowlShapes.map((sh) => ({ pts: sh.outer, islands: sh.holes, kind: 'cep3d', roundable: p.fillet < D - 1 })),
-    ...recessSmooth.map((l) => ({ pts: l, islands: [], kind: 'cep3d', roundable: true, figure: true })),
+    ...(carved ? [] : recessSmooth.map((l) => ({ pts: l, islands: [], kind: 'cep3d', roundable: true, figure: true }))),
   ];
+  // a carved logo: toolpaths on the flat top, and its grooves in the preview
+  let logo = null, view = null;
+  if (carved) {
+    const loops = placeLoops(figure.loopsUV, Math.round((p.rot || 0) / 90), fx0, fy0, fw, fh);
+    const c = logoCarve(loops, carved, p.logo);
+    warnings.push(...c.warnings);
+    if (c.maxDepth > thickness - 3) warnings.push(`Logo ${c.maxDepth} mm derin oyuluyor; malzemeye göre fazla.`);
+    logo = { style: carved, ops: c.ops, maxDepth: c.maxDepth };
+    const ld = logoDepth(g, c, carved);
+    const z = new Float32Array(g.z.length);
+    for (let k = 0; k < z.length; k++) z[k] = Math.max(depth[k], ld[k]);
+    view = { grid: { ...g, z } };
+  }
   return {
     name: `${name} ${Math.round(ob.w)}×${Math.round(ob.h)}`,
     outline,
@@ -134,7 +161,8 @@ export function figureTrayPart(figure, params, thickness = 18, name = 'Figürlü
     width: ob.w,
     height: ob.h,
     area: area(outline),
-    surface: { grid: g, bowlMask, recessMask, maxDepth: Math.max(D, recessDepth) },
+    surface: { grid: g, bowlMask, recessMask, maxDepth: Math.max(D, recessDepth), ...(view ? { view } : {}) },
+    ...(logo ? { logo } : {}),
     warnings,
     figureParams: p,
   };
