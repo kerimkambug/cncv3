@@ -324,7 +324,7 @@ export const CATALOG = [
   },
   {
     id: 'sunum-yinyang', group: 'Sunumluk', name: 'Yin-yang sunumluk (yarım)',
-    params: [P('D', 'Takım çapı', 360, 220, 600), P('g', 'İki yarı arası boşluk', 6, 0, 20), P('cup', 'Fincan yuvası çapı', 80, 0, 120), P('cd', 'Fincan yuvası derinliği', 5, 2, 10, 0.5), P('gi', 'Oluk kenardan', 16, 10, 40), P('gd', 'Oluk derinliği', 3, 1, 6, 0.5)],
+    params: [P('D', 'Takım çapı', 360, 160, 600), P('g', 'İki yarı arası boşluk', 6, 0, 20), P('cup', 'Fincan yuvası çapı', 80, 0, 120), P('cd', 'Fincan yuvası derinliği', 5, 2, 10, 0.5), P('gi', 'Oluk kenardan', 16, 10, 40), P('gd', 'Oluk derinliği', 3, 1, 6, 0.5)],
     build: (p) => {
       // one half of the yin-yang disc; the other half is the same piece turned 180°
       const R = p.D / 2;
