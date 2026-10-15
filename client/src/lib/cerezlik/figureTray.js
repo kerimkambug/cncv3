@@ -24,10 +24,7 @@ export const FIGURE_TRAY_DEFAULTS = {
   depth: 12, fillet: 15, cell: 0.25, // a finer grid keeps the depth map's detail for a 3 mm relief bit
   ballR: 15, // radius of the ball nose that finishes the compartments (T7 Ø30)
   reliefDia: 6, // the relief bit: the moat around the figure must be wider than it
-  // DXF logos only: 'kabartma' = 3D relief in a recess (as any figure); 'vcarve' /
-  // … = the logo is carved into the flat top (see logoCarve.js)
-  style: 'kabartma',
-  logo: {},
+  logo: {}, // DXF logos: V carving settings (see logoCarve.js)
 };
 
 /** The logo outlines (figure unit square) turned like rotateFigure and placed on the tray. */
@@ -64,7 +61,8 @@ export function figureTrayPart(figure, params, thickness = 18, name = 'Figürlü
   const padRaised = p.pad < minPad;
   if (padRaised) p.pad = minPad;
   const warnings = [];
-  const carved = p.style && p.style !== 'kabartma' && figure.loopsUV ? p.style : null;
+  // a DXF logo is V carved into the flat top; any other figure is a 3D relief in a recess
+  const carved = !!figure.loopsUV;
   if (carved) { p.figH = 0; p.figTop = 0; }
   const fig = rotateFigure(figure, Math.round((p.rot || 0) / 90));
   const outline = outlineFor(p);
@@ -143,10 +141,9 @@ export function figureTrayPart(figure, params, thickness = 18, name = 'Figürlü
   let logo = null, view = null;
   if (carved) {
     const loops = placeLoops(figure.loopsUV, Math.round((p.rot || 0) / 90), fx0, fy0, fw, fh);
-    const c = logoCarve(loops, carved, p.logo);
-    warnings.push(...c.warnings);
+    const c = logoCarve(loops, p.logo);
     if (c.maxDepth > thickness - 3) warnings.push(`Logo ${c.maxDepth} mm derin oyuluyor; malzemeye göre fazla.`);
-    logo = { style: carved, ops: c.ops, maxDepth: c.maxDepth };
+    logo = { ops: c.ops, maxDepth: c.maxDepth };
     const ld = logoDepth(g, c);
     const z = new Float32Array(g.z.length);
     for (let k = 0; k < z.length; k++) z[k] = Math.max(depth[k], ld[k]);

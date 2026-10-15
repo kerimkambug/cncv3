@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { figureFromDxf, figureFromImageData, figureFromStl, sampleShell } from '../../lib/cerezlik/figure.js';
 import { FIGURE_TRAY_DEFAULTS, figureTrayPart } from '../../lib/cerezlik/figureTray.js';
-import { FLAT_BITS, FLAT_STYLES, HATCH_PATTERNS, LOGO_DEFAULTS, LOGO_PRESETS } from '../../lib/cerezlik/logoCarve.js';
+import { FLAT_BITS, LOGO_DEFAULTS } from '../../lib/cerezlik/logoCarve.js';
 import PartCanvas from './PartCanvas.jsx';
 
 const FIELDS = [
@@ -18,44 +18,22 @@ const FIELDS = [
   ]],
 ];
 
-/** Settings of the chosen logo style (the V bit is T1 90°: a wider angle loses the fine strokes). */
-function LogoStyleFields({ style, logo, setLogo }) {
+/** V carving settings of a DXF logo (T1 90° V; a flat end mill clears floors wider than the depth allows). */
+function LogoFields({ logo, setLogo }) {
   const o = { ...LOGO_DEFAULTS, ...logo };
-  const flat = FLAT_STYLES.includes(style);
-  const num = (k, label, extra = {}) => (
-    <div key={k}>
-      <label>{label}</label>
-      <input type="number" value={o[k]} {...extra} onChange={(e) => setLogo({ [k]: e.target.value === '' ? '' : Number(e.target.value) })} />
-    </div>
-  );
-  const check = (k, label) => (
-    <label key={k} className="cz-check cz-text-check"><input type="checkbox" checked={!!o[k]} onChange={(e) => setLogo({ [k]: e.target.checked })} /> {label}</label>
-  );
   return (
     <div className="row3">
       <div>
-        <label>Düz bıçak</label>
+        <label>En fazla derinlik (mm)</label>
+        <input type="number" min="0.5" step="0.5" value={o.maxDepth} onChange={(e) => setLogo({ maxDepth: e.target.value === '' ? '' : Number(e.target.value) })} />
+      </div>
+      <div>
+        <label>Geniş taban bıçağı</label>
         <select value={o.flatTool} onChange={(e) => { const [t, d] = FLAT_BITS.find(([x]) => x === Number(e.target.value)); setLogo({ flatTool: t, flatDia: d }); }}>
           {FLAT_BITS.map(([t, d]) => <option key={t} value={t}>T{t} · Ø{d} düz</option>)}
         </select>
       </div>
-      {flat ? num('cepDepth', 'Derinlik (mm)', { min: 0.5, step: 0.5 }) : num('maxDepth', 'En fazla derinlik (mm)', { min: 0.5, step: 0.5 })}
-      {flat && num('stepdown', 'Kademe (mm)', { min: 0.5, step: 0.5 })}
-      {o.fill === 'acik' && num('frame', 'Logo çevresi zemin payı (mm)', { min: 0.5, step: 0.5 })}
-      {style === 'cepZigzag' && num('zigAngle', 'Çizgi yönü (°)', { step: 15 })}
-      {style === 'cepDoku' && (
-        <div>
-          <label>Desen</label>
-          <select value={o.hatch} onChange={(e) => setLogo({ hatch: e.target.value })}>
-            {HATCH_PATTERNS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-          </select>
-        </div>
-      )}
-      {style === 'cepDoku' && num('hatchStep', 'Desen aralığı (mm)', { min: 0.5, step: 0.5 })}
-      {style === 'cepDoku' && num('lineDepth', 'Desen derinliği (mm)', { min: 0.2, step: 0.1 })}
-      {style === 'cepDoku' && ['paralel', 'capraz', 'isinsal'].includes(o.hatch) && num('hatchAngle', 'Desen açısı (°)', { step: 15 })}
-      {flat && check('corners', `Ø${o.flatDia}'ün giremediği dar yerleri ve köşeleri T1 V oysun`)}
-      {!flat && check('flatClear', `Geniş tabanı T${o.flatTool} Ø${o.flatDia} düz temizlesin`)}
+      <label className="cz-check cz-text-check"><input type="checkbox" checked={!!o.flatClear} onChange={(e) => setLogo({ flatClear: e.target.checked })} /> Geniş tabanı düz bıçak temizlesin</label>
     </div>
   );
 }
@@ -109,10 +87,6 @@ export default function FigureTrayPanel({ thickness, ballR = 15, reliefDia = 6, 
       const { fig, dxf } = await loadFigure(file);
       if (!fig.mask.some(Boolean)) throw new Error('Figür bulunamadı: zemin tamamen düz ya da siyah.');
       setFigure({ name: file.name.replace(/\.[^.]+$/, ''), fig, dxf });
-      // a DXF logo is carved into the flat top (raised logo by default); other figures are 3D reliefs
-      setParams((p) => (dxf
-        ? (p.style === 'kabartma' ? { ...p, style: 'cep', logo: { ...p.logo, fill: 'acik' } } : p)
-        : { ...p, style: 'kabartma' }));
     } catch (err) {
       setError(`${file.name}: ${err.message}`);
       setBusy(false);
@@ -121,20 +95,14 @@ export default function FigureTrayPanel({ thickness, ballR = 15, reliefDia = 6, 
 
   const setP = (k, v) => setParams((p) => ({ ...p, [k]: v }));
   const setLogo = (patch) => setParams((p) => ({ ...p, logo: { ...p.logo, ...patch } }));
-  const carved = !!figure?.dxf && params.style !== 'kabartma';
-  const fill = params.logo?.fill || LOGO_DEFAULTS.fill;
-  const preset = LOGO_PRESETS.find(([, , st, f]) => st === params.style && f === fill)?.[0] || LOGO_PRESETS[0][0];
-  const onPreset = (key) => {
-    const [, , st, f] = LOGO_PRESETS.find(([k]) => k === key);
-    setParams((p) => ({ ...p, style: st, logo: { ...p.logo, fill: f } }));
-  };
+  const carved = !!figure?.dxf; // a DXF logo is V carved into the flat top
   const num = (k) => params[k];
 
   return (
     <div className="cz-figure">
       <div className="cz-drop" onClick={() => input.current?.click()}>
         <strong>{figure ? figure.name : 'Figür seçin'}</strong>
-        <span>STL, DXF logo (kapalı hatlar tepsiye işlenir) ya da derinlik haritası (PNG/JPG: beyaz yüksek, siyah zemin)</span>
+        <span>STL, DXF logo (kapalı hatlar V ile oyulur) ya da derinlik haritası (PNG/JPG: beyaz yüksek, siyah zemin)</span>
       </div>
       <input ref={input} type="file" accept=".stl,.dxf,.png,.jpg,.jpeg,.webp" style={{ display: 'none' }} onChange={(e) => { onFile(e.target.files[0]); e.target.value = ''; }} />
       {!figure && (
@@ -170,15 +138,8 @@ export default function FigureTrayPanel({ thickness, ballR = 15, reliefDia = 6, 
               </select>
             </div>
           </div>
-          {carved && (
-            <div>
-              <label>Logo stili</label>
-              <select value={preset} onChange={(e) => onPreset(e.target.value)}>
-                {LOGO_PRESETS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-              </select>
-            </div>
-          )}
-          {carved && <LogoStyleFields style={params.style} logo={params.logo} setLogo={setLogo} />}
+          {carved && <h3>Logo · V oyma (T1 90°)</h3>}
+          {carved && <LogoFields logo={params.logo} setLogo={setLogo} />}
           {figure.fig.openChains > 0 && (
             <div className="hint hint-warn">⚠ DXF'te {figure.fig.openChains} açık hat var; yalnızca kapalı hatlar işlendi.</div>
           )}

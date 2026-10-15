@@ -306,19 +306,12 @@ describe('figure from a DXF logo', async () => {
     expect(f.openChains).toBe(0);
   });
 
-  it('pillow and chamfer profiles rise from the edge to full height', () => {
-    for (const profile of ['pah', 'yastik']) {
-      const f = figureFromDxf(logo, { res: 200, profile });
-      expect(at(f, 1, 50)).toBeLessThan(1);
-      expect(at(f, 15, 50)).toBe(1);
-    }
-    expect(at(figureFromDxf(logo, { res: 200, profile: 'pah' }), 1, 50)).toBeLessThan(0.5);
-    expect(at(figureFromDxf(logo, { res: 200, profile: 'yastik' }), 3, 50)).toBeGreaterThan(at(figureFromDxf(logo, { res: 200, profile: 'pah' }), 3, 50));
-  });
-
-  it('makes a tray with the logo in the middle', () => {
+  it('makes a tray with the logo V carved into its flat top, compartments around it', () => {
     const part = figureTrayPart(figureFromDxf(logo, { res: 300 }), { cell: 0.6 }, 18, 'Logo');
-    expect(part.comps.filter((c) => c.figure).length).toBeGreaterThanOrEqual(1);
+    expect(part.comps.filter((c) => c.figure)).toHaveLength(0); // no recess: the logo is on the top
+    expect(part.comps.length).toBeGreaterThanOrEqual(1);
+    expect(part.logo.ops.map((o) => o.kind)).toContain('logo');
+    expect(part.logo.maxDepth).toBeLessThanOrEqual(3 + 1e-6);
     expect(part.warnings).toEqual([]);
   });
 
@@ -327,64 +320,37 @@ describe('figure from a DXF logo', async () => {
   });
 });
 
-describe('DXF logo carving styles', async () => {
+describe('DXF logo V carving', async () => {
   const { logoCarve } = await import('./logoCarve.js');
-
   const ring = (r, n = 180) => Array.from({ length: n }, (_, k) => [100 + r * Math.cos((2 * Math.PI * k) / n), 100 + r * Math.sin((2 * Math.PI * k) / n)]);
   // a wide band (Ø100 / Ø60) and a thin line ring (Ø120 / Ø118) around it
   const loops = [ring(50), ring(30), ring(60), ring(59)];
 
-  it('flat pocket: the Ø4 bit stays its radius inside, the V bit takes the thin line, nothing below the pocket depth', () => {
-    const c = logoCarve(loops, 'cep', { cepDepth: 3 });
-    const flat = c.ops.find((o) => o.kind === 'logoClear');
+  it('every V point sits no deeper than its distance to the outline allows (90°: depth ≤ distance)', () => {
+    const c = logoCarve(loops, { maxDepth: 3 });
     const v = c.ops.find((o) => o.kind === 'logo');
-    expect(flat.tool).toBe(4);
     expect(v.tool).toBe(1);
     expect(c.maxDepth).toBeCloseTo(3, 5);
-    for (const p of flat.passes) for (const [x, y] of p) {
-      const rr = Math.hypot(x - 100, y - 100);
-      expect(rr).toBeGreaterThan(32 - 0.02);
-      expect(rr).toBeLessThan(48 + 0.02);
-    }
-    // the thin ring (1 mm wide) is carved by the V bit only, at most 0.5 mm deep for a 90° bit
-    const thin = v.passes.flat().filter(([x, y]) => Math.hypot(x - 100, y - 100) > 58);
-    expect(thin.length).toBeGreaterThan(0);
-    for (const q of thin) expect(q[2]).toBeLessThanOrEqual(0.55);
-    expect(c.warnings.join(' ')).toMatch(/çok dar; V bıçak/);
-  });
-
-  it('textured floor: the V pattern keeps the cone clear of the walls', () => {
-    const c = logoCarve(loops, 'cepDoku', { cepDepth: 3, lineDepth: 0.6, hatch: 'capraz', corners: false });
-    const v = c.ops.find((o) => o.kind === 'logo');
-    const reach = 3.6; // 90° V at 3.6 mm: radius 3.6 at the top
     for (const [x, y, d] of v.passes.flat()) {
-      expect(d).toBeCloseTo(3.6, 5);
       const rr = Math.hypot(x - 100, y - 100);
-      expect(rr).toBeGreaterThan(30 + reach - 0.05);
-      expect(rr).toBeLessThan(50 - reach + 0.05);
+      const dist = rr > 55 ? Math.min(rr - 59, 60 - rr) : Math.min(rr - 30, 50 - rr);
+      expect(d).toBeLessThanOrEqual(Math.min(3, dist) + 0.06);
     }
+    // the thin ring (1 mm wide) is at most 0.5 mm deep
+    for (const [x, y, d] of v.passes.flat()) if (Math.hypot(x - 100, y - 100) > 58) expect(d).toBeLessThanOrEqual(0.56);
   });
 
-  it('zigzag pocket, textured floor and V carving build, nothing deeper than asked', () => {
-    for (const [style, deepest] of [['cepZigzag', 3], ['cepDoku', 3.5], ['vcarve', 3]]) {
-      const c = logoCarve(loops, style, { cepDepth: 3, maxDepth: 3, lineDepth: 0.5 });
-      expect(c.ops.length).toBeGreaterThan(0);
-      expect(c.maxDepth).toBeLessThanOrEqual(deepest + 1e-6);
+  it('the flat bit clears the wide floor only where it fits, at the floor depth', () => {
+    const c = logoCarve(loops, { maxDepth: 3, flatTool: 4, flatDia: 4 });
+    const flat = c.ops.find((o) => o.kind === 'logoClear');
+    expect(flat.tool).toBe(4);
+    for (const [x, y, d] of flat.passes.flat()) {
+      expect(d).toBeCloseTo(3, 5);
+      const rr = Math.hypot(x - 100, y - 100);
+      expect(rr).toBeGreaterThan(30 + 3 + 2 - 0.05); // V wall (3 mm) + bit radius
+      expect(rr).toBeLessThan(50 - 3 - 2 + 0.05);
     }
-  });
-
-  it('raised logo: the background reaches round shapes standing on their own', () => {
-    // a lone square: no gaps inside it, yet with a frame it gets a background ring to stand in
-    const sq = [[[0, 0], [20, 0], [20, 20], [0, 20]]];
-    expect(logoCarve(sq, 'cep', { fill: 'acik', frame: 0.0001 }).ops.length).toBe(0);
-    const c = logoCarve(sq, 'cep', { fill: 'acik', frame: 5, corners: false, flatDia: 4, flatTool: 4 });
-    const pts = c.ops.find((o) => o.kind === 'logoClear').passes.flat();
-    expect(pts.length).toBeGreaterThan(0);
-    // every centre stays outside the square by the bit radius, and inside the frame
-    for (const [x, y] of pts) {
-      const dx = Math.max(0, -x, x - 20), dy = Math.max(0, -y, y - 20);
-      expect(Math.hypot(dx, dy)).toBeGreaterThan(2 - 0.02);
-    }
+    expect(logoCarve(loops, { flatClear: false }).ops.map((o) => o.kind)).toEqual(['logo']);
   });
 });
 

@@ -203,23 +203,3 @@ export function evenOddShapes(loops) {
   c.Execute(ClipperLib.ClipType.ctUnion, tree, ClipperLib.PolyFillType.pftEvenOdd, ClipperLib.PolyFillType.pftEvenOdd);
   return shapes(tree);
 }
-
-/** subject − clip on oriented loops (outers CCW, holes CW, as shapes give them). Returns shapes. */
-export function differenceOriented(subject, clip) {
-  const c = new ClipperLib.Clipper();
-  c.AddPaths(subject.filter((p) => p.length >= 3).map(toClip), ClipperLib.PolyType.ptSubject, true);
-  if (clip.length) c.AddPaths(clip.filter((p) => p.length >= 3).map(toClip), ClipperLib.PolyType.ptClip, true);
-  const tree = new ClipperLib.PolyTree();
-  c.Execute(ClipperLib.ClipType.ctDifference, tree, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
-  return shapes(tree);
-}
-
-/** Open polylines clipped to the inside of oriented loops (outers CCW, holes CW). */
-export function clipLines(lines, loops) {
-  const c = new ClipperLib.Clipper();
-  for (const l of lines) if (l.length >= 2) c.AddPath(toClip(l), ClipperLib.PolyType.ptSubject, false);
-  c.AddPaths(loops.filter((p) => p.length >= 3).map(toClip), ClipperLib.PolyType.ptClip, true);
-  const tree = new ClipperLib.PolyTree();
-  c.Execute(ClipperLib.ClipType.ctIntersection, tree, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
-  return ClipperLib.Clipper.OpenPathsFromPolyTree(tree).map(fromClip).filter((p) => p.length >= 2);
-}
