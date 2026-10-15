@@ -365,22 +365,25 @@ describe('DXF logo carving styles', async () => {
     }
   });
 
-  it('zigzag pocket, chamfer and channel styles build', () => {
-    for (const style of ['cepZigzag', 'cepPah', 'hat']) {
-      const c = logoCarve(loops, style, {});
+  it('zigzag pocket, textured floor and V carving build, nothing deeper than asked', () => {
+    for (const [style, deepest] of [['cepZigzag', 3], ['cepDoku', 3.5], ['vcarve', 3]]) {
+      const c = logoCarve(loops, style, { cepDepth: 3, maxDepth: 3, lineDepth: 0.5 });
       expect(c.ops.length).toBeGreaterThan(0);
-      for (const op of c.ops) for (const p of op.passes) for (const q of p) expect(Number.isFinite(q[2])).toBe(true);
+      expect(c.maxDepth).toBeLessThanOrEqual(deepest + 1e-6);
     }
   });
 
-  it('band hatching runs from the outer line to the inner one', () => {
-    const c = logoCarve([ring(50), ring(30)], 'tarama', { hatch: 'bant', hatchStep: 3, outline: false });
-    const lines = c.ops[0].passes;
-    expect(lines.length).toBeGreaterThan(80);
-    for (const l of lines) {
-      const r0 = Math.hypot(l[0][0] - 100, l[0][1] - 100), r1 = Math.hypot(l[l.length - 1][0] - 100, l[l.length - 1][1] - 100);
-      expect(Math.max(r0, r1)).toBeGreaterThan(49.5);
-      expect(Math.min(r0, r1)).toBeLessThan(30.5);
+  it('raised logo: the background reaches round shapes standing on their own', () => {
+    // a lone square: no gaps inside it, yet with a frame it gets a background ring to stand in
+    const sq = [[[0, 0], [20, 0], [20, 20], [0, 20]]];
+    expect(logoCarve(sq, 'cep', { fill: 'acik', frame: 0.0001 }).ops.length).toBe(0);
+    const c = logoCarve(sq, 'cep', { fill: 'acik', frame: 5, corners: false, flatDia: 4, flatTool: 4 });
+    const pts = c.ops.find((o) => o.kind === 'logoClear').passes.flat();
+    expect(pts.length).toBeGreaterThan(0);
+    // every centre stays outside the square by the bit radius, and inside the frame
+    for (const [x, y] of pts) {
+      const dx = Math.max(0, -x, x - 20), dy = Math.max(0, -y, y - 20);
+      expect(Math.hypot(dx, dy)).toBeGreaterThan(2 - 0.02);
     }
   });
 });

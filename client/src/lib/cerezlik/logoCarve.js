@@ -1,64 +1,53 @@
-// 2D carving styles for a DXF logo on the flat top of a figure tray. The logo
-// stays at the material surface; the tool carves into it.
+// Carving a DXF logo into the flat top of a figure tray, at tray size (the
+// drawing shrinks to ~150–200 mm, so its strokes are 1–2 mm wide). Picked by
+// measuring the simulated cut against the drawing (see the tests):
 //
-// Flat end mill styles (Serbest Kesim's pocket logic: the bit's centre runs its
-// radius inside the outline, islands stay standing):
-//   cep       — pocket, offset rings inside out
-//   cepZigzag — pocket, parallel passes plus one ring along the wall
+//   fill 'acik' — the logo stays raised: the background inside its silhouette
+//                 (grown by `frame`) is carved. Deep and faithful.
+//   fill 'koyu' — the drawn areas are carved into the surface.
+//
+//   cep       — flat end mill pocket, Serbest Kesim's way (the bit's centre runs
+//               its radius inside the outline, islands stay standing), offset
+//               rings inside out
+//   cepZigzag — the same pocket with parallel passes (lines show on the floor)
+//               and one ring along the wall
 //   cepDoku   — pocket, then a V pattern cut into its floor
-//   cepPah    — pocket, then a V bevel along its top edge (sharp corners)
-//   hat       — the bit's centre on every line: a channel one bit wide
+//   vcarve    — V carving from the centre: depth = inset / tan(angle/2), so
+//               every stroke is cut exactly to its outline at the surface
 // With `corners`, what the flat bit cannot reach (strokes narrower than it,
 // inside corners) is V carved down to the pocket floor.
 //
-// V bit styles:
-//   vcarve  — V carving "from the centre": the V bit follows inset rings of the
-//             region, each at depth = inset / tan(angle/2), so narrow strokes are
-//             shallow and sharp, wide ones deeper, up to `maxDepth`. Beyond that
-//             the floor is flat: a flat end mill clears it where it fits and the
-//             V bit finishes the strip along the walls.
-//   kontur  — single-line engraving: every outline once, at a fixed depth.
-//   tarama  — the region is hatched with V grooves at a fixed depth: parallel,
-//             cross, radial (sun rays from the centre), rings or offset contours,
-//             with the outline traced around it.
-//
-// `fill` picks what is carved: 'koyu' = the drawn (filled) areas, 'acik' = the
-// gaps inside the logo (letters cut out of a dark ring become V grooves).
-//
 // Passes are [[x, y, depth]...] in the part's coordinates, depth below the top.
-import { area, bbox, clipLines, differenceOriented, evenOddShapes, offset, pathLength, simplifyLoop, union } from './geom.js';
+import { area, bbox, clipLines, differenceOriented, evenOddShapes, offset, simplifyLoop, union } from './geom.js';
 import { edt, makeGrid, maskPolys } from './surface.js';
 import { simplify3, thin, traceSkeleton } from './textCarve.js';
 import { levels, ringPasses } from './toolpaths.js';
 
-export const LOGO_STYLES = [
-  ['cep', 'Düz cep · offset halkalar (Serbest Kesim gibi)'],
-  ['cepZigzag', 'Düz cep · paralel tarama'],
-  ['cepDoku', 'Düz cep + desenli taban (V)'],
-  ['cepPah', 'Düz cep + V pah (keskin kenar)'],
-  ['hat', 'Çizgi üstü kanal (düz bıçak)'],
-  ['vcarve', 'V oyma (merkezden, derinlik çizgi enine göre)'],
-  ['kontur', 'Çizgi takibi (tek V geçiş)'],
-  ['tarama', 'V tarama'],
-  ['kabartma', '3D kabartma (rölyef bıçağı)'],
+/** The choices offered for a DXF logo: [key, label, style, fill]. */
+export const LOGO_PRESETS = [
+  ['kabarik', 'Kabarık logo · düz zemin', 'cep', 'acik'],
+  ['kabarikDoku', 'Kabarık logo · desenli zemin', 'cepDoku', 'acik'],
+  ['kabarikCizgi', 'Kabarık logo · çizgili zemin', 'cepZigzag', 'acik'],
+  ['oyma', 'Oyma logo · düz taban', 'cep', 'koyu'],
+  ['oymaV', 'Oyma logo · V oyma', 'vcarve', 'koyu'],
 ];
 
 /** Styles cut mainly with the flat end mill. */
-export const FLAT_STYLES = ['cep', 'cepZigzag', 'cepDoku', 'cepPah', 'hat'];
+export const FLAT_STYLES = ['cep', 'cepZigzag', 'cepDoku'];
 
 export const FLAT_BITS = [[4, 4], [6, 6], [8, 8], [10, 10]]; // [slot, Ø]
 
 export const HATCH_PATTERNS = [
-  ['bant', 'Bant: dış hattan içteki hatta dik çizgiler'],
-  ['paralel', 'Paralel çizgi'],
   ['capraz', 'Çapraz (ızgara)'],
-  ['isinsal', 'Işınsal (merkezden güneş)'],
+  ['paralel', 'Paralel çizgi'],
   ['halka', 'Eş merkezli halkalar'],
+  ['isinsal', 'Işınsal (merkezden)'],
   ['kontur', 'Şekli izleyen konturlar'],
 ];
 
 export const LOGO_DEFAULTS = {
   fill: 'koyu', // 'koyu' | 'acik'
+  frame: 3, // 'acik': the background reaches this far round the logo's silhouette
   tool: 1, angle: 90, // V bit
   maxDepth: 3, // V carving: deepest point (flat floor beyond)
   ringStep: 0.3, // V carving: inset between wall rings (the centre-line pass takes the ridge they leave)
@@ -67,24 +56,23 @@ export const LOGO_DEFAULTS = {
   cepDepth: 3, stepdown: 3, stepoverPct: 45, // flat pockets
   zigAngle: 0, // parallel pocket direction
   corners: true, // V bit takes what the flat bit cannot reach
-  chamfer: 1, // cepPah: V bevel depth on the top edge
-  lineDepth: 1, // kontur / tarama
-  hatch: 'bant', hatchStep: 3, hatchAngle: 45, outline: true,
-  toCentre: false, // band hatching: shapes with no inner line hatched towards their centre (stars…)
-  islandGap: 1, // band hatching: clear margin around islands in the band (letters stay readable)
+  lineDepth: 0.5, // cepDoku: pattern depth below the floor
+  hatch: 'capraz', hatchStep: 2, hatchAngle: 45,
 };
 
-const NUMERIC = ['maxDepth', 'ringStep', 'floorStep', 'flatDia', 'lineDepth', 'hatchStep', 'angle', 'cepDepth', 'stepdown', 'stepoverPct', 'chamfer'];
+const NUMERIC = ['frame', 'maxDepth', 'ringStep', 'floorStep', 'flatDia', 'lineDepth', 'hatchStep', 'angle', 'cepDepth', 'stepdown', 'stepoverPct'];
 const cot = (deg) => 1 / Math.tan(((deg / 2) * Math.PI) / 180);
 const closedPass = (loop, d) => { const l = simplifyLoop(loop, 0.01); return [...l, l[0]].map(([x, y]) => [x, y, d]); };
 const shapeLoops = (shs) => shs.flatMap((s) => [s.outer, ...s.holes]);
 
 /** The region to carve, as shapes (outers CCW, holes CW). */
-export function logoRegions(loops, fill = 'koyu') {
+export function logoRegions(loops, fill = 'koyu', frame = 0) {
   const dark = evenOddShapes(loops);
   if (fill !== 'acik') return dark;
-  // the gaps: inside the logo's outer silhouette, outside the drawn areas
-  const hull = union(dark.map((s) => s.outer)).map((s) => s.outer);
+  // the gaps: inside the logo's silhouette grown by `frame` (so shapes standing on
+  // their own, like stars, get a background round them too), outside the drawn areas
+  const outers = dark.map((s) => s.outer);
+  const hull = (frame > 0 ? union(offset(outers, frame, { keepOrientation: true })) : union(outers)).map((s) => s.outer);
   return differenceOriented(hull, shapeLoops(dark));
 }
 
@@ -177,79 +165,7 @@ function vcarve(regions, o) {
   return { vPasses, clearPasses };
 }
 
-/** First crossing of the ray p + t·u (t > 0) with a loop, or Infinity. */
-function rayHit(p, u, loop) {
-  let best = Infinity;
-  for (let i = 0, j = loop.length - 1; i < loop.length; j = i++) {
-    const a = loop[j], b = loop[i];
-    const ex = b[0] - a[0], ey = b[1] - a[1];
-    const den = u[0] * ey - u[1] * ex;
-    if (Math.abs(den) < 1e-12) continue;
-    const wx = a[0] - p[0], wy = a[1] - p[1];
-    const t = (wx * ey - wy * ex) / den, sgm = (wx * u[1] - wy * u[0]) / den;
-    if (t > 1e-6 && sgm >= 0 && sgm <= 1 && t < best) best = t;
-  }
-  return best;
-}
-
-/**
- * Band hatching: every region is the band between an outline and the line
- * inside it (its large holes). From points `step` apart along the outline a
- * line runs inwards, square to it, up to that inner line; small islands in
- * the band (letters…) interrupt it. A region with no inner line is hatched
- * from its outline towards its centre.
- */
-function bandLines(regions, o) {
-  const out = [];
-  const step = Math.max(0.3, o.hatchStep);
-  for (const sh of regions) {
-    const outerA = area(sh.outer);
-    const inner = sh.holes.filter((h) => area(h) > 0.05 * outerA); // the inner line(s); smaller holes are islands
-    const islands = sh.holes.filter((h) => area(h) <= 0.05 * outerA);
-    if (!inner.length && !o.toCentre) continue; // only the band between two lines is hatched
-    const ob = bbox([sh.outer]);
-    const centre = [(ob.minX + ob.maxX) / 2, (ob.minY + ob.maxY) / 2];
-    const loop = simplifyLoop(sh.outer, 0.05);
-    const L = pathLength(loop);
-    const n = Math.max(3, Math.round(L / step));
-    // points along the outline, and the outline's direction smoothed over ±1.5 steps
-    const cum = [0];
-    for (let i = 1; i <= loop.length; i++) cum.push(cum[i - 1] + Math.hypot(loop[i % loop.length][0] - loop[i - 1][0], loop[i % loop.length][1] - loop[i - 1][1]));
-    const at = (s) => {
-      s = ((s % L) + L) % L;
-      let i = 1;
-      while (i < cum.length - 1 && cum[i] < s) i++;
-      const a = loop[i - 1], b = loop[i % loop.length], t = (s - cum[i - 1]) / ((cum[i] - cum[i - 1]) || 1);
-      return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-    };
-    const segs = [];
-    for (let k = 0; k < n; k++) {
-      const s = (k * L) / n;
-      const p = at(s), q0 = at(s - 1.5 * step), q1 = at(s + 1.5 * step);
-      const tx = q1[0] - q0[0], ty = q1[1] - q0[1], tl = Math.hypot(tx, ty) || 1;
-      let u = [-ty / tl, tx / tl]; // left of a CCW outline = inwards
-      let reach;
-      if (inner.length) {
-        reach = Math.min(...inner.map((h) => rayHit(p, u, h)));
-        if (!Number.isFinite(reach)) continue;
-      } else {
-        u = [centre[0] - p[0], centre[1] - p[1]];
-        reach = Math.hypot(u[0], u[1]);
-        u = [u[0] / reach, u[1] / reach];
-      }
-      segs.push([[p[0] - u[0] * 0.05, p[1] - u[1] * 0.05], [p[0] + u[0] * (reach + 0.05), p[1] + u[1] * (reach + 0.05)]]);
-    }
-    // islands (letters…) keep a clear margin; the outer and inner lines are met exactly
-    const gap = Math.max(0, Number(o.islandGap) || 0);
-    const grown = gap && islands.length ? offset(islands.map((h) => h.slice().reverse()), gap, { keepOrientation: true }) : islands.map((h) => h.slice().reverse());
-    const clip = shapeLoops(differenceOriented([sh.outer, ...inner], grown));
-    out.push(...clipLines(segs, clip));
-  }
-  return out;
-}
-
 function hatchLines(regions, o) {
-  if (o.hatch === 'bant') return bandLines(regions, o);
   const loops = shapeLoops(regions);
   const b = bbox(loops);
   const cx = (b.minX + b.maxX) / 2, cy = (b.minY + b.maxY) / 2;
@@ -333,7 +249,7 @@ function flatPocket(regions, o, zigzag) {
 /**
  * The carving of a logo.
  * @param {number[][][]} loops  the logo's closed outlines, part coordinates
- * @param {string} style  see LOGO_STYLES (all but 'kabartma')
+ * @param {string} style  'cep' | 'cepZigzag' | 'cepDoku' | 'vcarve' (see LOGO_PRESETS)
  * @returns {{ ops: {kind, tool, passes}[], regions, warnings: string[], maxDepth: number }}
  */
 export function logoCarve(loops, style, opts = {}) {
@@ -342,7 +258,7 @@ export function logoCarve(loops, style, opts = {}) {
   for (const k of ['hatchAngle', 'zigAngle']) o[k] = Number.isFinite(Number(o[k])) && o[k] !== '' ? Number(o[k]) : LOGO_DEFAULTS[k];
   o.ringStep = Math.max(0.03, o.ringStep);
   o.floorStep = Math.max(0.1, o.floorStep);
-  const regions = logoRegions(loops, o.fill);
+  const regions = logoRegions(loops, o.fill, o.frame);
   const warnings = [];
   const ops = [];
   const preview = []; // what the preview stamps: see logoDepth
@@ -353,66 +269,32 @@ export function logoCarve(loops, style, opts = {}) {
 
   if (FLAT_STYLES.includes(style)) {
     const D = o.cepDepth;
-    if (style === 'hat') {
-      // the flat bit's centre on every line: a channel one bit wide
-      const passes = [];
-      for (const sh of regions) for (const l of [sh.outer, ...sh.holes]) for (const d of levels(D, o.stepdown)) passes.push(closedPass(l, d));
-      flatOp(orderPasses(passes));
-    } else {
-      const pk = flatPocket(regions, o, style === 'cepZigzag');
-      flatOp(pk.passes);
-      if (pk.skipped) warnings.push(`${pk.skipped} bölge T${o.flatTool} Ø${o.flatDia} için çok dar${o.corners ? '; V bıçak oyuyor' : ', atlandı'}.`);
-      const v = [];
-      if (o.corners && pk.residual.length) {
-        // what the flat bit cannot reach (narrow strokes, inside corners): V carved down to the pocket floor
-        const vc = vcarve(pk.residual, { ...o, maxDepth: D, flatClear: false });
-        v.push(...vc.vPasses);
-        preview.push({ type: 'vexact', regions: pk.residual, maxDepth: D, angle: o.angle });
-      }
-      if (style === 'cepPah') {
-        // V along the pocket's top edge: a bevel round the logo and sharp corners at the surface
-        for (const sh of regions) for (const l of [sh.outer, ...sh.holes]) v.push(closedPass(l, o.chamfer));
-      }
-      if (style === 'cepDoku') {
-        // pattern on the pocket floor: V lines `lineDepth` below it. The cone widens up to
-        // the material top, so a line keeps that radius from the walls or it gouges them.
-        const reach = (D + o.lineDepth) / cot(o.angle) + 0.2;
-        const floor = differenceOriented(offset(shapeLoops(regions), -reach, { keepOrientation: true }), []);
-        if (!floor.length) warnings.push(`Desen için taban yeterince geniş değil: duvardan ${reach.toFixed(1)} mm uzak kalması gerekiyor.`);
-        const lines = o.hatch === 'kontur'
-          ? floor.flatMap((sh) => { const out = []; for (let s2 = o.hatchStep; ; s2 += o.hatchStep) { const ring = offset([sh.outer, ...sh.holes], -s2, { keepOrientation: true, arcTol: 0.02 }); if (!ring.length) break; out.push(...ring.map((l) => [...l, l[0]])); } return out; })
-          : hatchLines(floor, { ...o, islandGap: 0 });
-        for (const l of lines) v.push(l.map(([x, y]) => [x, y, D + o.lineDepth]));
-      }
-      vOp(orderPasses(v));
+    const pk = flatPocket(regions, o, style === 'cepZigzag');
+    flatOp(pk.passes);
+    if (pk.skipped) warnings.push(`${pk.skipped} bölge T${o.flatTool} Ø${o.flatDia} için çok dar${o.corners ? '; V bıçak oyuyor' : ', atlandı'}.`);
+    const v = [];
+    if (o.corners && pk.residual.length) {
+      // what the flat bit cannot reach (narrow strokes, inside corners): V carved down to the pocket floor
+      v.push(...vcarve(pk.residual, { ...o, maxDepth: D, flatClear: false }).vPasses);
+      preview.push({ type: 'vexact', regions: pk.residual, maxDepth: D, angle: o.angle });
     }
-  } else if (style === 'vcarve') {
+    if (style === 'cepDoku') {
+      // pattern on the pocket floor: V lines `lineDepth` below it. The cone widens up to
+      // the material top, so a line keeps that radius from the walls or it gouges them.
+      const reach = (D + o.lineDepth) / cot(o.angle) + 0.2;
+      const floor = differenceOriented(offset(shapeLoops(regions), -reach, { keepOrientation: true }), []);
+      if (!floor.length) warnings.push(`Desen için taban yeterince geniş değil: duvardan ${reach.toFixed(1)} mm uzak kalması gerekiyor.`);
+      const lines = o.hatch === 'kontur'
+        ? floor.flatMap((sh) => { const out = []; for (let s2 = o.hatchStep; ; s2 += o.hatchStep) { const ring = offset([sh.outer, ...sh.holes], -s2, { keepOrientation: true, arcTol: 0.02 }); if (!ring.length) break; out.push(...ring.map((l) => [...l, l[0]])); } return out; })
+        : hatchLines(floor, o);
+      for (const l of lines) v.push(l.map(([x, y]) => [x, y, D + o.lineDepth]));
+    }
+    vOp(orderPasses(v));
+  } else {
     const { vPasses, clearPasses } = vcarve(regions, o);
     flatOp(orderPasses(clearPasses));
     if (vPasses.length) ops.push({ kind: 'logo', tool: Number(o.tool), passes: vPasses });
     preview.push({ type: 'vexact', regions, maxDepth: o.maxDepth, angle: o.angle });
-  } else {
-    const d = o.lineDepth;
-    const passes = [];
-    if (style === 'kontur') {
-      for (const sh of regions) for (const l of [sh.outer, ...sh.holes]) passes.push(closedPass(l, d));
-    } else {
-      if (o.hatch === 'kontur') {
-        for (const sh of regions) {
-          for (let s2 = o.hatchStep; ; s2 += o.hatchStep) {
-            const ring = offset([sh.outer, ...sh.holes], -s2, { keepOrientation: true, arcTol: 0.02 });
-            if (!ring.length) break;
-            for (const l of ring) passes.push(closedPass(l, d));
-          }
-        }
-      } else {
-        for (const l of hatchLines(regions, o)) passes.push(l.map(([x, y]) => [x, y, d]));
-      }
-      if (o.outline) for (const sh of regions) for (const l of [sh.outer, ...sh.holes]) passes.push(closedPass(l, d));
-    }
-    vOp(orderPasses(passes));
-    const lineW = (2 * d) / cot(o.angle);
-    if (style === 'tarama' && o.hatchStep <= lineW) warnings.push(`Tarama aralığı (${o.hatchStep} mm) V izinin eninden (${lineW.toFixed(1)} mm) dar: çizgiler birleşip düz bir yüzey olur.`);
   }
   let maxDepth = 0;
   for (const op of ops) for (const p of op.passes) for (const q of p) if (q[2] > maxDepth) maxDepth = q[2];
