@@ -1,7 +1,11 @@
 // 3D figures for trays: a normalised height field on its own pixel grid.
 //   { w, h, data: Float32Array (0..1, row 0 = bottom), mask: Uint8Array }
-// Sources: STL (looked at from above), a grey-scale depth map image, or the
-// built-in sample shell.
+// Sources: STL (looked at from above), a grey-scale depth map image, a 2D DXF
+// drawing (e.g. a logo: its closed outlines raised with a chosen edge profile),
+// or the built-in sample shell.
+import { parseDxf } from './dxf.js';
+import { bbox } from './geom.js';
+import { edt, makeGrid, maskPolys } from './surface.js';
 
 function finish(w, h, data, threshold) {
   let mn = Infinity, mx = -Infinity;
@@ -92,6 +96,35 @@ export function figureFromStl(buffer, { res = 700, threshold = 0.02 } = {}) {
     }
   }
   return finish(w, h, z, threshold);
+}
+
+export const DXF_PROFILES = { duz: 'Düz (dik kenar)', pah: 'Pahlı kenar', yastik: 'Yastık (yuvarlak kenar)' };
+
+/**
+ * 2D DXF (a logo, an emblem…) → height field. The closed outlines are filled
+ * even-odd, so letter counters and other holes stay down. `profile` shapes the
+ * edge: 'duz' = flat top with vertical walls, 'pah' = straight ramp, 'yastik' =
+ * rounded (quarter circle). `edge` = ramp width as a fraction of the longer side.
+ */
+export function figureFromDxf(text, { res = 700, profile = 'duz', edge = 0.04 } = {}) {
+  const { loops, chains } = parseDxf(text);
+  const polys = loops.map((l) => l.pts).filter((p) => p.length > 2);
+  if (!polys.length) throw new Error('DXF\'te kapalı hat yok: logo dış hatları kapalı çizilmeli.');
+  const b = bbox(polys);
+  const cell = Math.max(b.w, b.h, 1e-6) / res;
+  const pad = 2;
+  const g = makeGrid(b.minX - pad * cell, b.minY - pad * cell, Math.ceil(b.w / cell) + 2 * pad, Math.ceil(b.h / cell) + 2 * pad, cell);
+  const mask = maskPolys(g, polys);
+  const data = new Float32Array(g.w * g.h);
+  const ramp = Math.max(1, edge * res);
+  const dist = profile === 'duz' ? null : edt(mask, g.w, g.h);
+  for (let k = 0; k < mask.length; k++) {
+    if (!mask[k]) continue;
+    if (!dist) { data[k] = 1; continue; }
+    const t = Math.min(1, dist[k] / ramp);
+    data[k] = profile === 'yastik' ? Math.sqrt(1 - (1 - t) * (1 - t)) : t;
+  }
+  return { w: g.w, h: g.h, data, mask, openChains: chains.length };
 }
 
 /** Built-in sample: a scallop shell (fan with ribs, two ears at the hinge). */

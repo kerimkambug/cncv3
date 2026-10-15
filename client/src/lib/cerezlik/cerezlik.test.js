@@ -4,7 +4,7 @@ import { buildParts, checkPart } from './parts.js';
 import { partToolpaths, DEFAULT_RECIPE, toolReach } from './toolpaths.js';
 import { runNest, spacing, platePrograms, DEFAULT_PLATE } from './job.js';
 import { bbox, signedArea, offset, intersectionArea, transform, polylineDistance } from './geom.js';
-import { sampleDrawing, dxfDoc, circle, lwpoly, crescentPoints } from './sampleDxf.js';
+import { sampleDrawing, dxfDoc, circle, line, lwpoly, crescentPoints } from './sampleDxf.js';
 
 const recipe = structuredClone(DEFAULT_RECIPE);
 recipe.bowlStyle = 'duz'; // the 2D tests below check flat pockets; dished bowls have their own tests
@@ -284,6 +284,46 @@ describe('figure tray (3D)', async () => {
     expect(lines.filter((l) => l.startsWith('M6T'))).toEqual(['M6T10', 'M6T7', 'M6T2', 'M6T13', 'M6T3', 'M6T6']);
     const zs = lines.map((l) => /Z(-?[\d.]+)/.exec(l)).filter(Boolean).map((m) => +m[1]);
     expect(Math.min(...zs)).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('figure from a DXF logo', async () => {
+  const { figureFromDxf } = await import('./figure.js');
+  const { figureTrayPart } = await import('./figureTray.js');
+  // a ring (Ø100 with a Ø40 hole) and a separate square: the hole must stay down
+  const logo = dxfDoc([circle(50, 50, 50), circle(50, 50, 20), lwpoly([[120, 30], [160, 30], [160, 70], [120, 70]])]);
+  const at = (f, x, y) => { // x, y in drawing mm (bbox 0..160 × 0..100)
+    const cell = 160 / 200;
+    return f.data[Math.floor(y / cell + 2) * f.w + Math.floor(x / cell + 2)];
+  };
+
+  it('fills closed outlines even-odd: ring and square up, the hole down', () => {
+    const f = figureFromDxf(logo, { res: 200 });
+    expect(at(f, 10, 50)).toBe(1);
+    expect(at(f, 140, 50)).toBe(1);
+    expect(at(f, 50, 50)).toBe(0);
+    expect(at(f, 110, 50)).toBe(0);
+    expect(f.openChains).toBe(0);
+  });
+
+  it('pillow and chamfer profiles rise from the edge to full height', () => {
+    for (const profile of ['pah', 'yastik']) {
+      const f = figureFromDxf(logo, { res: 200, profile });
+      expect(at(f, 1, 50)).toBeLessThan(1);
+      expect(at(f, 15, 50)).toBe(1);
+    }
+    expect(at(figureFromDxf(logo, { res: 200, profile: 'pah' }), 1, 50)).toBeLessThan(0.5);
+    expect(at(figureFromDxf(logo, { res: 200, profile: 'yastik' }), 3, 50)).toBeGreaterThan(at(figureFromDxf(logo, { res: 200, profile: 'pah' }), 3, 50));
+  });
+
+  it('makes a tray with the logo in the middle', () => {
+    const part = figureTrayPart(figureFromDxf(logo, { res: 300 }), { cell: 0.6 }, 18, 'Logo');
+    expect(part.comps.filter((c) => c.figure).length).toBeGreaterThanOrEqual(1);
+    expect(part.warnings).toEqual([]);
+  });
+
+  it('rejects a drawing without closed outlines', () => {
+    expect(() => figureFromDxf(dxfDoc([line(0, 0, 50, 0), line(50, 0, 50, 40)]))).toThrow(/kapalı hat/);
   });
 });
 

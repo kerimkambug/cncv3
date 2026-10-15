@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { figureFromImageData, figureFromStl, sampleShell } from '../../lib/cerezlik/figure.js';
+import { DXF_PROFILES, figureFromDxf, figureFromImageData, figureFromStl, sampleShell } from '../../lib/cerezlik/figure.js';
 import { FIGURE_TRAY_DEFAULTS, figureTrayPart } from '../../lib/cerezlik/figureTray.js';
 import PartCanvas from './PartCanvas.jsx';
 
@@ -17,20 +17,25 @@ const FIELDS = [
   ]],
 ];
 
-async function loadFigure(file) {
-  if (/\.stl$/i.test(file.name)) return figureFromStl(await file.arrayBuffer());
+async function loadFigure(file, profile) {
+  if (/\.stl$/i.test(file.name)) return { fig: figureFromStl(await file.arrayBuffer()) };
+  if (/\.dxf$/i.test(file.name)) {
+    const dxf = await file.text();
+    return { fig: figureFromDxf(dxf, { profile }), dxf };
+  }
   const bmp = await createImageBitmap(file);
   const k = Math.min(1, 1800 / Math.max(bmp.width, bmp.height));
   const c = document.createElement('canvas');
   c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
   const ctx = c.getContext('2d');
   ctx.drawImage(bmp, 0, 0, c.width, c.height);
-  return figureFromImageData(ctx.getImageData(0, 0, c.width, c.height));
+  return { fig: figureFromImageData(ctx.getImageData(0, 0, c.width, c.height)) };
 }
 
-/** Figure tray designer: load a figure (STL / depth map), shape the tray around it, add it to the job. */
+/** Figure tray designer: load a figure (STL / depth map / DXF logo), shape the tray around it, add it to the job. */
 export default function FigureTrayPanel({ thickness, ballR = 15, reliefDia = 6, onAdd }) {
-  const [figure, setFigure] = useState(null); // { name, fig }
+  const [figure, setFigure] = useState(null); // { name, fig, dxf? }
+  const [profile, setProfile] = useState('duz'); // edge profile of a DXF logo
   const [params, setParams] = useState(() => ({ ...FIGURE_TRAY_DEFAULTS, fillet: ballR }));
   const [part, setPart] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -59,12 +64,22 @@ export default function FigureTrayPanel({ thickness, ballR = 15, reliefDia = 6, 
     setError('');
     setBusy(true);
     try {
-      const fig = await loadFigure(file);
+      const { fig, dxf } = await loadFigure(file, profile);
       if (!fig.mask.some(Boolean)) throw new Error('Figür bulunamadı: zemin tamamen düz ya da siyah.');
-      setFigure({ name: file.name.replace(/\.[^.]+$/, ''), fig });
+      setFigure({ name: file.name.replace(/\.[^.]+$/, ''), fig, dxf });
     } catch (err) {
       setError(`${file.name}: ${err.message}`);
       setBusy(false);
+    }
+  }
+
+  function onProfile(next) {
+    setProfile(next);
+    if (!figure?.dxf) return;
+    try {
+      setFigure({ ...figure, fig: figureFromDxf(figure.dxf, { profile: next }) });
+    } catch (err) {
+      setError(err.message);
     }
   }
 
@@ -75,9 +90,9 @@ export default function FigureTrayPanel({ thickness, ballR = 15, reliefDia = 6, 
     <div className="cz-figure">
       <div className="cz-drop" onClick={() => input.current?.click()}>
         <strong>{figure ? figure.name : 'Figür seçin'}</strong>
-        <span>STL ya da derinlik haritası (PNG/JPG: beyaz yüksek, siyah zemin)</span>
+        <span>STL, DXF logo (kapalı hatlar kabartılır) ya da derinlik haritası (PNG/JPG: beyaz yüksek, siyah zemin)</span>
       </div>
-      <input ref={input} type="file" accept=".stl,.png,.jpg,.jpeg,.webp" style={{ display: 'none' }} onChange={(e) => { onFile(e.target.files[0]); e.target.value = ''; }} />
+      <input ref={input} type="file" accept=".stl,.dxf,.png,.jpg,.jpeg,.webp" style={{ display: 'none' }} onChange={(e) => { onFile(e.target.files[0]); e.target.value = ''; }} />
       {!figure && (
         <div className="hint">
           Figür ortada kabartma olarak işlenir, bölmeler etrafına yerleşir.{' '}
@@ -111,6 +126,17 @@ export default function FigureTrayPanel({ thickness, ballR = 15, reliefDia = 6, 
               </select>
             </div>
           </div>
+          {figure.dxf && (
+            <div>
+              <label>Logo kenar profili</label>
+              <select value={profile} onChange={(e) => onProfile(e.target.value)}>
+                {Object.entries(DXF_PROFILES).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+              </select>
+            </div>
+          )}
+          {figure.fig.openChains > 0 && (
+            <div className="hint hint-warn">⚠ DXF'te {figure.fig.openChains} açık hat var; yalnızca kapalı hatlar kabartıldı.</div>
+          )}
           {FIELDS.map(([title, fields]) => (
             <div key={title}>
               <h3>{title}</h3>
