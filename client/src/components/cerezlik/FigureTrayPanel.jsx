@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { DXF_PROFILES, figureFromDxf, figureFromImageData, figureFromStl, sampleShell } from '../../lib/cerezlik/figure.js';
 import { FIGURE_TRAY_DEFAULTS, figureTrayPart } from '../../lib/cerezlik/figureTray.js';
-import { HATCH_PATTERNS, LOGO_DEFAULTS, LOGO_STYLES } from '../../lib/cerezlik/logoCarve.js';
+import { FLAT_BITS, FLAT_STYLES, HATCH_PATTERNS, LOGO_DEFAULTS, LOGO_STYLES } from '../../lib/cerezlik/logoCarve.js';
 import PartCanvas from './PartCanvas.jsx';
 
 const FIELDS = [
@@ -23,15 +23,21 @@ const V_BITS = [
   { key: '12-135', tool: 12, angle: 135, label: 'T12 · 135° V' },
 ];
 
-/** Style options of a DXF logo carved into the flat top (V carving, single line, hatching). */
+/** Style options of a DXF logo carved into the flat top (flat-bit pockets, V carving, hatching). */
 function LogoStyleFields({ style, logo, setLogo }) {
   const o = { ...LOGO_DEFAULTS, ...logo };
   const bit = V_BITS.find((b) => b.tool === Number(o.tool)) || V_BITS[0];
+  const flat = FLAT_STYLES.includes(style);
+  const usesV = !flat || (style !== 'hat' && (o.corners || ['cepDoku', 'cepPah'].includes(style)));
+  const hatched = style === 'tarama' || style === 'cepDoku';
   const num = (k, label, extra = {}) => (
     <div key={k}>
       <label>{label}</label>
       <input type="number" value={o[k]} {...extra} onChange={(e) => setLogo({ [k]: e.target.value === '' ? '' : Number(e.target.value) })} />
     </div>
+  );
+  const check = (k, label) => (
+    <label key={k} className="cz-check cz-text-check"><input type="checkbox" checked={!!o[k]} onChange={(e) => setLogo({ [k]: e.target.checked })} /> {label}</label>
   );
   return (
     <div className="row3">
@@ -39,18 +45,33 @@ function LogoStyleFields({ style, logo, setLogo }) {
         <label>Oyulacak alan</label>
         <select value={o.fill} onChange={(e) => setLogo({ fill: e.target.value })}>
           <option value="koyu">Koyu alanlar (çizim oyulur)</option>
-          <option value="acik">Açık alanlar (yazı ve boşluklar oyulur)</option>
+          <option value="acik">Açık alanlar (boşluklar oyulur, çizim kabarık kalır)</option>
         </select>
       </div>
-      <div>
-        <label>V bıçak</label>
-        <select value={bit.key} onChange={(e) => { const b = V_BITS.find((x) => x.key === e.target.value); setLogo({ tool: b.tool, angle: b.angle }); }}>
-          {V_BITS.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
-        </select>
-      </div>
+      {(flat || style === 'vcarve') && (
+        <div>
+          <label>Düz bıçak</label>
+          <select value={o.flatTool} onChange={(e) => { const [t, d] = FLAT_BITS.find(([x]) => x === Number(e.target.value)); setLogo({ flatTool: t, flatDia: d }); }}>
+            {FLAT_BITS.map(([t, d]) => <option key={t} value={t}>T{t} · Ø{d} düz</option>)}
+          </select>
+        </div>
+      )}
+      {usesV && (
+        <div>
+          <label>V bıçak</label>
+          <select value={bit.key} onChange={(e) => { const b = V_BITS.find((x) => x.key === e.target.value); setLogo({ tool: b.tool, angle: b.angle }); }}>
+            {V_BITS.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
+          </select>
+        </div>
+      )}
+      {flat && num('cepDepth', style === 'hat' ? 'Kanal derinliği (mm)' : 'Cep derinliği (mm)', { min: 0.5, step: 0.5 })}
+      {flat && num('stepdown', 'Kademe (mm)', { min: 0.5, step: 0.5 })}
+      {flat && style !== 'hat' && num('stepoverPct', 'Adım (% çap)', { min: 10, max: 90, step: 5 })}
+      {style === 'cepZigzag' && num('zigAngle', 'Tarama yönü (°)', { step: 15 })}
+      {style === 'cepPah' && num('chamfer', 'Pah derinliği (mm)', { min: 0.2, step: 0.1 })}
       {style === 'vcarve' && num('maxDepth', 'En fazla derinlik (mm)', { min: 0.5, step: 0.5 })}
-      {style !== 'vcarve' && num('lineDepth', 'Çizgi derinliği (mm)', { min: 0.2, step: 0.1 })}
-      {style === 'tarama' && (
+      {(style === 'kontur' || hatched) && num('lineDepth', style === 'cepDoku' ? 'Desen derinliği, taban altı (mm)' : 'Çizgi derinliği (mm)', { min: 0.2, step: 0.1 })}
+      {hatched && (
         <div>
           <label>Desen</label>
           <select value={o.hatch} onChange={(e) => setLogo({ hatch: e.target.value })}>
@@ -58,17 +79,12 @@ function LogoStyleFields({ style, logo, setLogo }) {
           </select>
         </div>
       )}
-      {style === 'tarama' && num('hatchStep', 'Çizgi aralığı (mm)', { min: 0.5, step: 0.5 })}
-      {style === 'tarama' && ['paralel', 'capraz', 'isinsal'].includes(o.hatch) && num('hatchAngle', 'Desen açısı (°)', { step: 15 })}
-      {style === 'vcarve' && (
-        <label className="cz-check cz-text-check"><input type="checkbox" checked={o.flatClear} onChange={(e) => setLogo({ flatClear: e.target.checked })} /> Geniş zemini T{o.flatTool} Ø{o.flatDia} düz temizlesin</label>
-      )}
-      {style === 'tarama' && o.hatch === 'bant' && (
-        <label className="cz-check cz-text-check"><input type="checkbox" checked={o.toCentre} onChange={(e) => setLogo({ toCentre: e.target.checked })} /> İç hattı olmayan şekilleri (yıldız…) merkeze doğru tara</label>
-      )}
-      {style === 'tarama' && (
-        <label className="cz-check cz-text-check"><input type="checkbox" checked={o.outline} onChange={(e) => setLogo({ outline: e.target.checked })} /> Dış hattı da çiz</label>
-      )}
+      {hatched && num('hatchStep', 'Çizgi aralığı (mm)', { min: 0.5, step: 0.5 })}
+      {hatched && ['paralel', 'capraz', 'isinsal'].includes(o.hatch) && num('hatchAngle', 'Desen açısı (°)', { step: 15 })}
+      {flat && style !== 'hat' && check('corners', `Ø${o.flatDia}'ün giremediği dar yerleri ve köşeleri V oysun`)}
+      {style === 'vcarve' && check('flatClear', `Geniş zemini T${o.flatTool} Ø${o.flatDia} düz temizlesin`)}
+      {hatched && o.hatch === 'bant' && check('toCentre', 'İç hattı olmayan şekilleri (yıldız…) merkeze doğru tara')}
+      {style === 'tarama' && check('outline', 'Dış hattı da çiz')}
     </div>
   );
 }
@@ -123,7 +139,7 @@ export default function FigureTrayPanel({ thickness, ballR = 15, reliefDia = 6, 
       const { fig, dxf } = await loadFigure(file, profile);
       if (!fig.mask.some(Boolean)) throw new Error('Figür bulunamadı: zemin tamamen düz ya da siyah.');
       setFigure({ name: file.name.replace(/\.[^.]+$/, ''), fig, dxf });
-      setParams((p) => ({ ...p, style: dxf ? (p.style === 'kabartma' ? 'vcarve' : p.style) : 'kabartma' }));
+      setParams((p) => ({ ...p, style: dxf ? (p.style === 'kabartma' ? 'cep' : p.style) : 'kabartma' }));
     } catch (err) {
       setError(`${file.name}: ${err.message}`);
       setBusy(false);

@@ -327,6 +327,64 @@ describe('figure from a DXF logo', async () => {
   });
 });
 
+describe('DXF logo carving styles', async () => {
+  const { logoCarve } = await import('./logoCarve.js');
+
+  const ring = (r, n = 180) => Array.from({ length: n }, (_, k) => [100 + r * Math.cos((2 * Math.PI * k) / n), 100 + r * Math.sin((2 * Math.PI * k) / n)]);
+  // a wide band (Ø100 / Ø60) and a thin line ring (Ø120 / Ø118) around it
+  const loops = [ring(50), ring(30), ring(60), ring(59)];
+
+  it('flat pocket: the Ø4 bit stays its radius inside, the V bit takes the thin line, nothing below the pocket depth', () => {
+    const c = logoCarve(loops, 'cep', { cepDepth: 3 });
+    const flat = c.ops.find((o) => o.kind === 'logoClear');
+    const v = c.ops.find((o) => o.kind === 'logo');
+    expect(flat.tool).toBe(4);
+    expect(v.tool).toBe(1);
+    expect(c.maxDepth).toBeCloseTo(3, 5);
+    for (const p of flat.passes) for (const [x, y] of p) {
+      const rr = Math.hypot(x - 100, y - 100);
+      expect(rr).toBeGreaterThan(32 - 0.02);
+      expect(rr).toBeLessThan(48 + 0.02);
+    }
+    // the thin ring (1 mm wide) is carved by the V bit only, at most 0.5 mm deep for a 90° bit
+    const thin = v.passes.flat().filter(([x, y]) => Math.hypot(x - 100, y - 100) > 58);
+    expect(thin.length).toBeGreaterThan(0);
+    for (const q of thin) expect(q[2]).toBeLessThanOrEqual(0.55);
+    expect(c.warnings.join(' ')).toMatch(/çok dar; V bıçak/);
+  });
+
+  it('textured floor: the V pattern keeps the cone clear of the walls', () => {
+    const c = logoCarve(loops, 'cepDoku', { cepDepth: 3, lineDepth: 0.6, hatch: 'capraz', corners: false });
+    const v = c.ops.find((o) => o.kind === 'logo');
+    const reach = 3.6; // 90° V at 3.6 mm: radius 3.6 at the top
+    for (const [x, y, d] of v.passes.flat()) {
+      expect(d).toBeCloseTo(3.6, 5);
+      const rr = Math.hypot(x - 100, y - 100);
+      expect(rr).toBeGreaterThan(30 + reach - 0.05);
+      expect(rr).toBeLessThan(50 - reach + 0.05);
+    }
+  });
+
+  it('zigzag pocket, chamfer and channel styles build', () => {
+    for (const style of ['cepZigzag', 'cepPah', 'hat']) {
+      const c = logoCarve(loops, style, {});
+      expect(c.ops.length).toBeGreaterThan(0);
+      for (const op of c.ops) for (const p of op.passes) for (const q of p) expect(Number.isFinite(q[2])).toBe(true);
+    }
+  });
+
+  it('band hatching runs from the outer line to the inner one', () => {
+    const c = logoCarve([ring(50), ring(30)], 'tarama', { hatch: 'bant', hatchStep: 3, outline: false });
+    const lines = c.ops[0].passes;
+    expect(lines.length).toBeGreaterThan(80);
+    for (const l of lines) {
+      const r0 = Math.hypot(l[0][0] - 100, l[0][1] - 100), r1 = Math.hypot(l[l.length - 1][0] - 100, l[l.length - 1][1] - 100);
+      expect(Math.max(r0, r1)).toBeGreaterThan(49.5);
+      expect(Math.min(r0, r1)).toBeLessThan(30.5);
+    }
+  });
+});
+
 describe('V-carved text', async () => {
   const { carveFromMask, placeCarve, thin, traceSkeleton } = await import('./textCarve.js');
   const { CATALOG, catalogPart } = await import('./catalog.js');

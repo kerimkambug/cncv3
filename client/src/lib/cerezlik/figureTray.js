@@ -25,7 +25,7 @@ export const FIGURE_TRAY_DEFAULTS = {
   ballR: 15, // radius of the ball nose that finishes the compartments (T7 Ø30)
   reliefDia: 6, // the relief bit: the moat around the figure must be wider than it
   // DXF logos only: 'kabartma' = 3D relief in a recess (as any figure); 'vcarve' /
-  // 'kontur' / 'tarama' = the logo is carved into the flat top (see logoCarve.js)
+  // … = the logo is carved into the flat top (see logoCarve.js)
   style: 'kabartma',
   logo: {},
 };
@@ -147,7 +147,7 @@ export function figureTrayPart(figure, params, thickness = 18, name = 'Figürlü
     warnings.push(...c.warnings);
     if (c.maxDepth > thickness - 3) warnings.push(`Logo ${c.maxDepth} mm derin oyuluyor; malzemeye göre fazla.`);
     logo = { style: carved, ops: c.ops, maxDepth: c.maxDepth };
-    const ld = logoDepth(g, c, carved);
+    const ld = logoDepth(g, c);
     const z = new Float32Array(g.z.length);
     for (let k = 0; k < z.length; k++) z[k] = Math.max(depth[k], ld[k]);
     view = { grid: { ...g, z } };
