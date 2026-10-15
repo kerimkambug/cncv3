@@ -458,6 +458,15 @@ function emitRasterPass(axis, lines, n, c, crossStart, crossEnd, safeStart, step
       lines.push(`N${n++} G1 Z${fmt(zn)}`);
     }
   }
+  // Lead-out: the last row ends in the deep corner, touching both the frame wall and
+  // the next panjur's start face. Lifting straight up from there drags the turning
+  // bit along that corner its whole height (a line on the side it lifts). So first
+  // move clear of both — 1 mm in, 0.5 mm back up the slope, 1 mm higher — then lift.
+  const last = bounds[passes - 1];
+  const inward = last.cross > last.entryCross + 1e-6 ? -1 : 1;
+  const leadCross = last.cross + inward * Math.min(1, Math.abs(last.start - last.cross) / 2);
+  const leadAlong = safeStart + (passes - 1) * step - Math.min(0.5, step * (passes - 1));
+  lines.push(`N${n++} G1 ${crossAxis}${fmt(leadCross)} ${stepAxis}${fmt(leadAlong)} Z${fmt(c.endZ + 1)}`);
   return n;
 }
 

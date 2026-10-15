@@ -106,7 +106,7 @@ describe('straight edges (edgeInset "duz", the default)', () => {
   it('every row runs between the same two X; the bit never passes the frame, even on a board thicker than 18', () => {
     const c = { ...base, edgeInset: 'duz', endZ: 5, t14TipDia: 3, t14BodyDia: 3, t14Height: 30, feed: 20000, plunge: 3000, toolNo: '14', spindle: 18000, groundEntry: false, exitCut: 4, drillTool: '4', drillSpindle: 12000, exitToolDia: 4, safeZ: 30, toolChangeZ: 30, homeZ: 30 };
     const gcode = generatePanjurGcode(c).gcode;
-    const xs = new Set(gcode.split('\n').filter((l) => / G1 X/.test(l)).map((l) => l.match(/X([\d.]+)/)[1]));
+    const xs = new Set(gcode.split('\n').filter((l) => / G1 X/.test(l) && !/ Z/.test(l)) /* rows, not the lead-out off the deep corner */.map((l) => l.match(/X([\d.]+)/)[1]));
     expect([...xs].sort()).toEqual(['338.50', '61.50']); // Ø3 ball: 1.5 in from both frame lines
     for (const top of [18, 18.3]) {
       const { grid } = simulate(gcode, { top, cell: 0.05, tools: { 14: { type: 'ball', dia: 3, name: 'b' } }, box: { x0: 50, y0: 50, x1: 350, y1: 250 } });

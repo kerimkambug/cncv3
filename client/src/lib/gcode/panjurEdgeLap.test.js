@@ -113,3 +113,21 @@ describe('panjur: x direction on a non-square door', () => {
     expect(b.x1).toBeLessThanOrEqual(340 + 1e-6);
   });
 });
+
+describe('panjur: lead-out off the deep corner', () => {
+  it('every panjur leaves its last row away from both walls before it lifts', () => {
+    const lines = generatePanjurGcode({ ...base, edgeLap: false }).gcode.split('\n');
+    const gs = panjurGroups(base).groups;
+    let seen = 0;
+    lines.forEach((l, k) => {
+      if (!/G0 Z30/.test(l) || !/ G1 /.test(lines[k - 1] || '')) return;
+      const lead = lines[k - 1], row = lines[k - 2];
+      const x = +lead.match(/X([\d.]+)/)[1], z = +lead.match(/Z([\d.]+)/)[1], xRow = +row.match(/X([\d.]+)/)[1];
+      expect(Math.abs(x - xRow)).toBeCloseTo(1, 6); // 1 mm in from the wall it ended at
+      expect(Math.min(x - 60, 140 - x)).toBeGreaterThan(2.4); // ball clear of the frame
+      expect(z).toBeCloseTo(base.endZ + 1, 1);
+      seen++;
+    });
+    expect(seen).toBe(gs.length);
+  });
+});
